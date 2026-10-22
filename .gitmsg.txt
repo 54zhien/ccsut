@@ -1,13 +1,9 @@
-﻿fix(ios): 关闭 URLSession 自动 Cookie 管理 —— 选课页空白的真凶
+﻿fix(ios): probe/refresh 补上 Cookie —— 修「所有页面会话过期」
 
-URLSessionConfiguration.httpShouldSetCookies 为 true 时，
-URLSession 会用 HTTPCookieStorage 里的 Cookie 覆盖手写的 Cookie header。
+上一版关闭 httpShouldSetCookies 后，makeRequest 的请求正常了，
+但 probe() 和 refresh() 是直接构造 URLRequest 的，
+既不经过 makeRequest、也没手动带 Cookie，于是必然被踢回登录页。
+结果 bootstrap 判定未登录、refresh 续不上，所有页面报会话过期。
 
-而 WebView 同步过去的 12 条里，HTTPCookieStorage 只接受了 3 条
-（JSESSIONID / route / uid），jw_uf、puid、username 全被丢弃。
-
-于是 listV2 靠 JSESSIONID 能成功，
-listjxbDataV2 因为缺 jw_uf 只回 mysksjd、不回 initData —— 选课页 0 门。
-
-改为 httpShouldSetCookies = false、httpCookieStorage = nil，
-Cookie 完全由 CookieJar 手写，Set-Cookie 由 send() 手动解析。
+新增 rawGet()：用专用 session（无自动 Cookie）+ CookieJar 手写头，
+并解析 Set-Cookie 更新池子。probe 和 refresh 都改走它。

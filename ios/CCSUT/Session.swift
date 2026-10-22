@@ -169,6 +169,16 @@ final class SessionStore {
 
     /// Cookie 数据仓库统一从 WebStore 取（见文件底部）
 
+    /// 专用 session：关闭自动 Cookie 管理，Cookie 全部由 CookieJar 手写
+    private static let rawSession: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.httpShouldSetCookies = false
+        cfg.httpCookieStorage = nil
+        cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+        cfg.timeoutIntervalForRequest = 20
+        return URLSession(configuration: cfg)
+    }()
+
     private let cookieKey = "ccsut.cookies.v2"
     private let nameKey = "ccsut.student.name"
     private let sidKey = "ccsut.student.id"
@@ -202,15 +212,35 @@ final class SessionStore {
 
     // MARK: 探测
 
+    /// 发一个带 CookieJar 的请求，并把响应里的 Set-Cookie 收进池子
+    private func rawGet(_ url: URL, timeout: TimeInterval = 20) async throws -> HTTPURLResponse {
+        var req = URLRequest(url: url)
+        req.timeoutInterval = timeout
+        req.setValue(UserAgent.mobile, forHTTPHeaderField: "User-Agent")
+        req.setValue("https://tls.ccsut.cn/frontend/views/student/xkPage/index.html",
+                     forHTTPHeaderField: "Referer")
+
+        // 关闭了 URLSession 的自动 Cookie，必须手动带
+        if let host = url.host, let cookie = CookieJar.header(for: host) {
+            req.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+
+        let (_, resp) = try await Self.rawSession.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1) }
+
+        // 收 Set-Cookie（TGC / jw_uf 都可能在这里轮换）
+        if let fields = http.allHeaderFields as? [String: String] {
+            let fresh = HTTPCookie.cookies(withResponseHeaderFields: fields, for: url)
+            if !fresh.isEmpty { CookieJar.upsert(fresh) }
+        }
+        return http
+    }
+
     /// GET /admin/ —— 被 303 到 /admin/login 就说明会话没了
     func probe() async -> Bool {
-        var req = URLRequest(url: Self.jwBase.appending(path: "admin/"))
-        req.timeoutInterval = 15
-        req.setValue(UserAgent.mobile, forHTTPHeaderField: "User-Agent")
-
         do {
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            let final = resp.url?.absoluteString ?? ""
+            let http = try await rawGet(Self.jwBase.appending(path: "admin/"), timeout: 15)
+            let final = http.url?.absoluteString ?? ""
             let ok = !final.contains("/admin/login") && !final.contains("loginFailPage")
             if ok { persistCurrentCookies() }
             return ok
@@ -228,13 +258,9 @@ final class SessionStore {
         let previous = phase
         phase = .refreshing
 
-        var req = URLRequest(url: URL(string: Self.serviceURL)!)
-        req.timeoutInterval = 20
-        req.setValue(UserAgent.mobile, forHTTPHeaderField: "User-Agent")
-
         do {
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            let final = resp.url?.absoluteString ?? ""
+            let http = try await rawGet(URL(string: Self.serviceURL)!)
+            let final = http.url?.absoluteString ?? ""
             if final.contains("/admin/login") || final.contains("loginFailPage") {
                 phase = .loggedOut
                 return
