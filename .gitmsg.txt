@@ -1,9 +1,11 @@
-﻿fix(ios): probe/refresh 补上 Cookie —— 修「所有页面会话过期」
+﻿fix(ios): rawGet 手动跟随重定向并按 host 取 Cookie
 
-上一版关闭 httpShouldSetCookies 后，makeRequest 的请求正常了，
-但 probe() 和 refresh() 是直接构造 URLRequest 的，
-既不经过 makeRequest、也没手动带 Cookie，于是必然被踢回登录页。
-结果 bootstrap 判定未登录、refresh 续不上，所有页面报会话过期。
+续期链路是 tls.ccsut.cn → auth.ccsut.cn → tls.ccsut.cn，
+而 TGC 属于 auth.ccsut.cn 域。关闭 URLSession 自动 Cookie 后，
+自动重定向不会按新 host 补 Cookie，TGC 永远发不出去，续期必然失败。
 
-新增 rawGet()：用专用 session（无自动 Cookie）+ CookieJar 手写头，
-并解析 Set-Cookie 更新池子。probe 和 refresh 都改走它。
+改动：
+- NoRedirect delegate 阻止自动重定向
+- rawGet 手动循环，每一跳按当前 host 从 CookieJar 取 Cookie
+- 每跳解析 Set-Cookie 入池
+- 修 HTTPURLResponse() 无参构造（不存在）

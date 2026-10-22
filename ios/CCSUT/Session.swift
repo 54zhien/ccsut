@@ -176,7 +176,9 @@ final class SessionStore {
         cfg.httpCookieStorage = nil
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
         cfg.timeoutIntervalForRequest = 20
-        return URLSession(configuration: cfg)
+        return URLSession(configuration: cfg,
+                          delegate: NoRedirect(),
+                          delegateQueue: nil)
     }()
 
     private let cookieKey = "ccsut.cookies.v2"
@@ -212,28 +214,48 @@ final class SessionStore {
 
     // MARK: 探测
 
-    /// 发一个带 CookieJar 的请求，并把响应里的 Set-Cookie 收进池子
-    private func rawGet(_ url: URL, timeout: TimeInterval = 20) async throws -> HTTPURLResponse {
-        var req = URLRequest(url: url)
-        req.timeoutInterval = timeout
-        req.setValue(UserAgent.mobile, forHTTPHeaderField: "User-Agent")
-        req.setValue("https://tls.ccsut.cn/frontend/views/student/xkPage/index.html",
-                     forHTTPHeaderField: "Referer")
+    /// 发一个带 CookieJar 的请求，手动跟随重定向。
+    ///
+    /// 为什么要手动跟：续期要从 tls.ccsut.cn 跳到 auth.ccsut.cn 再跳回来，
+    /// 而 TGC 属于 auth.ccsut.cn 域。关闭 URLSession 自动 Cookie 后，
+    /// 自动重定向不会按新 host 补 Cookie，TGC 就永远发不出去。
+    private func rawGet(_ url: URL, timeout: TimeInterval = 20, maxHops: Int = 8) async throws -> HTTPURLResponse {
+        var current = url
+        var last: HTTPURLResponse?
 
-        // 关闭了 URLSession 的自动 Cookie，必须手动带
-        if let host = url.host, let cookie = CookieJar.header(for: host) {
-            req.setValue(cookie, forHTTPHeaderField: "Cookie")
+        for _ in 0..<maxHops {
+            var req = URLRequest(url: current)
+            req.timeoutInterval = timeout
+            req.setValue(UserAgent.mobile, forHTTPHeaderField: "User-Agent")
+            req.setValue("https://tls.ccsut.cn/frontend/views/student/xkPage/index.html",
+                         forHTTPHeaderField: "Referer")
+
+            // 按当前这一跳的 host 取 Cookie —— TGC 在 auth.ccsut.cn，jw_uf 在 tls.ccsut.cn
+            if let host = current.host, let cookie = CookieJar.header(for: host) {
+                req.setValue(cookie, forHTTPHeaderField: "Cookie")
+            }
+
+            let (_, resp) = try await Self.rawSession.data(for: req)
+            guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1) }
+            last = http
+
+            // 收 Set-Cookie
+            if let fields = http.allHeaderFields as? [String: String] {
+                let fresh = HTTPCookie.cookies(withResponseHeaderFields: fields, for: current)
+                if !fresh.isEmpty { CookieJar.upsert(fresh) }
+            }
+
+            // 3xx → 下一跳
+            if (300..<400).contains(http.statusCode),
+               let loc = http.value(forHTTPHeaderField: "Location"),
+               let next = URL(string: loc, relativeTo: current) {
+                current = next
+                continue
+            }
+            return http
         }
-
-        let (_, resp) = try await Self.rawSession.data(for: req)
-        guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1) }
-
-        // 收 Set-Cookie（TGC / jw_uf 都可能在这里轮换）
-        if let fields = http.allHeaderFields as? [String: String] {
-            let fresh = HTTPCookie.cookies(withResponseHeaderFields: fields, for: url)
-            if !fresh.isEmpty { CookieJar.upsert(fresh) }
-        }
-        return http
+        guard let last else { throw APIError.http(-1) }
+        return last
     }
 
     /// GET /admin/ —— 被 303 到 /admin/login 就说明会话没了
@@ -441,6 +463,17 @@ enum UserAgent {
 /// 注入给 URLSession 时会被静默拒绝一部分（实测 12 条只进去 3 条，
 /// jw_uf / username / puid 全丢），导致 listV2 能过、listjxbDataV2 返回空。
 /// 所以请求时直接从这个池子取，不依赖 HTTPCookieStorage。
+/// 阻止 URLSession 自动跟随重定向，交给 rawGet 手动处理
+final class NoRedirect: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession,
+                    task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
 enum CookieJar {
     nonisolated(unsafe) static var shared: [HTTPCookie] = []
 
