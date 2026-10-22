@@ -570,13 +570,17 @@ struct LoginView: View {
 
         await sleep(500);
 
-        // 6. 验证码：这个页面始终渲染验证码框，无法自动填。
-        //    账号密码已经填好，交给用户补验证码即可。
+        // 6. 验证码框虽然始终渲染，但 class 是 ng-valid（非必填），
+        //    所以直接提交。万一服务端确实要求，会在提交后返回错误，
+        //    那时再切手动也不迟——先省掉一次多余的交互。
+        //    只有在 Angular 明确标成 ng-invalid 时才提前拦截。
         const captcha = [...document.querySelectorAll('input')]
           .find(el => /验证码/.test(el.placeholder || '') && el.offsetWidth > 0);
-        if (captcha) return 'need-captcha';
+        if (captcha && captcha.classList.contains('ng-invalid')) {
+          return 'need-captcha';
+        }
 
-        // 7. 无验证码时直接提交
+        // 7. 提交
         const btn = [...document.querySelectorAll('button')]
           .find(b => (b.textContent || '').trim() === '登录');
         if (!btn) return 'no-button';
