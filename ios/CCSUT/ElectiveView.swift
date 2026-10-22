@@ -21,6 +21,8 @@ struct ElectiveView: View {
     @State private var errorText: String?
     @State private var detail: TeachingClass?
     @State private var batchLog: [String] = []
+    @State private var rawSnippet = ""
+    @State private var cookieCount = 0
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "全部"
@@ -61,17 +63,26 @@ struct ElectiveView: View {
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 32)
 
-                        if !batchLog.isEmpty {
-                            VStack(alignment: .leading, spacing: 3) {
-                                ForEach(batchLog, id: \.self) { line in
-                                    Text(line)
-                                        .font(.caption2.monospaced())
-                                        .foregroundStyle(.secondary)
-                                }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Cookie \(cookieCount) 条")
+                                .font(.caption2.monospaced())
+                            ForEach(batchLog, id: \.self) { line in
+                                Text(line).font(.caption2.monospaced())
                             }
-                            .padding(12)
-                            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 10))
+                            if !rawSnippet.isEmpty {
+                                Text("原始响应：")
+                                    .font(.caption2.monospaced())
+                                    .padding(.top, 2)
+                                Text(rawSnippet)
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .lineLimit(8)
+                            }
                         }
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 10))
+                        .padding(.horizontal, 20)
                     }
                 } else {
                     list
@@ -79,19 +90,6 @@ struct ElectiveView: View {
             }
             .navigationTitle("选课")
             .searchable(text: $keyword, prompt: "课程名 / 教师")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Picker("筛选", selection: $selectedFilter) {
-                            ForEach(Filter.allCases) { f in
-                                Text(f.rawValue).tag(f)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                    }
-                }
-            }
             .refreshable { await load(force: true) }
             .task {
                 if classes.isEmpty { await load() }
@@ -107,6 +105,8 @@ struct ElectiveView: View {
     private var list: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
+                filterBar
+
                 if let initData {
                     header(initData)
                 }
@@ -147,6 +147,42 @@ struct ElectiveView: View {
     }
 
     private var selectedCount: Int { classes.filter(\.isSelected).count }
+
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Filter.allCases) { f in
+                    let on = f == selectedFilter
+                    Button {
+                        withAnimation(.snappy(duration: 0.18)) { selectedFilter = f }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(f.rawValue)
+                                .font(.caption.weight(.medium))
+                            if f == .selected, selectedCount > 0 {
+                                Text("\(selectedCount)")
+                                    .font(.caption2.weight(.bold).monospacedDigit())
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(.white.opacity(on ? 0.25 : 0.15), in: .capsule)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(
+                            on ? AnyShapeStyle(Color.accentColor)
+                               : AnyShapeStyle(Color(.secondarySystemGroupedBackground)),
+                            in: .capsule
+                        )
+                        .foregroundStyle(on ? .white : .primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+        .padding(.top, 2)
+    }
 
     // MARK: 筛选
 
@@ -208,6 +244,18 @@ struct ElectiveView: View {
             }
 
             batchLog = log
+            cookieCount = session.allCookies().count
+
+            if merged.isEmpty {
+                // 拉一次原始响应，看看服务端到底回了什么
+                if let first = initData.pcencs?.first {
+                    rawSnippet = (try? await APIClient.shared.teachingClassesRaw(batch: (first.key, first.value))) ?? "<请求失败>"
+                } else {
+                    rawSnippet = (try? await APIClient.shared.electiveInitRaw()) ?? "<请求失败>"
+                }
+                if rawSnippet.count > 400 { rawSnippet = String(rawSnippet.prefix(400)) + "…" }
+            }
+
             if merged.isEmpty, let lastError { throw lastError }
 
             classes = merged.sorted {

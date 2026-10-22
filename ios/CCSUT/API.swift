@@ -178,6 +178,28 @@ extension APIClient {
         throw APIError.decoding("课表页里找不到 xhid")
     }
 
+    /// 原始响应（诊断用）：不做解码，直接返回服务端说了什么
+    func teachingClassesRaw(batch: (pcid: String, pcenc: String)?) async throws -> String {
+        var form: [String: String] = [
+            "from": "ggxxk", "kcmc": "", "kcxz": "", "jxms": "",
+            "kcgs": "", "teacher": "", "kkxq": "", "kclb": "", "kclx": "",
+        ]
+        if let batch {
+            form["pcid"] = batch.pcid
+            form["pcenc"] = batch.pcenc
+        }
+        let req = makeRequest("/admin/xsd/xk/listjxbDataV2", method: "POST", form: form)
+        let (data, _) = try await send(req)
+        return String(data: data, encoding: .utf8) ?? "<二进制>"
+    }
+
+    /// 原始 listV2 响应（诊断用）
+    func electiveInitRaw() async throws -> String {
+        let req = makeRequest("/admin/xsd/xk/listV2", method: "POST", form: [:])
+        let (data, _) = try await send(req)
+        return String(data: data, encoding: .utf8) ?? "<二进制>"
+    }
+
     /// 真实课表数据（JSON，实测 98 条专业课）
     func scheduleItems(xnxq: String, xhid: String) async throws -> [ScheduleItem] {
         let q: [URLQueryItem] = [
