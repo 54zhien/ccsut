@@ -4,26 +4,35 @@
 //
 //  统一身份认证 · 底部弹起的 large sheet
 //
-//  设计要点：
-//    · 用 .presentationDetents([.large]) 走 Apple 官方 sheet
-//    · WebView 生命周期跟着 sheet 走，关闭即销毁，不留在主界面上
-//    · 传了账号密码就自动填表；验证码这关必须人工（短信验证码）
-//    · 一旦落到 tls.ccsut.cn 就接管 Cookie 并自动关闭
+//  CAS 有三个页签：扫码登录 / 密码登录 / 验证码登录
+//  这里只走两条不需要密码的：
+//    · 扫码      —— 二维码，扫完自动跳转
+//    · 验证码登录 —— 工号/学号/手机号 + 短信验证码
+//
+//  验证码必须人工输入（短信），脚本负责切页签、填账号、
+//  必要时点「获取验证码」，剩下的交给用户。
 //
 
 import SwiftUI
 import WebKit
 
-// MARK: - 模式
+// MARK: - 请求
 
-enum LoginSheetMode: String, Identifiable {
-    case password     // 账号密码，自动填表
-    case qr           // 扫码，不填表
+struct LoginSheetRequest: Identifiable {
+    enum Mode {
+        case sms      // 验证码登录
+        case qr       // 扫码登录
+    }
 
-    var id: String { rawValue }
+    let id = UUID()
+    let mode: Mode
+    let account: String
+    let code: String
+    let autoSend: Bool       // 打开后自动点「获取验证码」
+
     var title: String {
-        switch self {
-        case .password: return "账号密码登录"
+        switch mode {
+        case .sms: return "验证码登录"
         case .qr: return "扫码登录"
         }
     }
@@ -35,19 +44,15 @@ struct WebLoginSheet: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.dismiss) private var dismiss
 
-    let mode: LoginSheetMode
-    let username: String
-    let password: String
+    let request: LoginSheetRequest
 
     @State private var webView: WKWebView
     @State private var nav = WebNavigator()
-    @State private var status: String = ""
-    @State private var didInject = false
+    @State private var status = ""
+    @State private var didPrepare = false
 
-    init(mode: LoginSheetMode, username: String = "", password: String = "") {
-        self.mode = mode
-        self.username = username
-        self.password = password
+    init(request: LoginSheetRequest) {
+        self.request = request
         _webView = State(initialValue: WebFactory.make())
     }
 
@@ -56,11 +61,9 @@ struct WebLoginSheet: View {
             WebPanel(webView: webView)
                 .ignoresSafeArea(edges: .bottom)
                 .overlay(alignment: .top) {
-                    if !status.isEmpty {
-                        statusBar
-                    }
+                    if !status.isEmpty { statusBar }
                 }
-                .navigationTitle(mode.title)
+                .navigationTitle(request.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
@@ -85,19 +88,14 @@ struct WebLoginSheet: View {
         }
     }
 
-    // MARK: 状态条
-
     private var statusBar: some View {
         HStack(spacing: 8) {
             if webView.isLoading {
                 ProgressView().controlSize(.mini)
             } else {
-                Image(systemName: "info.circle")
-                    .font(.caption)
+                Image(systemName: "info.circle").font(.caption)
             }
-            Text(status)
-                .font(.caption)
-                .lineLimit(2)
+            Text(status).font(.caption).lineLimit(3)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
@@ -117,8 +115,7 @@ struct WebLoginSheet: View {
     private func handle(_ url: URL) {
         let absolute = url.absoluteString
 
-        // 1. 到了教务系统 → 接管
-        //    必须按 host 判断：CAS 登录页的 service 参数里也含 tls.ccsut.cn
+        // 到教务系统 → 接管
         if url.host == "tls.ccsut.cn",
            !absolute.contains("/admin/login"),
            !absolute.contains("loginFailPage") {
@@ -126,43 +123,46 @@ struct WebLoginSheet: View {
             return
         }
 
-        // 2. 停在 CAS 登录页 → 自动填表（仅账号密码模式）
+        // 停在 CAS 页 → 预置表单（只做一次）
         if url.host == "auth.ccsut.cn",
            absolute.contains("/cas/login"),
-           mode == .password,
-           !didInject {
-            didInject = true
-            Task { await inject() }
+           request.mode == .sms,
+           !didPrepare {
+            didPrepare = true
+            Task { await prepareSMS() }
         }
     }
 
-    private func inject() async {
-        status = "填写账号密码…"
-
+    private func prepareSMS() async {
+        status = "切到验证码登录…"
         do {
-            let raw = try await webView.callAsync(Self.fillScript, arguments: [
-                "username": username,
-                "password": password,
+            let raw = try await webView.callAsync(Self.smsScript, arguments: [
+                "account": request.account,
+                "code": request.code,
+                "autoSend": request.autoSend ? "1" : "0",
             ])
             let outcome = (raw as? String) ?? "(nil)"
 
             switch outcome {
-            case "need-captcha":
-                // 账号密码已填好，停在页面上等用户点「获取验证码」
-                status = "已填好账号密码 · 请点「获取验证码」并输入短信码，然后点「登录」"
-            case "waiting":
-                status = "账号密码已填好，请手动点「登录」"
-            case "ok":
-                status = "已提交，等待跳转…"
+            case "sent":
+                status = "验证码已发送 · 收到短信后填进去，再点「登录」"
+            case "filled":
+                status = "已填好，正在提交…"
+            case "no-code":
+                status = "账号已填好 · 点「获取验证码」，收到短信后填进去再点登录"
             case "no-tab":
-                status = "认证页没渲染出页签，点右上角刷新试试"
+                status = "认证页没渲染出页签，点右上角刷新"
             case "no-form":
-                status = "没找到密码框，点右上角刷新试试"
+                status = "没找到验证码登录表单，点右上角刷新"
+            case "no-account":
+                status = "账号框是空的，请手动填一下"
+            case "send-failed":
+                status = "发送验证码失败，请手动点「获取验证码」"
             default:
-                status = "填表异常（\(outcome)）"
+                status = "准备表单时出错（\(outcome)）"
             }
         } catch {
-            status = "填表失败：\(error.localizedDescription)"
+            status = "准备失败：\(error.localizedDescription)"
         }
     }
 
@@ -176,52 +176,57 @@ struct WebLoginSheet: View {
         }
     }
 
-    // MARK: 注入脚本
+    // MARK: 脚本
 
-    /// 只填账号密码，不点提交。
-    /// 原因：这个 CAS 强制要短信验证码，自动提交必然返回「验证码不正确」，
-    /// 不如把账号密码填好，让用户补一位验证码再自己点登录。
-    private static let fillScript = """
+    /// 切到「验证码登录」页签，填账号，
+    /// 需要时点「获取验证码」，验证码非空则一并提交。
+    private static let smsScript = """
         const setVal = (el, v) => {
           const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
           setter.call(el, v);
           ['input', 'change', 'keyup', 'blur'].forEach(t =>
             el.dispatchEvent(new Event(t, { bubbles: true })));
         };
-
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-        // 1. 等 Angular 渲染页签
-        let pwdTab = null;
-        for (let i = 0; i < 50 && !pwdTab; i++) {
-          const tabs = [...document.querySelectorAll('.ant-tabs-tab')];
-          pwdTab = tabs.find(t => (t.textContent || '').includes('密码登录'));
-          if (!pwdTab) await sleep(200);
+        // 1. 等页签渲染
+        let tabs = [];
+        for (let i = 0; i < 50; i++) {
+          tabs = [...document.querySelectorAll('.ant-tabs-tab')];
+          if (tabs.length) break;
+          await sleep(200);
         }
-        if (!pwdTab) return 'no-tab';
+        if (!tabs.length) return 'no-tab';
 
-        // 2. 切到密码登录
-        if (!pwdTab.classList.contains('ant-tabs-tab-active')) {
-          pwdTab.click();
-          await sleep(900);
+        // 2. 切到「验证码登录」
+        const target = tabs.find(t => (t.textContent || '').includes('验证码登录'));
+        if (!target) return 'no-tab';
+        if (!target.classList.contains('ant-tabs-tab-active')) {
+          target.click();
+          await sleep(1000);
         }
 
-        // 3. 等密码框
-        let pwd = null;
-        for (let i = 0; i < 40 && !pwd; i++) {
-          pwd = [...document.querySelectorAll('input')]
-            .find(el => el.type === 'password' && el.offsetWidth > 0);
-          if (!pwd) await sleep(200);
+        // 3. 等表单（账号框 + 验证码框）
+        let accountBox = null, codeBox = null;
+        for (let i = 0; i < 40; i++) {
+          const inputs = [...document.querySelectorAll('input')]
+            .filter(el => el.offsetWidth > 0 && el.type === 'text');
+          accountBox = inputs.find(el => /工号|学号|手机号/.test(el.placeholder || ''));
+          codeBox = inputs.find(el => /验证码/.test(el.placeholder || ''));
+          if (accountBox && codeBox) break;
+          await sleep(200);
         }
-        if (!pwd) return 'no-form';
+        if (!codeBox) return 'no-form';
 
-        // 4. 填账号密码
-        const user = [...document.querySelectorAll('input')]
-          .find(el => /用户名|手机号|账号/.test(el.placeholder || '') && el.offsetWidth > 0);
-        if (user) setVal(user, username);
-        setVal(pwd, password);
+        // 4. 填账号
+        if (accountBox && account) {
+          setVal(accountBox, account);
+        } else if (!accountBox) {
+          return 'no-account';
+        }
+        await sleep(400);
 
-        // 5. 勾「记住账号」「记住密码」
+        // 5. 勾「记住账号」
         [...document.querySelectorAll('label.ant-checkbox-wrapper')].forEach(label => {
           if (/记住/.test(label.textContent || '')) {
             const cb = label.querySelector('input[type=checkbox]');
@@ -229,18 +234,27 @@ struct WebLoginSheet: View {
           }
         });
 
-        await sleep(400);
+        // 6. 需要时点「获取验证码」
+        if (autoSend === '1') {
+          const sendBtn = [...document.querySelectorAll('button')]
+            .find(b => (b.textContent || '').includes('获取验证码'));
+          if (!sendBtn) return 'send-failed';
+          sendBtn.click();
+          await sleep(1200);
+          return 'sent';
+        }
 
-        // 6. 有验证码框就停下，交给用户
-        const captcha = [...document.querySelectorAll('input')]
-          .find(el => /验证码/.test(el.placeholder || '') && el.offsetWidth > 0);
-        if (captcha) return 'need-captcha';
+        // 7. 验证码已填 → 一并提交
+        if (code) {
+          setVal(codeBox, code);
+          await sleep(400);
+          const loginBtn = [...document.querySelectorAll('button')]
+            .find(b => (b.textContent || '').trim() === '登录');
+          if (!loginBtn) return 'no-code';
+          loginBtn.click();
+          return 'filled';
+        }
 
-        // 7. 没有验证码 → 直接提交
-        const btn = [...document.querySelectorAll('button')]
-          .find(b => (b.textContent || '').trim() === '登录');
-        if (!btn) return 'waiting';
-        btn.click();
-        return 'ok';
+        return 'no-code';
         """
 }
