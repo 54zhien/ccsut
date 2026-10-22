@@ -425,6 +425,31 @@ struct LoginView: View {
         }
     }
 
+    /// 从 CAS 页面里抠出错误提示
+    @MainActor
+    private func readFailureReason() async -> String? {
+        guard let raw = try? await webView.evaluateJavaScript(
+            "document.body ? document.body.innerText : ''"
+        ), let text = raw as? String else { return nil }
+
+        let keywords = ["密码", "验证码", "错误", "失败", "锁定", "不存在", "未激活", "异常", "过期"]
+        let lines = text
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { line in
+                !line.isEmpty
+                    && line.count < 80
+                    && keywords.contains { line.contains($0) }
+                    // 排除页面上那几行固定说明
+                    && !line.contains("身份证后六位")
+                    && !line.contains("初始密码")
+                    && !line.contains("强制修改")
+                    && !line.contains("获取验证码")
+            }
+
+        return lines.first
+    }
+
     // MARK: 接管会话
 
     /// URL 到了教务系统不代表登录成功，必须真的拿到 Cookie 且能访问 /admin/
@@ -509,9 +534,22 @@ struct LoginView: View {
             stage = .submitting
             logLines.append("已提交，等跳转…")
 
-            try? await Task.sleep(for: .seconds(15))
+            // 提交后给 Angular 一点时间做校验和重渲染，然后读页面反馈。
+            // CAS 拒绝登录时会把错误直接印在登录页上，抓着它比干等有用。
+            try? await Task.sleep(for: .seconds(5))
+
             if stage == .submitting {
-                stage = .failed("没跳转，可能密码错或需要验证码。用「网页登录」")
+                let reason = await readFailureReason()
+                if let reason {
+                    logLines.append("CAS 返回：\(reason)")
+                    stage = .failed(reason)
+                } else {
+                    // 再等一轮，有些慢请求要 10 秒
+                    try? await Task.sleep(for: .seconds(7))
+                    if stage == .submitting {
+                        stage = .failed("没跳转也没有错误提示，点「用网页登录」手动试")
+                    }
+                }
             }
         } catch {
             stage = .failed("注入失败：\(error.localizedDescription)")
