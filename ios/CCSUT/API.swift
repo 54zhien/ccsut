@@ -1,0 +1,360 @@
+//
+//  API.swift
+//  CCSUT
+//
+//  网络层：所有 /admin/** 请求 + 课表 HTML 解析
+//
+//  认证方式：纯 Cookie（withCredentials），没有 token、没有签名
+//
+
+import Foundation
+
+// MARK: - 错误
+
+enum APIError: LocalizedError {
+    case notLoggedIn
+    case http(Int)
+    case business(Int, String)
+    case empty
+    case decoding(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .notLoggedIn: return "登录已失效，请重新登录"
+        case .http(let code): return "网络错误 HTTP \(code)"
+        case .business(let ret, let msg): return "接口返回错误 [\(ret)] \(msg)"
+        case .empty: return "接口返回空数据"
+        case .decoding(let what): return "数据解析失败：\(what)"
+        }
+    }
+}
+
+// MARK: - 客户端
+
+final class APIClient {
+    static let shared = APIClient()
+
+    private let base = URL(string: "https://tls.ccsut.cn")!
+    private let session: URLSession
+
+    /// 教务系统对移动端 UA 没有特殊处理，用 iPhone UA 即可
+    private let userAgent =
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+
+    private init() {
+        let cfg = URLSessionConfiguration.default
+        cfg.httpCookieStorage = HTTPCookieStorage.shared
+        cfg.httpShouldSetCookies = true
+        cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+        cfg.timeoutIntervalForRequest = 20
+        session = URLSession(configuration: cfg)
+    }
+
+    // MARK: 基础请求
+
+    private func makeRequest(_ path: String, method: String, query: [URLQueryItem] = [], form: [String: String]? = nil) -> URLRequest {
+        var comps = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+        if !query.isEmpty { comps.queryItems = query }
+
+        var req = URLRequest(url: comps.url!)
+        req.httpMethod = method
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue("https://tls.ccsut.cn/frontend/views/student/xkPage/index.html", forHTTPHeaderField: "Referer")
+        req.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
+
+        if let form {
+            req.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+            req.httpBody = form
+                .map { "\($0.key.urlEncoded)=\($0.value.urlEncoded)" }
+                .joined(separator: "&")
+                .data(using: .utf8)
+        }
+        return req
+    }
+
+    private func send(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1) }
+
+        // 被踢回登录页
+        let final = http.url?.absoluteString ?? ""
+        if final.contains("/admin/login") || final.contains("loginFailPage") {
+            throw APIError.notLoggedIn
+        }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.http(http.statusCode) }
+        return (data, http)
+    }
+
+    // MARK: 泛型 JSON
+
+    func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
+        try await decode(send(makeRequest(path, method: "GET", query: query)))
+    }
+
+    func post<T: Decodable>(_ path: String, form: [String: String] = [:]) async throws -> T {
+        try await decode(send(makeRequest(path, method: "POST", form: form)))
+    }
+
+    private func decode<T: Decodable>(_ result: (Data, HTTPURLResponse)) throws -> T {
+        let (data, _) = result
+        guard !data.isEmpty else { throw APIError.empty }
+
+        // 先按统一壳解
+        if let env = try? JSONDecoder().decode(APIEnvelope<T>.self, from: data) {
+            if let payload = env.data {
+                return payload
+            }
+            if env.ret != 0 {
+                throw APIError.business(env.ret, env.msg ?? "")
+            }
+            throw APIError.empty
+        }
+        // 少数接口直接返回裸数据
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            let preview = String(data: data.prefix(200), encoding: .utf8) ?? ""
+            throw APIError.decoding(preview)
+        }
+    }
+
+    // MARK: HTML
+
+    func html(_ path: String, query: [URLQueryItem] = []) async throws -> String {
+        let (data, _) = try await send(makeRequest(path, method: "GET", query: query))
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+}
+
+// MARK: - 业务接口
+
+extension APIClient {
+    /// 选课页初始化：学生信息、字典、批次加密串
+    func electiveInit() async throws -> ElectiveInit {
+        try await post("/admin/xsd/xk/listV2")
+    }
+
+    /// 教学班列表
+    /// - Parameters:
+    ///   - keyword: 课程名模糊搜索
+    ///   - batch: (pcid, pcenc)，来自 ElectiveInit.pcencs；不传则按当前开放批次
+    func teachingClasses(keyword: String = "", batch: (pcid: String, pcenc: String)? = nil) async throws -> TeachingClassPage {
+        var form: [String: String] = [
+            "from": "ggxxk",
+            "kcmc": keyword,
+            "kcxz": "",
+            "jxms": "",
+            "kcgs": "",
+            "teacher": "",
+            "kkxq": "",
+            "kclb": "",
+            "kclx": "",
+        ]
+        if let batch {
+            form["pcid"] = batch.pcid
+            form["pcenc"] = batch.pcenc
+        }
+        return try await post("/admin/xsd/xk/listjxbDataV2", form: form)
+    }
+
+    /// 课表页（HTML，服务端渲染骨架 + AJAX 填充）
+    func scheduleHTML(xnxq: String? = nil) async throws -> String {
+        var q: [URLQueryItem] = []
+        if let xnxq { q.append(URLQueryItem(name: "xnxq", value: xnxq)) }
+        return try await html("/admin/xsd/pkgl/xskb/queryKbForXsd", query: q)
+    }
+
+    /// 校历周次
+    func calendarWeeks() async throws -> [String] {
+        let data = try await getRaw("/admin/api/getZclistByXnxq", query: [])
+        return data
+    }
+
+    private func getRaw(_ path: String, query: [URLQueryItem]) async throws -> [String] {
+        let (data, _) = try await send(makeRequest(path, method: "GET", query: query))
+        if let arr = try? JSONDecoder().decode([String].self, from: data) { return arr }
+        if let env = try? JSONDecoder().decode(APIEnvelope<[String]>.self, from: data), let d = env.data {
+            return d
+        }
+        return []
+    }
+}
+
+// MARK: - 编码工具
+
+extension String {
+    var urlEncoded: String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "+&=%?#")
+        return addingPercentEncoding(withAllowedCharacters: allowed) ?? self
+    }
+}
+
+// MARK: - 课表 HTML 解析
+
+enum ScheduleParser {
+    /// 解析 queryKbForXsd 返回的表格
+    ///
+    /// 结构：
+    /// ```
+    /// <thead><tr><th>节次</th><th>星期日</th><th>星期一</th>…</tr></thead>
+    /// <tbody>
+    ///   <tr><td rowspan="4">上午</td><td>1</td><td>…</td><td>课程</td>…</tr>
+    /// </tbody>
+    /// ```
+    /// rowspan 会导致列错位，用占位网格处理
+    static func parse(_ html: String) -> ScheduleBundle {
+        var bundle = ScheduleBundle()
+
+        guard let tableRange = html.range(of: "<table"),
+              let tableEnd = html.range(of: "</table>", range: tableRange.lowerBound..<html.endIndex)
+        else { return bundle }
+
+        let table = String(html[tableRange.lowerBound..<tableEnd.upperBound])
+
+        // 1. 表头 → 星期列顺序
+        let weekdays = parseHeader(table)
+        // 2. 数据行
+        let rows = parseRows(table, weekdayColumns: weekdays)
+
+        bundle.slots = rows
+        bundle.periods = Array(1...max(12, (rows.map(\.endPeriod).max() ?? 12)))
+        return bundle
+    }
+
+    // 星期日/一/… 的列顺序（有的学校周日排第一列）
+    private static func parseHeader(_ table: String) -> [(weekday: Int, col: Int)] {
+        guard let theadRange = table.range(of: "<thead"),
+              let theadEnd = table.range(of: "</thead>", range: theadRange.lowerBound..<table.endIndex)
+        else { return [] }
+        let thead = String(table[theadRange.upperBound..<theadEnd.lowerBound])
+
+        let names: [(String, Int)] = [
+            ("星期日", 7), ("星期天", 7),
+            ("星期一", 1), ("星期二", 2), ("星期三", 3),
+            ("星期四", 4), ("星期五", 5), ("星期六", 6),
+        ]
+
+        var result: [(Int, Int)] = []
+        var col = 0
+        for cell in matches(in: thead, pattern: "<th[^>]*>([\\s\\S]*?)</th>") {
+            let text = stripTags(cell)
+            if let hit = names.first(where: { text.contains($0.0) }) {
+                result.append((hit.1, col))
+            }
+            col += 1
+        }
+        return result
+    }
+
+    private static func parseRows(_ table: String, weekdayColumns: [(weekday: Int, col: Int)]) -> [ScheduleSlot] {
+        guard let tbodyRange = table.range(of: "<tbody") else { return [] }
+        let tbody = String(table[tbodyRange.lowerBound...])
+
+        // 列 → 当前占用到的行号
+        var occupied: [Int: Int] = [:]
+        var slots: [ScheduleSlot] = []
+        var rowIndex = 0
+
+        for rowHTML in matches(in: tbody, pattern: "<tr[^>]*>([\\s\\S]*?)</tr>") {
+            // 节次：这一行第一个纯数字单元格
+            var period = 0
+            var col = 0
+
+            for (attrs, inner) in cells(in: rowHTML) {
+                // 跳过被 rowspan 占掉的列（加保护，防止越界）
+                var guardCount = 0
+                while let until = occupied[col], until >= rowIndex, guardCount < 32 {
+                    col += 1
+                    guardCount += 1
+                }
+                if col > 31 { break }
+
+                let rowspan = Int(attr(attrs, "rowspan") ?? "1") ?? 1
+                let colspan = Int(attr(attrs, "colspan") ?? "1") ?? 1
+                let text = stripTags(inner)
+                let lines = splitLines(inner)
+
+                if period == 0, let p = Int(text.trimmingCharacters(in: .whitespaces)), (1...20).contains(p) {
+                    period = p
+                }
+
+                if let hit = weekdayColumns.first(where: { $0.col == col }), period > 0, !lines.isEmpty {
+                    // 第一行是课程名，后面依次是教师、教室
+                    let course = lines.first ?? ""
+                    let teacher = lines.count > 1 ? lines[1] : ""
+                    let room = lines.count > 2 ? lines[2] : ""
+
+                    slots.append(
+                        ScheduleSlot(
+                            course: course,
+                            teacher: teacher,
+                            room: room,
+                            weekday: hit.weekday,
+                            startPeriod: period,
+                            endPeriod: period + rowspan - 1,
+                            weeks: []
+                        )
+                    )
+                    // 记录 rowspan 占用
+                    for r in 0..<rowspan {
+                        occupied[col] = rowIndex + r
+                    }
+                }
+
+                col += colspan
+            }
+            rowIndex += 1
+        }
+        return slots
+    }
+
+    // MARK: 正则小工具
+
+    private static func matches(in text: String, pattern: String) -> [String] {
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { return [] }
+        let ns = text as NSString
+        return re.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap {
+            ns.substring(with: $0)
+        }
+    }
+
+    private static func cells(in row: String) -> [(attrs: String, inner: String)] {
+        guard let re = try? NSRegularExpression(pattern: "<td([^>]*)>([\\s\\S]*?)</td>", options: [.dotMatchesLineSeparators]) else { return [] }
+        let ns = row as NSString
+        return re.matches(in: row, range: NSRange(location: 0, length: ns.length)).map {
+            (ns.substring(with: $0.range(at: 1)), ns.substring(with: $0.range(at: 2)))
+        }
+    }
+
+    private static func attr(_ attrs: String, _ name: String) -> String? {
+        guard let re = try? NSRegularExpression(pattern: "\(name)\\s*=\\s*[\"']?([\\d]+)", options: .caseInsensitive) else { return nil }
+        let ns = attrs as NSString
+        guard let m = re.firstMatch(in: attrs, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        return ns.substring(with: m.range(at: 1))
+    }
+
+    /// 把单元格里的 <br> / </div> / </p> 当换行，去标签，去空行
+    private static func splitLines(_ html: String) -> [String] {
+        var s = html
+        for tag in ["<br>", "<br/>", "<br />", "</div>", "</p>", "</span>"] {
+            s = s.replacingOccurrences(of: tag, with: "\n", options: .caseInsensitive)
+        }
+        return s
+            .components(separatedBy: "\n")
+            .map { stripTags($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0 != "&nbsp;" }
+    }
+
+    private static func stripTags(_ html: String) -> String {
+        guard let re = try? NSRegularExpression(pattern: "<[^>]+>") else { return html }
+        let ns = html as NSString
+        let plain = re.stringByReplacingMatches(in: html, range: NSRange(location: 0, length: ns.length), withTemplate: "")
+        return plain
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}

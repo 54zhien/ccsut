@@ -1,0 +1,34 @@
+# 会话凭证等同密码，绝不入库
+out/
+*.state.json
+cookies.txt
+state.json
+
+node_modules/
+.pnpm-store/
+
+# iOS
+ios/build/
+ios/DerivedData/
+**/xcuserdata/
+**/*.xcuserstate
+*.ipa
+*.xcarchive
+*.dSYM.zip
+*.dSYM
+
+# Flutter（Android 端，后续用）
+shell/.dart_tool/
+shell/.packages
+shell/build/
+shell/.flutter-plugins*
+shell/ios/Pods/
+shell/android/.gradle/
+shell/pubspec.lock
+
+# 编辑器
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

@@ -1,0 +1,16 @@
+{
+  "name": "ccsut-jw",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "长沙工业学院教务系统（tls.ccsut.cn）会话捕获 / 接口采集 / 保活工具",
+  "scripts": {
+    "capture": "node tools/capture.mjs --out ./out",
+    "capture:cdp": "node tools/capture.mjs --cdp 9222 --out ./out",
+    "keepalive": "node tools/keepalive.mjs --state ./out/state.json",
+    "watch": "node tools/keepalive.mjs --state ./out/state.json --watch"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}

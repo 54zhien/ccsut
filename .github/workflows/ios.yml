@@ -1,0 +1,107 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      note:
+        description: '构建备注'
+        required: false
+        default: ''
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compile & Package
+    runs-on: macos-26
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          echo "=== 可用 Xcode ==="
+          ls -1 /Applications | grep -i '^Xcode' || true
+          if [ -d "/Applications/Xcode_26.1.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_26.1.app
+          elif [ -d "/Applications/Xcode_26.0.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_26.0.app
+          elif [ -d "/Applications/Xcode_26.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_26.app
+          else
+            sudo xcode-select -s /Applications/Xcode.app
+          fi
+          echo "=== 当前使用 ==="
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version || true
+
+      - name: Show project
+        run: |
+          xcodebuild -project CCSUT.xcodeproj -list || true
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          # 用 build 而不是 archive：archive 对签名要求更严，未签名时常报
+          # "Code signing is required for product type 'Application'"
+          xcodebuild build \
+            -project CCSUT.xcodeproj \
+            -scheme CCSUT \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            2>&1 | tee "$RUNNER_TEMP/build.log"
+        continue-on-error: false
+
+      - name: Package unsigned IPA
+        if: success()
+        run: |
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos/CCSUT.app"
+          if [ ! -d "$APP" ]; then
+            echo "找不到 CCSUT.app，列出构建产物："
+            find "$RUNNER_TEMP/DerivedData/Build/Products" -maxdepth 2 -name "*.app" || true
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+
+          cd "$RUNNER_TEMP"
+          zip -qry CCSUT-unsigned.ipa Payload
+
+          echo "=== 产物 ==="
+          ls -lh CCSUT-unsigned.ipa
+          unzip -l CCSUT-unsigned.ipa | head -n 20
+
+          # 记录版本信息，方便对照
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist"
+
+      - name: Upload IPA
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCSUT-ipa
+          path: ${{ runner.temp }}/CCSUT-unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ runner.temp }}/build.log
+          retention-days: 7
+          if-no-files-found: ignore
