@@ -38,7 +38,7 @@ enum LoginStage: Equatable {
         case .loading: return "加载认证页…"
         case .injecting: return "填写表单…"
         case .submitting: return "登录中…"
-        case .done: return "成功"
+        case .done: return "进入中…"
         case .failed: return "重试"
         }
     }
@@ -223,7 +223,7 @@ struct LoginView: View {
                 .clipShape(.rect(cornerRadius: 14))
             }
             .buttonStyle(.plain)
-            .disabled(!canSubmit || stage.isBusy)
+            .disabled(!canSubmit || stage.isBusy || stage == .done)
             .padding(.top, 4)
         }
         .padding(20)
@@ -280,7 +280,7 @@ struct LoginView: View {
                     .lineLimit(2)
             }
 
-            ForEach(logLines.suffix(3), id: \.self) { line in
+            ForEach(logLines.suffix(6), id: \.self) { line in
                 Text(line)
                     .font(.caption2.monospaced())
                     .foregroundStyle(.white.opacity(0.6))
@@ -295,7 +295,7 @@ struct LoginView: View {
         let host = webView.url?.host ?? "未加载"
         let path = webView.url?.path ?? ""
         let state = webView.isLoading ? "loading" : "idle"
-        return "\(state) · \(host)\(path.isEmpty ? "" : path)"
+        return "\(state) · \(host)\(path.isEmpty ? "" : path) · \(phaseLabel)"
     }
 
     private var statusColor: Color {
@@ -387,18 +387,12 @@ struct LoginView: View {
         let absolute = url.absoluteString
         logLines.append("→ \(url.host ?? "")\(url.path)")
 
-        // 落到教务系统 → 成功
+        // 落到教务系统 → 尝试接管会话（URL 只是线索，真正判定看 Cookie + 探测）
         if absolute.contains("tls.ccsut.cn"),
            !absolute.contains("/admin/login"),
            !absolute.contains("loginFailPage") {
-            guard stage != .done else { return }
             watchdog?.cancel()
-            stage = .done
-            logLines.append("✓ 已进入教务系统")
-            Task {
-                await session.adoptCookies()
-                await session.refreshIfNeeded()
-            }
+            Task { await finishLogin() }
             return
         }
 
@@ -408,6 +402,52 @@ struct LoginView: View {
            !didInject {
             didInject = true
             Task { await inject() }
+            scheduleInjectFallback()
+        }
+    }
+
+    /// CAS 有 TGC 时通常自动跳转，不需要注入；
+    /// 但如果 4 秒还停在登录页，说明需要手动填表
+    private func scheduleInjectFallback() {
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            guard stage == .loading else { return }
+            let url = webView.url?.absoluteString ?? ""
+            guard url.contains("/cas/login") else { return }
+            logLines.append("4 秒未跳转，主动注入")
+            await inject()
+        }
+    }
+
+    // MARK: 接管会话
+
+    /// URL 到了教务系统不代表登录成功，必须真的拿到 Cookie 且能访问 /admin/
+    @MainActor
+    private func finishLogin() async {
+        guard stage != .submitting, stage != .done else { return }
+        stage = .submitting
+        logLines.append("接管会话…")
+
+        let ok = await session.adoptCookies()
+        logLines.append("Cookie \(session.lastCookieCount) 条 · phase=\(phaseLabel)")
+
+        if ok {
+            stage = .done
+            logLines.append("✓ 会话有效")
+        } else {
+            let msg = session.lastError ?? "会话建立失败"
+            stage = .failed(msg)
+            logLines.append("✗ \(msg)")
+            logLines.append("现有 Cookie：\(session.cookieNames)")
+        }
+    }
+
+    private var phaseLabel: String {
+        switch session.phase {
+        case .checking: return "checking"
+        case .loggedOut: return "loggedOut"
+        case .loggedIn: return "loggedIn"
+        case .refreshing: return "refreshing"
         }
     }
 

@@ -130,6 +130,7 @@ final class SessionStore {
     private(set) var lastError: String?
     private(set) var studentName: String?
     private(set) var studentId: String?
+    private(set) var lastCookieCount = 0
 
     /// 供 UI 展示的会话健康摘要
     var cookieSummary: String {
@@ -141,6 +142,12 @@ final class SessionStore {
                 return "\(c.name)·\(d)"
             }
         return list.isEmpty ? "未登录" : list.joined(separator: "  ")
+    }
+
+    /// 调试用：当前所有 Cookie 的名字
+    var cookieNames: String {
+        let names = allCookies().map(\.name).sorted()
+        return names.isEmpty ? "无" : names.joined(separator: ",")
     }
 
     var tgcRemainingDays: Double? {
@@ -244,19 +251,44 @@ final class SessionStore {
 
     // MARK: 登录成功后接管
 
-    func adoptCookies() async {
-        let cookies = await WebStore.dataStore.httpCookieStore.allCookies()
-            .filter { $0.domain.contains("ccsut.cn") }
+    /// 登录完成后接管 WebView 的 Cookie
+    ///
+    /// 关键：WKWebsiteDataStore 的 Cookie 写入是异步的，
+    /// didFinish 回调的瞬间去读经常是空的，这里轮询等最多 2 秒。
+    @discardableResult
+    func adoptCookies() async -> Bool {
+        var cookies: [HTTPCookie] = []
+
+        for attempt in 0..<8 {
+            cookies = await WebStore.dataStore.httpCookieStore.allCookies()
+                .filter { $0.domain.contains("ccsut.cn") }
+            if !cookies.isEmpty { break }
+            if attempt < 7 {
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+
+        lastCookieCount = cookies.count
+
         guard !cookies.isEmpty else {
-            lastError = "没有拿到 Cookie"
-            return
+            lastError = "WebView 里没有任何 ccsut.cn 的 Cookie"
+            return false
         }
 
         persist(cookies)
         await injectToWebKit(cookies)
         injectToURLSession(cookies)
+
+        // 真正验证一次：能不能访问 /admin/
+        guard await probe() else {
+            lastError = "Cookie 拿到了（\(cookies.count) 条）但会话无效"
+            return false
+        }
+
         phase = .loggedIn
+        lastError = nil
         await loadProfile()
+        return true
     }
 
     /// 顺手把姓名学号读出来（/admin/xsd/xk/listV2 里有）
