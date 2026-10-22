@@ -279,16 +279,26 @@ final class SessionStore {
             return false
         }
 
-        persist(cookies)
+        // 只有 JSESSIONID 说明只是打开了登录页，没真正登录
+        let keys = Set(cookies.map(\.name))
+        let authenticated = keys.contains("jw_uf") || keys.contains("puid") || keys.contains("username")
+        guard authenticated else {
+            lastError = "只拿到会话 Cookie（\(keys.sorted().joined(separator: ","))），说明还停在登录页"
+            return false
+        }
+
+        // 先只注入到内存，验证通过才落盘。
+        // 否则一条残缺的 JSESSIONID 会把 Keychain 里完整的 Cookie 覆盖掉。
         await injectToWebKit(cookies)
         injectToURLSession(cookies)
 
         // 真正验证一次：能不能访问 /admin/
         guard await probe() else {
-            lastError = "Cookie 拿到了（\(cookies.count) 条）但会话无效"
+            lastError = "Cookie 只有 \(cookies.count) 条（\(cookies.map(\.name).joined(separator: ","))），没有登录态"
             return false
         }
 
+        persist(cookies)
         phase = .loggedIn
         lastError = nil
         await loadProfile()

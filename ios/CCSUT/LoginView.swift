@@ -398,11 +398,15 @@ struct LoginView: View {
 
         // CAS 登录页 → 注入
         if absolute.contains("auth.ccsut.cn"),
-           absolute.contains("/cas/login"),
-           !didInject {
-            didInject = true
-            Task { await inject() }
-            scheduleInjectFallback()
+           absolute.contains("/cas/login") {
+            if didInject {
+                logLines.append("CAS 页已处理过，等跳转")
+            } else {
+                didInject = true
+                logLines.append("进入 CAS 登录页，准备填表")
+                Task { await inject() }
+                scheduleInjectFallback()
+            }
         }
     }
 
@@ -425,6 +429,15 @@ struct LoginView: View {
     @MainActor
     private func finishLogin() async {
         guard stage != .submitting, stage != .done else { return }
+
+        // 必须在真正的教务系统页面上才接管。
+        // 之前没有这个守卫，CAS 页一有风吹草动就误判成功。
+        let current = webView.url?.absoluteString ?? ""
+        guard current.contains("tls.ccsut.cn"), !current.contains("/admin/login") else {
+            logLines.append("跳过接管：还在 \(webView.url?.host ?? "?")\(webView.url?.path ?? "")")
+            return
+        }
+
         stage = .submitting
         logLines.append("接管会话…")
 
