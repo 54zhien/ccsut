@@ -83,7 +83,7 @@ struct MainTabs: View {
     @Environment(SessionStore.self) private var session
 
     enum AppTab: Hashable {
-        case schedule, elective, me
+        case schedule, score, elective, me
     }
 
     @State private var selection: AppTab = .schedule
@@ -92,6 +92,10 @@ struct MainTabs: View {
         TabView(selection: $selection) {
             Tab("课表", systemImage: "calendar", value: AppTab.schedule) {
                 ScheduleView()
+            }
+
+            Tab("成绩", systemImage: "chart.bar.doc.horizontal", value: AppTab.score) {
+                ScoreView()
             }
 
             Tab("选课", systemImage: "list.bullet.rectangle.portrait", value: AppTab.elective) {
@@ -111,7 +115,6 @@ struct MainTabs: View {
 struct ProfileView: View {
     @Environment(SessionStore.self) private var session
 
-    @State private var showScore = false
     @State private var showLogoutAlert = false
 
     var body: some View {
@@ -140,23 +143,12 @@ struct ProfileView: View {
                 }
 
                 Section {
-                    Button {
-                        showScore = true
-                    } label: {
-                        Label("成绩查询", systemImage: "chart.bar.doc.horizontal")
-                    }
-                }
-
-                Section {
                     Button("退出登录", role: .destructive) {
                         showLogoutAlert = true
                     }
                 }
             }
             .navigationTitle("我的")
-            .sheet(isPresented: $showScore) {
-                ScoreView()
-            }
             .alert("退出登录", isPresented: $showLogoutAlert) {
                 Button("取消", role: .cancel) {}
                 Button("退出", role: .destructive) {

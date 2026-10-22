@@ -265,7 +265,8 @@ extension APIClient {
 extension String {
     var urlEncoded: String {
         var allowed = CharacterSet.urlQueryAllowed
-        allowed.remove(charactersIn: "+&=%?#")
+        // 斜杠也要编码：pcenc 是 base64，未编码的 / 会被服务端当成路径分隔符
+        allowed.remove(charactersIn: "+&=%?#/")
         return addingPercentEncoding(withAllowedCharacters: allowed) ?? self
     }
 }

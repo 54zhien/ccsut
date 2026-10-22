@@ -15,7 +15,6 @@ import SwiftUI
 
 struct ScoreView: View {
     @Environment(SessionStore.self) private var session
-    @Environment(\.dismiss) private var dismiss
 
     @State private var items: [ScoreItem] = []
     @State private var isLoading = false
@@ -49,9 +48,6 @@ struct ScoreView: View {
             .navigationTitle("成绩单")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await load(force: true) }
