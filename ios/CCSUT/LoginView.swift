@@ -2,169 +2,59 @@
 //  LoginView.swift
 //  CCSUT
 //
-//  登录页 · 原生 UI + 后台 WKWebView 代理
+//  登录页
 //
-//  架构（踩过坑之后的最终版）：
-//    · WebView 永远只有一个实例，铺满全屏
-//    · 非手动模式时被 nativeLayer 完全遮住（不是靠 alpha=0 / 1×1，那会让 WebKit 停加载）
-//    · 登录靠 callAsyncJavaScript 注入填表，参数自动转义
-//    · 八秒没反应就自动切手动模式，不至于卡死
+//  两个入口：
+//    · 账号密码 → 弹 large sheet，里面自动填表，验证码人工补
+//    · 扫码     → 弹同样的 sheet，直接显示二维码
+//
+//  WebView 不再嵌在主界面里，生命周期跟着 sheet 走。
 //
 
 import SwiftUI
-import WebKit
-import Observation
-
-// MARK: - 阶段
-
-enum LoginStage: Equatable {
-    case idle
-    case loading
-    case injecting
-    case submitting
-    case done
-    case failed(String)
-
-    var isBusy: Bool {
-        switch self {
-        case .loading, .injecting, .submitting: return true
-        default: return false
-        }
-    }
-
-    var caption: String {
-        switch self {
-        case .idle: return "登录"
-        case .loading: return "加载认证页…"
-        case .injecting: return "填写表单…"
-        case .submitting: return "登录中…"
-        case .done: return "进入中…"
-        case .failed: return "重试"
-        }
-    }
-}
-
-// MARK: - 登录页
 
 struct LoginView: View {
     @Environment(SessionStore.self) private var session
 
-    @State private var webView: WKWebView
-    @State private var nav = WebNavigator()
-
     @State private var username = ""
     @State private var password = ""
-    @State private var stage: LoginStage = .idle
-    @State private var manualMode = false
-    @State private var didInject = false
-    @State private var logLines: [String] = []
-    @State private var watchdog: Task<Void, Never>?
+    @State private var sheet: LoginSheetMode?
 
     @FocusState private var focused: Field?
     private enum Field { case user, pass }
 
-    init() {
-        _webView = State(initialValue: WebFactory.make())
-    }
-
     var body: some View {
         ZStack {
-            // 唯一的 WebView：全屏、始终存在
-            // 手动模式显示，自动模式被下面的 nativeLayer 盖住
-            WebPanel(webView: webView)
-                .ignoresSafeArea()
-                .opacity(manualMode ? 1 : 1)   // 保持 1，靠遮挡而不是透明度
-                .allowsHitTesting(manualMode)
+            backdrop
 
-            if manualMode {
-                manualOverlay
-            } else {
-                nativeLayer
-            }
-        }
-        .animation(.smooth(duration: 0.25), value: manualMode)
-        .onAppear(perform: setup)
-        .onDisappear { watchdog?.cancel() }
-        .onChange(of: nav.currentURL) { _, url in
-            guard let url else { return }
-            handleNavigation(to: url)
-        }
-        .onChange(of: nav.lastError) { _, err in
-            guard let err else { return }
-            logLines.append("⚠️ \(err)")
-            if stage.isBusy { stage = .failed(err) }
-        }
-    }
-
-    // MARK: 初始化
-
-    private func setup() {
-        webView.navigationDelegate = nav
-        nav.onNavigate = { url in handleNavigation(to: url) }
-        nav.onFailure = { msg in
-            logLines.append("⚠️ \(msg)")
-            if stage.isBusy { stage = .failed(msg) }
-        }
-
-        if username.isEmpty,
-           let saved = UserDefaults.standard.string(forKey: "ccsut.lastUsername") {
-            username = saved
-        }
-    }
-
-    // MARK: 手动模式覆盖层
-
-    private var manualOverlay: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button {
-                    manualMode = false
-                    stage = .idle
-                } label: {
-                    Label("返回", systemImage: "chevron.left")
-                        .font(.subheadline.weight(.medium))
+            ScrollView {
+                VStack(spacing: 24) {
+                    Spacer(minLength: 48)
+                    brand
+                    formCard
+                    qrRow
+                    footer
                 }
-
-                Spacer()
-
-                Text("网页登录")
-                    .font(.subheadline.weight(.semibold))
-
-                Spacer()
-
-                Button {
-                    webView.reload()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
+                .padding(.horizontal, 22)
+                .padding(.bottom, 40)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.bar)
-
-            Spacer()
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .onAppear {
+            if username.isEmpty,
+               let saved = UserDefaults.standard.string(forKey: "ccsut.lastUsername") {
+                username = saved
+            }
+        }
+        .sheet(item: $sheet) { mode in
+            WebLoginSheet(mode: mode, username: username, password: password)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(26)
         }
     }
 
-    // MARK: 原生登录层
-
-    private var nativeLayer: some View {
-        ScrollView {
-            VStack(spacing: 26) {
-                Spacer(minLength: 36)
-                brand
-                formCard
-                if case .failed(let msg) = stage { errorBanner(msg) }
-                fallbackRow
-                debugStrip
-                footer
-            }
-            .padding(.horizontal, 22)
-            .padding(.bottom, 36)
-        }
-        .scrollBounceBehavior(.basedOnSize)
-        .background(backdrop)
-    }
+    // MARK: 品牌
 
     private var brand: some View {
         VStack(spacing: 14) {
@@ -188,6 +78,8 @@ struct LoginView: View {
         }
     }
 
+    // MARK: 表单
+
     private var formCard: some View {
         VStack(spacing: 16) {
             inputRow(symbol: "person.text.rectangle", placeholder: "学号", text: $username, secure: false)
@@ -203,18 +95,15 @@ struct LoginView: View {
                 .textContentType(.password)
                 .focused($focused, equals: .pass)
                 .submitLabel(.go)
-                .onSubmit(submit)
+                .onSubmit { open(.password) }
 
-            Button(action: submit) {
+            Button {
+                open(.password)
+            } label: {
                 HStack(spacing: 10) {
-                    if stage.isBusy {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(Color(red: 0.10, green: 0.31, blue: 0.82))
-                    } else {
-                        Image(systemName: "arrow.right.circle.fill")
-                    }
-                    Text(stage.caption).font(.headline)
+                    Image(systemName: "arrow.right.circle.fill")
+                    Text("登录")
+                        .font(.headline)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 50)
@@ -223,8 +112,13 @@ struct LoginView: View {
                 .clipShape(.rect(cornerRadius: 14))
             }
             .buttonStyle(.plain)
-            .disabled(!canSubmit || stage.isBusy || stage == .done)
+            .disabled(!canSubmit)
             .padding(.top, 4)
+
+            Text("登录时会自动填好账号密码，验证码处按提示补一位短信码即可")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
         }
         .padding(20)
         .glassCard(radius: 26)
@@ -252,82 +146,24 @@ struct LoginView: View {
         .padding(.vertical, 6)
     }
 
-    private var fallbackRow: some View {
-        VStack(spacing: 12) {
-            // 扫码：CAS 默认页签就是二维码，不需要验证码
-            Button {
-                openCASPage(inject: true)
-            } label: {
-                Label("扫码登录 · 不需要验证码", systemImage: "qrcode")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .background(.white.opacity(0.18), in: .rect(cornerRadius: 12))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(.white.opacity(0.25), lineWidth: 1)
-                    }
-                    .foregroundStyle(.white)
-            }
-            .buttonStyle(.plain)
+    // MARK: 扫码
 
-            Button {
-                openCASPage(inject: false)
-            } label: {
-                Label("用网页登录（账号密码 / 改密码）", systemImage: "safari")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.75))
-            }
-            .buttonStyle(.plain)
+    private var qrRow: some View {
+        Button {
+            open(.qr)
+        } label: {
+            Label("扫码登录 · 不需要验证码", systemImage: "qrcode")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .background(.white.opacity(0.18), in: .rect(cornerRadius: 13))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 13)
+                        .strokeBorder(.white.opacity(0.26), lineWidth: 1)
+                }
+                .foregroundStyle(.white)
         }
-    }
-
-    /// 打开 CAS 页面。inject=true 时不自动填表（留给扫码），
-    /// inject=false 时也交给用户，避免和短信验证码打架
-    private func openCASPage(inject: Bool) {
-        didInject = true          // 都不自动填表了，交给用户
-        stage = .idle
-        manualMode = true
-        logLines.append(inject ? "打开扫码页" : "打开网页登录")
-        webView.load(URLRequest(url: SessionStore.casLoginURL))
-    }
-
-    /// 实时显示 WebView 状态，出问题一眼看出卡在哪
-    private var debugStrip: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 6, height: 6)
-                Text(debugLine)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.white.opacity(0.7))
-                    .lineLimit(2)
-            }
-
-            ForEach(logLines.suffix(6), id: \.self) { line in
-                Text(line)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.white.opacity(0.6))
-                    .lineLimit(1)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 6)
-    }
-
-    private var debugLine: String {
-        let host = webView.url?.host ?? "未加载"
-        let path = webView.url?.path ?? ""
-        let state = webView.isLoading ? "loading" : "idle"
-        return "\(state) · \(host)\(path.isEmpty ? "" : path) · \(phaseLabel)"
-    }
-
-    private var statusColor: Color {
-        if nav.lastError != nil { return .red }
-        if webView.isLoading { return .yellow }
-        if webView.url != nil { return .green }
-        return .gray
+        .buttonStyle(.plain)
     }
 
     private var footer: some View {
@@ -336,19 +172,7 @@ struct LoginView: View {
             .foregroundStyle(.white.opacity(0.7))
     }
 
-    private func errorBanner(_ msg: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-            Text(msg)
-                .font(.footnote)
-                .foregroundStyle(.white)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .background(.red.opacity(0.35), in: .rect(cornerRadius: 12))
-    }
+    // MARK: 背景
 
     private var backdrop: some View {
         MeshGradient(
@@ -379,276 +203,13 @@ struct LoginView: View {
         !username.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
     }
 
-    private func submit() {
+    private func open(_ mode: LoginSheetMode) {
         focused = nil
-        guard canSubmit, !stage.isBusy else { return }
-
-        UserDefaults.standard.set(username, forKey: "ccsut.lastUsername")
-        didInject = false
-        logLines = ["开始加载统一认证"]
-        stage = .loading
-
-        webView.load(URLRequest(url: SessionStore.casLoginURL))
-        startWatchdog()
+        if !username.isEmpty {
+            UserDefaults.standard.set(username, forKey: "ccsut.lastUsername")
+        }
+        sheet = mode
     }
-
-    /// 8 秒还没加载出页面，说明 WebKit 没动，直接切手动模式给用户
-    private func startWatchdog() {
-        watchdog?.cancel()
-        watchdog = Task {
-            try? await Task.sleep(for: .seconds(8))
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                if stage == .loading, webView.url == nil {
-                    logLines.append("⚠️ 8 秒未加载，转手动模式")
-                    manualMode = true
-                    stage = .idle
-                }
-            }
-        }
-    }
-
-    private func handleNavigation(to url: URL) {
-        let absolute = url.absoluteString
-        logLines.append("→ \(url.host ?? "")\(url.path)")
-
-        // 落到教务系统 → 尝试接管会话
-        // 注意：必须按 host 判断。CAS 登录页的 URL 带
-        // ?service=https%3A%2F%2Ftls.ccsut.cn%2F... 参数，
-        // 用 contains("tls.ccsut.cn") 会把登录页本身误判成已登录。
-        if url.host == "tls.ccsut.cn",
-           !absolute.contains("/admin/login"),
-           !absolute.contains("loginFailPage") {
-            watchdog?.cancel()
-            Task { await finishLogin() }
-            return
-        }
-
-        // CAS 登录页 → 注入
-        if url.host == "auth.ccsut.cn", absolute.contains("/cas/login") {
-            if didInject {
-                logLines.append("CAS 页已处理过，等跳转")
-            } else {
-                didInject = true
-                logLines.append("进入 CAS 登录页，准备填表")
-                Task { await inject() }
-                scheduleInjectFallback()
-            }
-        }
-    }
-
-    /// CAS 有 TGC 时通常自动跳转，不需要注入；
-    /// 但如果 4 秒还停在登录页，说明需要手动填表
-    private func scheduleInjectFallback() {
-        Task {
-            try? await Task.sleep(for: .seconds(4))
-            guard stage == .loading else { return }
-            let url = webView.url?.absoluteString ?? ""
-            guard url.contains("/cas/login") else { return }
-            logLines.append("4 秒未跳转，主动注入")
-            await inject()
-        }
-    }
-
-    /// 从 CAS 页面里抠出错误提示
-    @MainActor
-    private func readFailureReason() async -> String? {
-        guard let raw = try? await webView.evaluateJavaScript(
-            "document.body ? document.body.innerText : ''"
-        ), let text = raw as? String else { return nil }
-
-        let keywords = ["密码", "验证码", "错误", "失败", "锁定", "不存在", "未激活", "异常", "过期"]
-        let lines = text
-            .split(separator: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { line in
-                !line.isEmpty
-                    && line.count < 80
-                    && keywords.contains { line.contains($0) }
-                    // 排除页面上那几行固定说明
-                    && !line.contains("身份证后六位")
-                    && !line.contains("初始密码")
-                    && !line.contains("强制修改")
-                    && !line.contains("获取验证码")
-            }
-
-        return lines.first
-    }
-
-    // MARK: 接管会话
-
-    /// URL 到了教务系统不代表登录成功，必须真的拿到 Cookie 且能访问 /admin/
-    @MainActor
-    private func finishLogin() async {
-        guard stage != .submitting, stage != .done else { return }
-
-        // 必须在真正的教务系统页面上才接管。
-        // 之前没有这个守卫，CAS 页一有风吹草动就误判成功。
-        guard let host = webView.url?.host, host == "tls.ccsut.cn" else {
-            logLines.append("跳过接管：当前在 \(webView.url?.host ?? "?")")
-            return
-        }
-        let current = webView.url?.absoluteString ?? ""
-        guard !current.contains("/admin/login") else {
-            logLines.append("跳过接管：还在教务登录页")
-            return
-        }
-
-        stage = .submitting
-        logLines.append("接管会话…")
-
-        let ok = await session.adoptCookies()
-        logLines.append("Cookie \(session.lastCookieCount) 条 · phase=\(phaseLabel)")
-
-        if ok {
-            stage = .done
-            logLines.append("✓ 会话有效")
-        } else {
-            let msg = session.lastError ?? "会话建立失败"
-            stage = .failed(msg)
-            logLines.append("✗ \(msg)")
-            logLines.append("现有 Cookie：\(session.cookieNames)")
-        }
-    }
-
-    private var phaseLabel: String {
-        switch session.phase {
-        case .checking: return "checking"
-        case .loggedOut: return "loggedOut"
-        case .loggedIn: return "loggedIn"
-        case .refreshing: return "refreshing"
-        }
-    }
-
-    // MARK: 注入
-
-    @MainActor
-    private func inject() async {
-        stage = .injecting
-        logLines.append("注入填表脚本")
-
-        do {
-            let result = try await webView.callAsync(Self.loginScriptBody, arguments: [
-                "username": username,
-                "password": password,
-            ])
-
-            let outcome = (result as? String) ?? "(nil)"
-            logLines.append("注入结果：\(outcome)")
-
-            // 验证码：账号密码已填好，切到手动模式让用户补一位
-            if outcome == "need-captcha" {
-                stage = .idle
-                manualMode = true
-                logLines.append("账号密码已填好 · 点「获取验证码」，收到短信后填进去再点登录")
-                return
-            }
-
-            guard outcome == "ok" else {
-                let msg: String
-                switch outcome {
-                case "no-tab":   msg = "认证页没渲染出页签，点「用网页登录」"
-                case "no-form":  msg = "没找到密码框，点「用网页登录」"
-                case "no-button": msg = "没找到登录按钮，点「用网页登录」"
-                default:         msg = "页面结构异常（\(outcome)）"
-                }
-                stage = .failed(msg)
-                return
-            }
-
-            stage = .submitting
-            logLines.append("已提交，等跳转…")
-
-            // 提交后给 Angular 一点时间做校验和重渲染，然后读页面反馈。
-            // CAS 拒绝登录时会把错误直接印在登录页上，抓着它比干等有用。
-            try? await Task.sleep(for: .seconds(5))
-
-            if stage == .submitting {
-                let reason = await readFailureReason()
-                if let reason {
-                    logLines.append("CAS 返回：\(reason)")
-                    stage = .failed(reason)
-                } else {
-                    // 再等一轮，有些慢请求要 10 秒
-                    try? await Task.sleep(for: .seconds(7))
-                    if stage == .submitting {
-                        stage = .failed("没跳转也没有错误提示，点「用网页登录」手动试")
-                    }
-                }
-            }
-        } catch {
-            stage = .failed("注入失败：\(error.localizedDescription)")
-        }
-    }
-
-    /// callAsyncJavaScript 传的是函数体，参数以变量名注入
-    private static let loginScriptBody = """
-        const setVal = (el, v) => {
-          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-          setter.call(el, v);
-          ['input', 'change', 'keyup', 'blur'].forEach(t =>
-            el.dispatchEvent(new Event(t, { bubbles: true })));
-        };
-
-        const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-        // 1. 等 Angular 把页签渲染出来
-        //    刚 didFinish 时 DOM 往往还是空的，直接查会得到空数组
-        let pwdTab = null;
-        for (let i = 0; i < 50 && !pwdTab; i++) {
-          const tabs = [...document.querySelectorAll('.ant-tabs-tab')];
-          pwdTab = tabs.find(t => (t.textContent || '').includes('密码登录'));
-          if (!pwdTab) await sleep(200);
-        }
-        if (!pwdTab) return 'no-tab';
-
-        // 2. 切到「密码登录」页签
-        if (!pwdTab.classList.contains('ant-tabs-tab-active')) {
-          pwdTab.click();
-          await sleep(900);
-        }
-
-        // 3. 等密码框出现
-        let pwd = null;
-        for (let i = 0; i < 40 && !pwd; i++) {
-          pwd = [...document.querySelectorAll('input')]
-            .find(el => el.type === 'password' && el.offsetWidth > 0);
-          if (!pwd) await sleep(200);
-        }
-        if (!pwd) return 'no-form';
-
-        // 4. 填账号密码
-        const user = [...document.querySelectorAll('input')]
-          .find(el => /用户名|手机号|账号/.test(el.placeholder || '') && el.offsetWidth > 0);
-        if (user) setVal(user, username);
-        setVal(pwd, password);
-
-        // 5. 勾上「记住账号」「记住密码」
-        [...document.querySelectorAll('label.ant-checkbox-wrapper')].forEach(label => {
-          if (/记住/.test(label.textContent || '')) {
-            const cb = label.querySelector('input[type=checkbox]');
-            if (cb && !cb.checked) label.click();
-          }
-        });
-
-        await sleep(500);
-
-        // 6. 验证码是服务端强制校验的（短信验证码，没有图形 captcha）。
-        //    实测：不填直接提交会返回「验证码不正确」，密码根本不被校验。
-        //    Angular 对空值给的是 ng-valid，所以不能靠 class 判断，
-        //    只要这个输入框存在就必须交人工。
-        const captcha = [...document.querySelectorAll('input')]
-          .find(el => /验证码/.test(el.placeholder || '') && el.offsetWidth > 0);
-        if (captcha) return 'need-captcha';
-
-        // 7. 提交
-        const btn = [...document.querySelectorAll('button')]
-          .find(b => (b.textContent || '').trim() === '登录');
-        if (!btn) return 'no-button';
-        btn.click();
-
-        return 'ok';
-        """
 }
 
 // MARK: - Liquid Glass 卡片
