@@ -147,6 +147,23 @@ struct ProfileView: View {
                         showLogoutAlert = true
                     }
                 }
+
+                Section {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("诊断").font(.caption.weight(.semibold))
+                        Text("CookieJar \(CookieJar.shared.count) 条")
+                            .font(.caption2.monospaced())
+                        Text(CookieJar.names.joined(separator: ","))
+                            .font(.system(size: 9, design: .monospaced))
+                            .lineLimit(3)
+                        Text("HTTPCookieStorage \(HTTPCookieStorage.shared.cookies?.count ?? 0) 条")
+                            .font(.caption2.monospaced())
+                        Text((HTTPCookieStorage.shared.cookies ?? []).map(\.name).sorted().joined(separator: ","))
+                            .font(.system(size: 9, design: .monospaced))
+                            .lineLimit(3)
+                    }
+                    .foregroundStyle(.secondary)
+                }
             }
             .navigationTitle("我的")
             .alert("退出登录", isPresented: $showLogoutAlert) {

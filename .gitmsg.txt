@@ -1,11 +1,10 @@
-﻿fix(ios): rawGet 手动跟随重定向并按 host 取 Cookie
+﻿revert+diag: 恢复自动 Cookie 保可用，并显示两套 Cookie 的真实数量
 
-续期链路是 tls.ccsut.cn → auth.ccsut.cn → tls.ccsut.cn，
-而 TGC 属于 auth.ccsut.cn 域。关闭 URLSession 自动 Cookie 后，
-自动重定向不会按新 host 补 Cookie，TGC 永远发不出去，续期必然失败。
+连续几版「会话过期」都源于关闭 httpShouldSetCookies，
+现在先退回 v0.4.1 的可用状态（能登录、能看课表成绩），
+选课空白的问题单独排查。
 
-改动：
-- NoRedirect delegate 阻止自动重定向
-- rawGet 手动循环，每一跳按当前 host 从 CookieJar 取 Cookie
-- 每跳解析 Set-Cookie 入池
-- 修 HTTPURLResponse() 无参构造（不存在）
+同时在我的页底部加诊断：
+- CookieJar 条数与名字
+- HTTPCookieStorage 条数与名字
+这两组数字能直接说明是哪一层丢了 Cookie。

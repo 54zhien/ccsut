@@ -235,7 +235,7 @@ final class SessionStore {
                 req.setValue(cookie, forHTTPHeaderField: "Cookie")
             }
 
-            let (_, resp) = try await Self.rawSession.data(for: req)
+            let (_, resp) = try await URLSession.shared.data(for: req)
             guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1) }
             last = http
 
