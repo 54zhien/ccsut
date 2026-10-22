@@ -124,6 +124,9 @@ struct ScheduleSlot: Identifiable, Hashable {
 
     /// 该格子在网格里的行（节次）跨度
     var periodSpan: Int { max(1, endPeriod - startPeriod + 1) }
+
+    /// 学校按「2 小节 = 1 大节」排课：djc 1,2 → 第1大节 …
+    var bigSection: Int { max(1, min(4, (startPeriod + 1) / 2)) }
 }
 
 /// 课表接口（/admin/xsd/pkgl/xskb/sdpkkbList）返回的一条记录
