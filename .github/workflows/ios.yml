@@ -42,10 +42,12 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version || true
 
       - name: Show project
+        working-directory: ios
         run: |
           xcodebuild -project CCSUT.xcodeproj -list || true
 
       - name: Build (unsigned)
+        working-directory: ios
         run: |
           set -o pipefail
           # 用 build 而不是 archive：archive 对签名要求更严，未签名时常报
