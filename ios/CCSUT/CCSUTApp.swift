@@ -212,19 +212,16 @@ struct ProfileView: View {
 struct ScoreWebView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @State private var page: WebPage
+    @State private var webView: WKWebView
+    @State private var nav = WebNavigator()
 
     init() {
-        var config = WebPage.Configuration()
-        config.websiteDataStore = WebStore.dataStore
-        let page = WebPage(configuration: config)
-        page.customUserAgent = UserAgent.mobile
-        _page = State(initialValue: page)
+        _webView = State(initialValue: WebFactory.make())
     }
 
     var body: some View {
         NavigationStack {
-            WebView(page)
+            WebPanel(webView: webView)
                 .ignoresSafeArea(edges: .bottom)
                 .navigationTitle("成绩查询")
                 .navigationBarTitleDisplayMode(.inline)
@@ -234,21 +231,22 @@ struct ScoreWebView: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
-                            page.reload()
+                            webView.reload()
                         } label: {
                             Image(systemName: "arrow.clockwise")
                         }
                     }
                 }
-                .onAppear {
-                    page.load(URLRequest(
-                        url: URL(string: "https://tls.ccsut.cn/admin/xsd/xsdzgcjcx/xscjdy")!
-                    ))
-                }
                 .overlay {
-                    if page.isLoading {
+                    if webView.isLoading {
                         ProgressView().controlSize(.large)
                     }
+                }
+                .onAppear {
+                    webView.navigationDelegate = nav
+                    webView.load(URLRequest(
+                        url: URL(string: "https://tls.ccsut.cn/admin/xsd/xsdzgcjcx/xscjdy")!
+                    ))
                 }
         }
     }
