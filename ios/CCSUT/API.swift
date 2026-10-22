@@ -315,7 +315,7 @@ enum ScheduleParser {
         guard let re = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { return [] }
         let ns = text as NSString
         return re.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap {
-            ns.substring(with: $0)
+            ns.substring(with: $0.range)
         }
     }
 

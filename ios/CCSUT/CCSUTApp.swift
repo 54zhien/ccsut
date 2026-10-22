@@ -82,23 +82,23 @@ struct LaunchView: View {
 struct MainTabs: View {
     @Environment(SessionStore.self) private var session
 
-    enum Tab: Hashable {
+    enum AppTab: Hashable {
         case schedule, elective, me
     }
 
-    @State private var selection: Tab = .schedule
+    @State private var selection: AppTab = .schedule
 
     var body: some View {
         TabView(selection: $selection) {
-            Tab("课表", systemImage: "calendar", value: Tab.schedule) {
+            Tab("课表", systemImage: "calendar", value: AppTab.schedule) {
                 ScheduleView()
             }
 
-            Tab("选课", systemImage: "list.bullet.rectangle.portrait", value: Tab.elective) {
+            Tab("选课", systemImage: "list.bullet.rectangle.portrait", value: AppTab.elective) {
                 ElectiveView()
             }
 
-            Tab("我的", systemImage: "person.crop.circle", value: Tab.me) {
+            Tab("我的", systemImage: "person.crop.circle", value: AppTab.me) {
                 ProfileView()
             }
         }
@@ -217,8 +217,9 @@ struct ScoreWebView: View {
     init() {
         var config = WebPage.Configuration()
         config.websiteDataStore = WebStore.dataStore
-        config.customUserAgent = UserAgent.mobile
-        _page = State(initialValue: WebPage(configuration: config))
+        let page = WebPage(configuration: config)
+        page.customUserAgent = UserAgent.mobile
+        _page = State(initialValue: page)
     }
 
     var body: some View {

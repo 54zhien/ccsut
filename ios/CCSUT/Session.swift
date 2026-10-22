@@ -103,9 +103,10 @@ extension WKHTTPCookieStore {
         }
     }
 
-    func delete(_ cookie: HTTPCookie) async {
+    /// deleteCookie 在新 SDK 里已改名为 delete，这里换个名字避免递归
+    func remove(_ cookie: HTTPCookie) async {
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            deleteCookie(cookie) { c.resume() }
+            delete(cookie) { c.resume() }
         }
     }
 }
@@ -319,7 +320,7 @@ final class SessionStore {
 
         let store = WebStore.dataStore.httpCookieStore
         for c in await store.allCookies() where c.domain.contains("ccsut.cn") {
-            await store.delete(c)
+            await store.remove(c)
         }
 
         phase = .loggedOut

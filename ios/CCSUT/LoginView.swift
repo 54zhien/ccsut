@@ -63,8 +63,9 @@ struct LoginView: View {
     init() {
         var config = WebPage.Configuration()
         config.websiteDataStore = WebStore.dataStore
-        config.customUserAgent = UserAgent.mobile
-        _page = State(initialValue: WebPage(configuration: config))
+        let page = WebPage(configuration: config)
+        page.customUserAgent = UserAgent.mobile
+        _page = State(initialValue: page)
     }
 
     var body: some View {

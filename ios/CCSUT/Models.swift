@@ -52,6 +52,7 @@ struct ElectiveInit: Decodable {
 
 struct TeachingClass: Decodable, Identifiable, Hashable {
     let id: String
+    let jxbmc: String?       // 教学班名称（含课程+性质+序号）
     let kcmc: String?        // 课程名称
     let kcid: String?        // 课程代码
     let kcbh: String?        // 课程编号
