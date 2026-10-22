@@ -253,18 +253,43 @@ struct LoginView: View {
     }
 
     private var fallbackRow: some View {
-        Button {
-            manualMode = true
-            didInject = true
-            stage = .loading
-            logLines.append("切手动模式")
-            webView.load(URLRequest(url: SessionStore.casLoginURL))
-        } label: {
-            Label("用网页登录（验证码 / 改密码走这里）", systemImage: "safari")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.white.opacity(0.92))
+        VStack(spacing: 12) {
+            // 扫码：CAS 默认页签就是二维码，不需要验证码
+            Button {
+                openCASPage(inject: true)
+            } label: {
+                Label("扫码登录 · 不需要验证码", systemImage: "qrcode")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(.white.opacity(0.18), in: .rect(cornerRadius: 12))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(.white.opacity(0.25), lineWidth: 1)
+                    }
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                openCASPage(inject: false)
+            } label: {
+                Label("用网页登录（账号密码 / 改密码）", systemImage: "safari")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+    }
+
+    /// 打开 CAS 页面。inject=true 时不自动填表（留给扫码），
+    /// inject=false 时也交给用户，避免和短信验证码打架
+    private func openCASPage(inject: Bool) {
+        didInject = true          // 都不自动填表了，交给用户
+        stage = .idle
+        manualMode = true
+        logLines.append(inject ? "打开扫码页" : "打开网页登录")
+        webView.load(URLRequest(url: SessionStore.casLoginURL))
     }
 
     /// 实时显示 WebView 状态，出问题一眼看出卡在哪
@@ -515,7 +540,7 @@ struct LoginView: View {
             if outcome == "need-captcha" {
                 stage = .idle
                 manualMode = true
-                logLines.append("账号密码已填好，请补验证码后点登录")
+                logLines.append("账号密码已填好 · 点「获取验证码」，收到短信后填进去再点登录")
                 return
             }
 
@@ -608,15 +633,13 @@ struct LoginView: View {
 
         await sleep(500);
 
-        // 6. 验证码框虽然始终渲染，但 class 是 ng-valid（非必填），
-        //    所以直接提交。万一服务端确实要求，会在提交后返回错误，
-        //    那时再切手动也不迟——先省掉一次多余的交互。
-        //    只有在 Angular 明确标成 ng-invalid 时才提前拦截。
+        // 6. 验证码是服务端强制校验的（短信验证码，没有图形 captcha）。
+        //    实测：不填直接提交会返回「验证码不正确」，密码根本不被校验。
+        //    Angular 对空值给的是 ng-valid，所以不能靠 class 判断，
+        //    只要这个输入框存在就必须交人工。
         const captcha = [...document.querySelectorAll('input')]
           .find(el => /验证码/.test(el.placeholder || '') && el.offsetWidth > 0);
-        if (captcha && captcha.classList.contains('ng-invalid')) {
-          return 'need-captcha';
-        }
+        if (captcha) return 'need-captcha';
 
         // 7. 提交
         const btn = [...document.querySelectorAll('button')]
