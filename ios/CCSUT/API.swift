@@ -76,6 +76,14 @@ final class APIClient {
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1) }
 
+        // 收 Set-Cookie 并更新 CookieJar。
+        // 服务端每次响应都可能轮换 jw_uf（有效期只有 4 小时），
+        // CookieJar 若停留在登录那一刻的快照，后续请求就会用过期值。
+        if let url = req.url, let fields = http.allHeaderFields as? [String: String] {
+            let fresh = HTTPCookie.cookies(withResponseHeaderFields: fields, for: url)
+            if !fresh.isEmpty { CookieJar.upsert(fresh) }
+        }
+
         // 被踢回登录页
         let final = http.url?.absoluteString ?? ""
         if final.contains("/admin/login") || final.contains("loginFailPage") {

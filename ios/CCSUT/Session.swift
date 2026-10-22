@@ -421,6 +421,22 @@ enum CookieJar {
     }
 
     static var names: [String] { shared.map(\.name).sorted() }
+
+    /// 按 (name, domain, path) 覆盖或追加。
+    /// 服务端每次响应都可能轮换 jw_uf，不更新的话会一直用登录那一刻的旧值。
+    static func upsert(_ cookie: HTTPCookie) {
+        let key: (HTTPCookie) -> String = { "\($0.name)|\($0.domain)|\($0.path)" }
+        let k = key(cookie)
+        if let idx = shared.firstIndex(where: { key($0) == k }) {
+            shared[idx] = cookie
+        } else {
+            shared.append(cookie)
+        }
+    }
+
+    static func upsert(_ cookies: [HTTPCookie]) {
+        for c in cookies { upsert(c) }
+    }
 }
 
 enum WebStore {
