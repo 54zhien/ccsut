@@ -486,10 +486,23 @@ struct LoginView: View {
             let outcome = (result as? String) ?? "(nil)"
             logLines.append("注入结果：\(outcome)")
 
+            // 验证码：账号密码已填好，切到手动模式让用户补一位
+            if outcome == "need-captcha" {
+                stage = .idle
+                manualMode = true
+                logLines.append("账号密码已填好，请补验证码后点登录")
+                return
+            }
+
             guard outcome == "ok" else {
-                stage = .failed(outcome == "no-form"
-                    ? "没找到登录表单，点下面「用网页登录」"
-                    : "页面结构异常（\(outcome)）")
+                let msg: String
+                switch outcome {
+                case "no-tab":   msg = "认证页没渲染出页签，点「用网页登录」"
+                case "no-form":  msg = "没找到密码框，点「用网页登录」"
+                case "no-button": msg = "没找到登录按钮，点「用网页登录」"
+                default:         msg = "页面结构异常（\(outcome)）"
+                }
+                stage = .failed(msg)
                 return
             }
 
@@ -516,33 +529,54 @@ struct LoginView: View {
 
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-        const tabs = [...document.querySelectorAll('.ant-tabs-tab')];
-        const pwdTab = tabs.find(t => (t.textContent || '').includes('密码登录'));
-        if (pwdTab && !pwdTab.classList.contains('ant-tabs-tab-active')) {
+        // 1. 等 Angular 把页签渲染出来
+        //    刚 didFinish 时 DOM 往往还是空的，直接查会得到空数组
+        let pwdTab = null;
+        for (let i = 0; i < 50 && !pwdTab; i++) {
+          const tabs = [...document.querySelectorAll('.ant-tabs-tab')];
+          pwdTab = tabs.find(t => (t.textContent || '').includes('密码登录'));
+          if (!pwdTab) await sleep(200);
+        }
+        if (!pwdTab) return 'no-tab';
+
+        // 2. 切到「密码登录」页签
+        if (!pwdTab.classList.contains('ant-tabs-tab-active')) {
           pwdTab.click();
-          await sleep(600);
+          await sleep(900);
         }
 
+        // 3. 等密码框出现
         let pwd = null;
-        for (let i = 0; i < 25 && !pwd; i++) {
-          pwd = [...document.querySelectorAll('input')].find(el => el.type === 'password');
+        for (let i = 0; i < 40 && !pwd; i++) {
+          pwd = [...document.querySelectorAll('input')]
+            .find(el => el.type === 'password' && el.offsetWidth > 0);
           if (!pwd) await sleep(200);
         }
         if (!pwd) return 'no-form';
 
-        const texts = [...document.querySelectorAll('input')].filter(el => el.type === 'text');
-        const user = texts.find(el => /用户名|手机号|账号/.test(el.placeholder || '')) || texts[0];
+        // 4. 填账号密码
+        const user = [...document.querySelectorAll('input')]
+          .find(el => /用户名|手机号|账号/.test(el.placeholder || '') && el.offsetWidth > 0);
         if (user) setVal(user, username);
         setVal(pwd, password);
 
-        [...document.querySelectorAll('.ant-checkbox-wrapper')].forEach(label => {
+        // 5. 勾上「记住账号」「记住密码」
+        [...document.querySelectorAll('label.ant-checkbox-wrapper')].forEach(label => {
           if (/记住/.test(label.textContent || '')) {
             const cb = label.querySelector('input[type=checkbox]');
             if (cb && !cb.checked) label.click();
           }
         });
 
-        await sleep(400);
+        await sleep(500);
+
+        // 6. 验证码：这个页面始终渲染验证码框，无法自动填。
+        //    账号密码已经填好，交给用户补验证码即可。
+        const captcha = [...document.querySelectorAll('input')]
+          .find(el => /验证码/.test(el.placeholder || '') && el.offsetWidth > 0);
+        if (captcha) return 'need-captcha';
+
+        // 7. 无验证码时直接提交
         const btn = [...document.querySelectorAll('button')]
           .find(b => (b.textContent || '').trim() === '登录');
         if (!btn) return 'no-button';
