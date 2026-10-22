@@ -17,9 +17,9 @@ struct ScheduleView: View {
     @State private var isLoading = false
     @State private var errorText: String?
 
-    private let periodHeight: CGFloat = 62
+    private let periodHeight: CGFloat = 76
     private let timeColumnWidth: CGFloat = 30
-    private let headerHeight: CGFloat = 34
+    private let headerHeight: CGFloat = 30
     private let weekdays = ["一", "二", "三", "四", "五", "六", "日"]
 
     var body: some View {
@@ -42,7 +42,7 @@ struct ScheduleView: View {
                     emptyState
                 }
             }
-            .navigationTitle("课表")
+            .navigationTitle(bundle?.title.isEmpty == false ? "课表 · \(bundle!.title)" : "课表")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -80,8 +80,8 @@ struct ScheduleView: View {
     // MARK: 网格
 
     private func grid(_ bundle: ScheduleBundle) -> some View {
-        let rows = max(12, bundle.periods.count)
-        let totalHeight = headerHeight + CGFloat(rows) * periodHeight
+        let rows = max(8, bundle.periods.count)
+        let totalHeight = headerHeight + CGFloat(rows) * periodHeight + 12
 
         return ScrollView(.vertical) {
             GeometryReader { geo in
@@ -94,9 +94,9 @@ struct ScheduleView: View {
                     // 网格线
                     gridLines(rows: rows, colWidth: colWidth, height: totalHeight)
 
-                    // 课程块
-                    ForEach(bundle.slots) { slot in
-                        courseBlock(slot, colWidth: colWidth)
+                    // 课程块（同一格可能有多门课，分周上）
+                    ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
+                        courseBlock(cell.slot, extra: cell.extra, colWidth: colWidth)
                     }
                 }
                 .frame(height: totalHeight, alignment: .top)
@@ -154,7 +154,7 @@ struct ScheduleView: View {
         }
     }
 
-    private func courseBlock(_ slot: ScheduleSlot, colWidth: CGFloat) -> some View {
+    private func courseBlock(_ slot: ScheduleSlot, extra: Int, colWidth: CGFloat) -> some View {
         let x = timeColumnWidth + CGFloat(slot.weekday - 1) * colWidth
         let y = headerHeight + CGFloat(slot.startPeriod - 1) * periodHeight
         let h = CGFloat(slot.periodSpan) * periodHeight - 3
@@ -162,23 +162,44 @@ struct ScheduleView: View {
 
         return VStack(alignment: .leading, spacing: 2) {
             Text(slot.course)
-                .font(.caption.weight(.semibold))
-                .lineLimit(3)
-                .minimumScaleFactor(0.8)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.75)
 
             if !slot.room.isEmpty {
                 Text(slot.room)
                     .font(.system(size: 9))
-                    .opacity(0.75)
+                    .opacity(0.8)
                     .lineLimit(1)
             }
+
             Spacer(minLength: 0)
+
+            if extra > 0 {
+                Text("+\(extra)")
+                    .font(.system(size: 9, weight: .bold))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(.white.opacity(0.25), in: .capsule)
+            }
         }
         .foregroundStyle(.white)
-        .padding(5)
+        .padding(4)
         .frame(width: max(0, colWidth - 3), height: max(0, h), alignment: .topLeading)
         .background(tint.gradient, in: .rect(cornerRadius: 8))
         .offset(x: x, y: y)
+    }
+
+    /// 按 (星期, 节次) 归并，一格里可能压着好几门分周上的课
+    private var cells: [(slot: ScheduleSlot, extra: Int)] {
+        guard let bundle else { return [] }
+        let groups = Dictionary(grouping: bundle.slots) { "\($0.weekday)-\($0.startPeriod)" }
+        return groups.values
+            .compactMap { slots -> (ScheduleSlot, Int)? in
+                guard let first = slots.first else { return nil }
+                return (first, slots.count - 1)
+            }
+            .sorted { ($0.0.weekday, $0.0.startPeriod) < ($1.0.weekday, $1.0.startPeriod) }
     }
 
     // MARK: 加载
@@ -192,9 +213,25 @@ struct ScheduleView: View {
         defer { isLoading = false }
 
         do {
-            let html = try await APIClient.shared.scheduleHTML()
-            let parsed = ScheduleParser.parse(html)
-            bundle = parsed
+            // 1. 学期（选课接口里带着，不用额外请求）
+            let initData = try await APIClient.shared.electiveInit()
+            let xnxq = initData.xkxnxq ?? "2026-2027-1"
+
+            // 2. xhid（课表页里的隐藏字段）
+            let xhid = try await APIClient.shared.scheduleXhid(xnxq: xnxq)
+
+            // 3. 真实课表 JSON
+            let items = try await APIClient.shared.scheduleItems(xnxq: xnxq, xhid: xhid)
+
+            let slots = items
+                .map(\.slot)
+                .filter { !$0.course.isEmpty }
+
+            bundle = ScheduleBundle(
+                title: xnxq,
+                slots: slots,
+                periods: Array(1...8)
+            )
         } catch let e as APIError {
             if case .notLoggedIn = e {
                 await session.refresh()

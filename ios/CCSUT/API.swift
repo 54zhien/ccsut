@@ -157,11 +157,39 @@ extension APIClient {
         return try await post("/admin/xsd/xk/listjxbDataV2", form: form)
     }
 
-    /// 课表页（HTML，服务端渲染骨架 + AJAX 填充）
+    /// 课表页骨架（HTML）。真正数据在 sdpkkbList，这个只用来取 xhid
     func scheduleHTML(xnxq: String? = nil) async throws -> String {
         var q: [URLQueryItem] = []
         if let xnxq { q.append(URLQueryItem(name: "xnxq", value: xnxq)) }
         return try await html("/admin/xsd/pkgl/xskb/queryKbForXsd", query: q)
+    }
+
+    /// 从课表页里挖出 xhid（一个长串，服务端校验用）
+    func scheduleXhid(xnxq: String? = nil) async throws -> String {
+        let page = try await scheduleHTML(xnxq: xnxq)
+        let patterns = [
+            #"id=["']xhid["'][^>]*?value=["']([^"']+)"#,
+            #"name=["']xhid["'][^>]*?value=["']([^"']+)"#,
+            #"value=["']([A-Za-z0-9]{40,})["'][^>]*?id=["']xhid["']"#,
+        ]
+        for p in patterns {
+            if let v = page.firstCapture(p), !v.isEmpty { return v }
+        }
+        throw APIError.decoding("课表页里找不到 xhid")
+    }
+
+    /// 真实课表数据（JSON，实测 98 条专业课）
+    func scheduleItems(xnxq: String, xhid: String) async throws -> [ScheduleItem] {
+        let q: [URLQueryItem] = [
+            URLQueryItem(name: "xnxq", value: xnxq),
+            URLQueryItem(name: "xhid", value: xhid),
+            URLQueryItem(name: "xqdm", value: "01"),
+            URLQueryItem(name: "zdzc", value: ""),
+            URLQueryItem(name: "zxzc", value: ""),
+            URLQueryItem(name: "xskbxslx", value: "0"),
+        ]
+        let req = makeRequest("/admin/xsd/pkgl/xskb/sdpkkbList", method: "POST", query: q, form: [:])
+        return try await decode(send(req))
     }
 
     /// 校历周次
@@ -356,5 +384,20 @@ enum ScheduleParser {
             .replacingOccurrences(of: "&lt;", with: "<")
             .replacingOccurrences(of: "&gt;", with: ">")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+
+// MARK: - 正则取值
+
+extension String {
+    /// 返回第一个捕获组
+    func firstCapture(_ pattern: String) -> String? {
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = self as NSString
+        guard let m = re.firstMatch(in: self, range: NSRange(location: 0, length: ns.length)),
+              m.numberOfRanges > 1
+        else { return nil }
+        return ns.substring(with: m.range(at: 1))
     }
 }

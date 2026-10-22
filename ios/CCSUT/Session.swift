@@ -170,6 +170,8 @@ final class SessionStore {
     /// Cookie 数据仓库统一从 WebStore 取（见文件底部）
 
     private let cookieKey = "ccsut.cookies.v2"
+    private let nameKey = "ccsut.student.name"
+    private let sidKey = "ccsut.student.id"
 
     // MARK: 冷启动
 
@@ -188,6 +190,7 @@ final class SessionStore {
 
         if await probe() {
             phase = .loggedIn
+            await loadProfile()
             await refreshIfNeeded()
         } else if restored.contains(where: { $0.name == "TGC" }) {
             await refresh()
@@ -237,6 +240,7 @@ final class SessionStore {
             }
             persistCurrentCookies()
             phase = .loggedIn
+            await loadProfile()
         } catch {
             lastError = error.localizedDescription
             phase = previous == .refreshing ? .loggedOut : previous
@@ -293,12 +297,22 @@ final class SessionStore {
 
     /// 顺手把姓名学号读出来（/admin/xsd/xk/listV2 里有）
     func loadProfile() async {
+        // 先用缓存顶上，避免冷启动时「我的」页空白
+        if studentName == nil { studentName = UserDefaults.standard.string(forKey: nameKey) }
+        if studentId == nil { studentId = UserDefaults.standard.string(forKey: sidKey) }
+
         do {
             let initData: ElectiveInit = try await APIClient.shared.electiveInit()
-            studentName = initData.xsxm
-            studentId = initData.xsxh
+            if let name = initData.xsxm, !name.isEmpty {
+                studentName = name
+                UserDefaults.standard.set(name, forKey: nameKey)
+            }
+            if let sid = initData.xsxh, !sid.isEmpty {
+                studentId = sid
+                UserDefaults.standard.set(sid, forKey: sidKey)
+            }
         } catch {
-            // 拿不到不影响主流程
+            lastError = "拉取学生信息失败：\(error.localizedDescription)"
         }
     }
 
@@ -343,6 +357,8 @@ final class SessionStore {
 
     func logout() async {
         Keychain.delete(cookieKey)
+        UserDefaults.standard.removeObject(forKey: nameKey)
+        UserDefaults.standard.removeObject(forKey: sidKey)
         studentName = nil
         studentId = nil
 

@@ -126,6 +126,35 @@ struct ScheduleSlot: Identifiable, Hashable {
     var periodSpan: Int { max(1, endPeriod - startPeriod + 1) }
 }
 
+/// 课表接口（/admin/xsd/pkgl/xskb/sdpkkbList）返回的一条记录
+struct ScheduleItem: Decodable {
+    let kcmc: String?      // 课程名（含 <a> 标签）
+    let tmc: String?       // 教师
+    let croommc: String?   // 教室
+    let zc: String?        // 周次，如 "1-4,6-11"
+    let xingqi: Int?       // 星期 1-7
+    let djc: Int?          // 第几大节 1-8
+    let ksxs: String?      // 考核方式
+    let kcxz: String?      // 课程性质
+    let jsxq: String?      // 校区
+    let xf: String?        // 学分
+    let jxbzc: String?     // 教学班组成
+    let croombh: String?   // 教室编号
+
+    var slot: ScheduleSlot {
+        let p = djc ?? 1
+        return ScheduleSlot(
+            course: (kcmc ?? "").strippingHTML,
+            teacher: (tmc ?? "").strippingHTML,
+            room: (croommc ?? "").strippingHTML,
+            weekday: min(7, max(1, xingqi ?? 1)),
+            startPeriod: p,
+            endPeriod: p,
+            weeks: WeekParser.parse(zc ?? "")
+        )
+    }
+}
+
 /// 课表页信息
 struct ScheduleBundle {
     var title: String = ""
@@ -201,6 +230,63 @@ enum ScheduleCodec {
                 parts.append(start == prev ? "\(start)" : "\(start)-\(prev)")
                 start = w
                 prev = w
+            }
+        }
+        parts.append(start == prev ? "\(start)" : "\(start)-\(prev)")
+        return parts.joined(separator: ",")
+    }
+}
+
+
+// MARK: - HTML 剥离
+
+extension String {
+    /// 课表接口里的字段都包了一层 <a href="javascript:...">
+    var strippingHTML: String {
+        replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+// MARK: - 周次解析
+
+enum WeekParser {
+    /// "1-4,6-11" → [1,2,3,4,6,7,8,9,10,11]
+    /// "1-3,5-7,9-9,11-11" → 单双周也在这里展开
+    static func parse(_ raw: String) -> [Int] {
+        var set = Set<Int>()
+        for part in raw.split(separator: ",") {
+            let p = part.trimmingCharacters(in: .whitespaces)
+            guard !p.isEmpty else { continue }
+            if p.contains("-") {
+                let nums = p.split(separator: "-").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+                if nums.count == 2, nums[0] <= nums[1], nums[1] - nums[0] < 60 {
+                    set.formUnion(nums[0]...nums[1])
+                }
+            } else if let n = Int(p), n > 0 {
+                set.insert(n)
+            }
+        }
+        return set.sorted()
+    }
+
+    /// "1-4,6-11" → "1-4,6-11"（保留原样，只做校验）
+    static func describe(_ raw: String) -> String {
+        let weeks = parse(raw)
+        guard !weeks.isEmpty else { return raw }
+        return compress(weeks)
+    }
+
+    static func compress(_ weeks: [Int]) -> String {
+        guard !weeks.isEmpty else { return "" }
+        var parts: [String] = []
+        var start = weeks[0], prev = weeks[0]
+        for w in weeks.dropFirst() {
+            if w == prev + 1 { prev = w }
+            else {
+                parts.append(start == prev ? "\(start)" : "\(start)-\(prev)")
+                start = w; prev = w
             }
         }
         parts.append(start == prev ? "\(start)" : "\(start)-\(prev)")
