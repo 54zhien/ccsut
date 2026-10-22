@@ -149,15 +149,34 @@ struct ElectiveView: View {
             let initData = try await APIClient.shared.electiveInit()
             self.initData = initData
 
-            let batch: (pcid: String, pcenc: String)?
-            if let first = initData.pcencs?.first {
-                batch = (first.key, first.value)
+            // pcencs 里可能有多个选课批次（实测有 2 个：网络课 63 门 + 面授课 75 门）
+            // 必须逐个拉、合并去重；只取第一个会漏掉一大半
+            var merged: [TeachingClass] = []
+            var seen = Set<String>()
+            var lastError: Error?
+
+            if let batches = initData.pcencs, !batches.isEmpty {
+                for (pcid, pcenc) in batches {
+                    do {
+                        let page = try await APIClient.shared.teachingClasses(batch: (pcid, pcenc))
+                        for item in page.initData ?? [] where !seen.contains(item.id) {
+                            seen.insert(item.id)
+                            merged.append(item)
+                        }
+                    } catch {
+                        lastError = error
+                    }
+                }
             } else {
-                batch = nil
+                let page = try await APIClient.shared.teachingClasses(batch: nil)
+                merged = page.initData ?? []
             }
 
-            let page = try await APIClient.shared.teachingClasses(batch: batch)
-            classes = page.initData ?? []
+            if merged.isEmpty, let lastError { throw lastError }
+
+            classes = merged.sorted {
+                ($0.kcmc ?? "").localizedStandardCompare($1.kcmc ?? "") == .orderedAscending
+            }
         } catch let e as APIError {
             if case .notLoggedIn = e {
                 await session.refresh()
