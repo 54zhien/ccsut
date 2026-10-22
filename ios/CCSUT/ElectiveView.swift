@@ -246,8 +246,8 @@ struct ElectiveView: View {
             }
 
             batchLog = log
-            cookieCount = session.allCookies().count
-            cookieNames = session.allCookies().map(\.name).sorted().joined(separator: ",")
+            cookieCount = CookieJar.shared.count
+            cookieNames = CookieJar.names.joined(separator: ",")
 
             if merged.isEmpty {
                 // 拉一次原始响应，看看服务端到底回了什么

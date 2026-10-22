@@ -180,6 +180,7 @@ final class SessionStore {
         lastError = nil
 
         let restored = restoreFromKeychain()
+        if !restored.isEmpty { CookieJar.shared = restored }
         guard !restored.isEmpty else {
             phase = .loggedOut
             return
@@ -287,6 +288,8 @@ final class SessionStore {
             return false
         }
 
+        CookieJar.shared = cookies
+
         // 先只注入到内存，验证通过才落盘。
         // 否则一条残缺的 JSESSIONID 会把 Keychain 里完整的 Cookie 覆盖掉。
         await injectToWebKit(cookies)
@@ -299,6 +302,7 @@ final class SessionStore {
         }
 
         persist(cookies)
+        CookieJar.shared = cookies
         phase = .loggedIn
         lastError = nil
         await loadProfile()
@@ -397,6 +401,27 @@ enum UserAgent {
 //
 // 单独放全局：@MainActor 隔离的类里放 static let 会让 SwiftUI View 的
 // init() 无法访问（init 不保证在 MainActor 上）。
+
+/// 全局 Cookie 池
+///
+/// 为什么需要它：WebView 里的 Cookie 通过 HTTPCookieStorage.shared.setCookie
+/// 注入给 URLSession 时会被静默拒绝一部分（实测 12 条只进去 3 条，
+/// jw_uf / username / puid 全丢），导致 listV2 能过、listjxbDataV2 返回空。
+/// 所以请求时直接从这个池子取，不依赖 HTTPCookieStorage。
+enum CookieJar {
+    nonisolated(unsafe) static var shared: [HTTPCookie] = []
+
+    static func header(for host: String) -> String? {
+        let matched = shared.filter { c in
+            let d = c.domain.hasPrefix(".") ? String(c.domain.dropFirst()) : c.domain
+            return host == d || host.hasSuffix("." + d)
+        }
+        guard !matched.isEmpty else { return nil }
+        return matched.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+    }
+
+    static var names: [String] { shared.map(\.name).sorted() }
+}
 
 enum WebStore {
     static let dataStore: WKWebsiteDataStore = .default()
