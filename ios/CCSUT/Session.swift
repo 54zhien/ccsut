@@ -264,11 +264,21 @@ final class SessionStore {
     func adoptCookies() async -> Bool {
         var cookies: [HTTPCookie] = []
 
-        for attempt in 0..<8 {
+        // 注意：不能以「拿到任意一条 Cookie」为结束条件。
+        // 打开 CAS 登录页的瞬间就会有一条 JSESSIONID，
+        // 那时还停在登录页，必须等真正代表登录态的 Cookie 出现。
+        var authenticated = false
+        for attempt in 0..<24 {
             cookies = await WebStore.dataStore.httpCookieStore.allCookies()
                 .filter { $0.domain.contains("ccsut.cn") }
-            if !cookies.isEmpty { break }
-            if attempt < 7 {
+
+            let keys = Set(cookies.map(\.name))
+            authenticated = keys.contains("jw_uf")
+                || keys.contains("puid")
+                || keys.contains("username")
+
+            if authenticated { break }
+            if attempt < 23 {
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
@@ -280,11 +290,8 @@ final class SessionStore {
             return false
         }
 
-        // 只有 JSESSIONID 说明只是打开了登录页，没真正登录
-        let keys = Set(cookies.map(\.name))
-        let authenticated = keys.contains("jw_uf") || keys.contains("puid") || keys.contains("username")
         guard authenticated else {
-            lastError = "只拿到会话 Cookie（\(keys.sorted().joined(separator: ","))），说明还停在登录页"
+            lastError = "登录还没有完成"
             return false
         }
 

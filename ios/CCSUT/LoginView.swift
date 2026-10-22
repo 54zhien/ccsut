@@ -392,13 +392,18 @@ struct LoginView: View {
     }
 
     private func finish() async {
-        let ok = await session.adoptCookies()
-        if ok {
-            busy = .done
-        } else {
-            hint = session.lastError ?? "会话建立失败"
-            busy = .idle
+        // 跳转瞬间 Cookie 可能还在写，重试几次
+        for attempt in 0..<3 {
+            if await session.adoptCookies() {
+                busy = .done
+                return
+            }
+            if attempt < 2 {
+                try? await Task.sleep(for: .milliseconds(700))
+            }
         }
+        busy = .idle
+        hint = "登录没有完成，请再试一次"
     }
 
     private func startCooldown(_ seconds: Int) {
