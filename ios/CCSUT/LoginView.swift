@@ -387,8 +387,11 @@ struct LoginView: View {
         let absolute = url.absoluteString
         logLines.append("→ \(url.host ?? "")\(url.path)")
 
-        // 落到教务系统 → 尝试接管会话（URL 只是线索，真正判定看 Cookie + 探测）
-        if absolute.contains("tls.ccsut.cn"),
+        // 落到教务系统 → 尝试接管会话
+        // 注意：必须按 host 判断。CAS 登录页的 URL 带
+        // ?service=https%3A%2F%2Ftls.ccsut.cn%2F... 参数，
+        // 用 contains("tls.ccsut.cn") 会把登录页本身误判成已登录。
+        if url.host == "tls.ccsut.cn",
            !absolute.contains("/admin/login"),
            !absolute.contains("loginFailPage") {
             watchdog?.cancel()
@@ -397,8 +400,7 @@ struct LoginView: View {
         }
 
         // CAS 登录页 → 注入
-        if absolute.contains("auth.ccsut.cn"),
-           absolute.contains("/cas/login") {
+        if url.host == "auth.ccsut.cn", absolute.contains("/cas/login") {
             if didInject {
                 logLines.append("CAS 页已处理过，等跳转")
             } else {
@@ -432,9 +434,13 @@ struct LoginView: View {
 
         // 必须在真正的教务系统页面上才接管。
         // 之前没有这个守卫，CAS 页一有风吹草动就误判成功。
+        guard let host = webView.url?.host, host == "tls.ccsut.cn" else {
+            logLines.append("跳过接管：当前在 \(webView.url?.host ?? "?")")
+            return
+        }
         let current = webView.url?.absoluteString ?? ""
-        guard current.contains("tls.ccsut.cn"), !current.contains("/admin/login") else {
-            logLines.append("跳过接管：还在 \(webView.url?.host ?? "?")\(webView.url?.path ?? "")")
+        guard !current.contains("/admin/login") else {
+            logLines.append("跳过接管：还在教务登录页")
             return
         }
 

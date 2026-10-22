@@ -1,0 +1,13 @@
+﻿fix(ios): 用 host 精确判断页面，修复登录永远不填表
+
+CAS 登录页的 URL 带 service 参数，里面就含 tls.ccsut.cn 字面量：
+  auth.ccsut.cn/backstage/cas/login?service=https%3A%2F%2Ftls.ccsut.cn%2Fadmin%2Fcaslogin
+
+handleNavigation 原本用 absolute.contains 判断是否已进入教务系统，
+于是每个 CAS 登录页都被误判成功、直接 return，
+填表代码永远执行不到，用户只拿到一条 JSESSIONID。
+
+三处判断全部改为 url.host 精确匹配：
+- tls 分支
+- CAS 分支
+- finishLogin 守卫
