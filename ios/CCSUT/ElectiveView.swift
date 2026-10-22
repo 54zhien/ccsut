@@ -24,6 +24,7 @@ struct ElectiveView: View {
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "全部"
+        case selected = "已选"
         case available = "可选"
         case free = "有余量"
         var id: String { rawValue }
@@ -132,6 +133,10 @@ struct ElectiveView: View {
             Divider().frame(height: 14)
             Label(data.xsxm ?? "—", systemImage: "person")
             Spacer()
+            if selectedCount > 0 {
+                Label("\(selectedCount) 已选", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
             Text("\(filtered.count) 门")
                 .foregroundStyle(.secondary)
         }
@@ -140,6 +145,8 @@ struct ElectiveView: View {
         .padding(.horizontal, 4)
         .padding(.top, 4)
     }
+
+    private var selectedCount: Int { classes.filter(\.isSelected).count }
 
     // MARK: 筛选
 
@@ -152,6 +159,7 @@ struct ElectiveView: View {
             }
             switch selectedFilter {
             case .all: return true
+            case .selected: return item.isSelected
             case .available: return item.canSelect
             case .free: return !item.isFull
             }
@@ -275,9 +283,20 @@ struct ClassCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
         .overlay(alignment: .topTrailing) {
-            if item.canSelect && !item.isFull {
+            if item.isSelected {
+                Text("已选")
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(.green, in: .capsule)
+                    .foregroundStyle(.white)
+                    .padding(10)
+            }
+        }
+        .overlay {
+            if item.isSelected {
                 RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(.green.opacity(0.25), lineWidth: 1)
+                    .strokeBorder(.green.opacity(0.55), lineWidth: 1.5)
             }
         }
     }
@@ -355,8 +374,13 @@ struct ClassDetailSheet: View {
                 Section("选课情况") {
                     LabeledContent("已选 / 容量", value: "\(item.enrolled) / \(item.capacity)")
                     LabeledContent("状态") {
-                        Text(item.isFull ? "已满" : (item.canSelect ? "可选" : "不可选"))
-                            .foregroundStyle(item.isFull ? .orange : (item.canSelect ? .green : .secondary))
+                        if item.isSelected {
+                            Label("已选", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        } else {
+                            Text(item.isFull ? "已满" : (item.canSelect ? "可选" : "不可选"))
+                                .foregroundStyle(item.isFull ? .orange : (item.canSelect ? .green : .secondary))
+                        }
                     }
                 }
 

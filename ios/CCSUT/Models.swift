@@ -70,6 +70,8 @@ struct TeachingClass: Decodable, Identifiable, Hashable {
     let sksjddstr: String?   // 上课时间编码，如 "8403,9403"
     let kkxqmc: String?      // 校区
     let sfkxk: String?       // "1" 可选
+    let status: String?      // "1" = 已选
+    let bmzt: String?        // 报名状态
     let ksxs: String?        // 考核方式
     let bz: String?          // 备注
 
@@ -86,6 +88,9 @@ struct TeachingClass: Decodable, Identifiable, Hashable {
     var isFull: Bool { capacity > 0 && enrolled >= capacity }
 
     var canSelect: Bool { sfkxk == "1" && !isFull }
+
+    /// 已选（退课按钮能点的那些）
+    var isSelected: Bool { status == "1" }
 
     var fillRatio: Double {
         guard capacity > 0 else { return 0 }

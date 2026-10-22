@@ -269,16 +269,6 @@ struct ScheduleView: View {
         .padding(6)
         .frame(width: max(0, colWidth - 4), height: h, alignment: .topLeading)
         .background(tint.gradient, in: .rect(cornerRadius: 9))
-        .overlay(alignment: .topTrailing) {
-            if extra > 0 {
-                Text("+\(extra)")
-                    .font(.system(size: 8, weight: .bold))
-                    .padding(.horizontal, 3)
-                    .padding(.vertical, 1)
-                    .background(.black.opacity(0.25), in: .capsule)
-                    .padding(3)
-            }
-        }
         .offset(x: x, y: y)
     }
 
