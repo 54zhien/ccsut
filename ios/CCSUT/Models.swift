@@ -301,3 +301,65 @@ enum WeekParser {
         return parts.joined(separator: ",")
     }
 }
+
+
+// MARK: - 成绩
+
+/// GET /admin/ydd/inf/getXscjJson?xnxq=111  （111 = 全部学期）
+struct ScoreItem: Decodable, Identifiable, Hashable {
+    let id: String?
+    let kcmc: String?      // "[01BJ001]画法几何"
+    let kcbh: String?
+    let xf: String?        // 学分
+    let zhcj: String?      // 总成绩，可能是 "85" / "67.6" / "良"
+    let jd: Double?        // 绩点
+    let cjfxms: String?    // 平时(40%):91,期末(60%):80
+    let kcxz: String?      // 课程性质
+    let xnxq: String?
+    let sfjg: String?      // "1" 及格
+
+    /// 去掉 "[01BJ001]" 前缀
+    var courseName: String {
+        guard let k = kcmc, !k.isEmpty else { return "" }
+        if let close = k.firstIndex(of: "]") {
+            return String(k[k.index(after: close)...]).trimmingCharacters(in: .whitespaces)
+        }
+        return k
+    }
+
+    var credit: Double { Double(xf ?? "") ?? 0 }
+    var point: Double { jd ?? 0 }
+    var passed: Bool { sfjg == "1" }
+    var scoreText: String { (zhcj?.isEmpty == false) ? zhcj! : "—" }
+
+    /// 成绩分项拆成可读的键值对
+    var breakdown: [(String, String)] {
+        guard let raw = cjfxms, !raw.isEmpty else { return [] }
+        return raw.split(separator: ",").compactMap { part in
+            let s = String(part)
+            guard let colon = s.firstIndex(of: ":") else { return nil }
+            let key = String(s[s.startIndex..<colon])
+            let val = String(s[s.index(after: colon)...])
+            guard !val.isEmpty, val != "0" else { return nil }
+            return (key, val)
+        }
+    }
+}
+
+/// 一个学期的汇总
+struct ScoreTerm: Identifiable {
+    let name: String
+    let items: [ScoreItem]
+
+    var id: String { name }
+    var credits: Double { items.reduce(0) { $0 + $1.credit } }
+
+    /// 加权平均绩点
+    var gpa: Double {
+        let weighted = items.reduce(0.0) { $0 + $1.point * $1.credit }
+        let total = credits
+        return total > 0 ? weighted / total : 0
+    }
+
+    var failedCount: Int { items.filter { !$0.passed }.count }
+}

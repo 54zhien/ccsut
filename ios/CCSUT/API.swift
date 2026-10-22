@@ -214,6 +214,19 @@ extension APIClient {
         return try await decode(send(req))
     }
 
+    /// 全部成绩（xnxq=111 是服务端约定的「全部学期」，实测 61 门跨 5 学期）
+    ///
+    /// 注意：这不是 /admin/xsd/xsdzgcjcx/xscjdy（那条是 JSP 报表，学校缺 .rpx 文件），
+    /// 而是移动端页面 /admin/ydd/inf/showScore 背后用的 JSON 接口。
+    func scoreList() async throws -> [ScoreItem] {
+        struct Payload: Decodable { let xscjList: [ScoreItem]? }
+        let payload: Payload = try await get(
+            "/admin/ydd/inf/getXscjJson",
+            query: [URLQueryItem(name: "xnxq", value: "111")]
+        )
+        return payload.xscjList ?? []
+    }
+
     /// 当前教学周（校历接口，实测返回 {"xlzc":"7"}）
     func currentTeachingWeek() async throws -> Int {
         struct WeekInfo: Decodable { let xlzc: String? }
