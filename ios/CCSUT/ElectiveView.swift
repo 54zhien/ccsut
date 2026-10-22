@@ -23,6 +23,7 @@ struct ElectiveView: View {
     @State private var batchLog: [String] = []
     @State private var rawSnippet = ""
     @State private var cookieCount = 0
+    @State private var cookieNames = ""
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "全部"
@@ -64,8 +65,9 @@ struct ElectiveView: View {
                             .padding(.horizontal, 32)
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Cookie \(cookieCount) 条")
+                            Text("Cookie \(cookieCount) 条：\(cookieNames)")
                                 .font(.caption2.monospaced())
+                                .lineLimit(3)
                             ForEach(batchLog, id: \.self) { line in
                                 Text(line).font(.caption2.monospaced())
                             }
@@ -245,6 +247,7 @@ struct ElectiveView: View {
 
             batchLog = log
             cookieCount = session.allCookies().count
+            cookieNames = session.allCookies().map(\.name).sorted().joined(separator: ",")
 
             if merged.isEmpty {
                 // 拉一次原始响应，看看服务端到底回了什么

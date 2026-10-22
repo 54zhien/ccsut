@@ -189,8 +189,10 @@ extension APIClient {
             form["pcenc"] = batch.pcenc
         }
         let req = makeRequest("/admin/xsd/xk/listjxbDataV2", method: "POST", form: form)
+        let body = req.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? "<无body>"
         let (data, _) = try await send(req)
-        return String(data: data, encoding: .utf8) ?? "<二进制>"
+        let resp = String(data: data, encoding: .utf8) ?? "<二进制>"
+        return "BODY[\(body.count)]: \(body.prefix(220))\nRESP: \(resp.prefix(260))"
     }
 
     /// 原始 listV2 响应（诊断用）
