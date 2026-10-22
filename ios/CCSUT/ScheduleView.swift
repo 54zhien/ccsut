@@ -16,6 +16,9 @@ struct ScheduleView: View {
     @State private var bundle: ScheduleBundle?
     @State private var isLoading = false
     @State private var errorText: String?
+    @State private var selectedWeek = 1
+    @State private var currentWeek = 1
+    @State private var didPickWeek = false
 
     private let periodHeight: CGFloat = 76
     private let timeColumnWidth: CGFloat = 30
@@ -24,25 +27,30 @@ struct ScheduleView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if isLoading && bundle == nil {
-                    ProgressView("加载课表…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorText {
-                    ContentUnavailableView {
-                        Label("加载失败", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(errorText)
-                    } actions: {
-                        Button("重试") { Task { await load(force: true) } }
+            VStack(spacing: 0) {
+                if bundle?.isEmpty == false {
+                    weekBar
+                }
+                Group {
+                    if isLoading && bundle == nil {
+                        ProgressView("加载课表…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if let errorText {
+                        ContentUnavailableView {
+                            Label("加载失败", systemImage: "wifi.exclamationmark")
+                        } description: {
+                            Text(errorText)
+                        } actions: {
+                            Button("重试") { Task { await load(force: true) } }
+                        }
+                    } else if let bundle, !bundle.isEmpty {
+                        grid(bundle)
+                    } else {
+                        emptyState
                     }
-                } else if let bundle, !bundle.isEmpty {
-                    grid(bundle)
-                } else {
-                    emptyState
                 }
             }
-            .navigationTitle(bundle?.title.isEmpty == false ? "课表 · \(bundle!.title)" : "课表")
+            .navigationTitle(navTitle)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -62,6 +70,76 @@ struct ScheduleView: View {
                 if bundle == nil { await load() }
             }
         }
+    }
+
+    private var navTitle: String {
+        guard let t = bundle?.title, !t.isEmpty else { return "课表" }
+        return "课表 · \(t)"
+    }
+
+    // MARK: 周次
+
+    private var maxWeek: Int {
+        let m = bundle?.slots.flatMap(\.weeks).max() ?? 18
+        return max(18, m)
+    }
+
+    /// 只保留本门课在这一周有排课的内容
+    private var visibleSlots: [ScheduleSlot] {
+        guard let bundle else { return [] }
+        return bundle.slots.filter { slot in
+            slot.weeks.isEmpty || slot.weeks.contains(selectedWeek)
+        }
+    }
+
+    private var weekBar: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(1...maxWeek, id: \.self) { w in
+                        weekChip(w).id(w)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .onChange(of: selectedWeek) { _, w in
+                withAnimation(.snappy(duration: 0.22)) {
+                    proxy.scrollTo(w, anchor: .center)
+                }
+            }
+        }
+        .background(.bar)
+    }
+
+    private func weekChip(_ w: Int) -> some View {
+        let isSelected = w == selectedWeek
+        let isCurrent = w == currentWeek
+
+        return Button {
+            withAnimation(.snappy(duration: 0.18)) { selectedWeek = w }
+        } label: {
+            VStack(spacing: 1) {
+                Text("\(w)")
+                    .font(.system(size: 15, weight: isSelected ? .bold : .medium))
+                Text(isCurrent ? "本周" : "周")
+                    .font(.system(size: 8))
+                    .opacity(0.8)
+            }
+            .frame(width: 40, height: 40)
+            .background(
+                isSelected ? AnyShapeStyle(Color.accentColor)
+                           : AnyShapeStyle(Color(.secondarySystemGroupedBackground)),
+                in: .rect(cornerRadius: 10)
+            )
+            .foregroundStyle(isSelected ? .white : .primary)
+            .overlay(alignment: .topTrailing) {
+                if isCurrent && !isSelected {
+                    Circle().fill(.green).frame(width: 6, height: 6).padding(3)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: 空状态
@@ -193,7 +271,7 @@ struct ScheduleView: View {
     /// 按 (星期, 节次) 归并，一格里可能压着好几门分周上的课
     private var cells: [(slot: ScheduleSlot, extra: Int)] {
         guard let bundle else { return [] }
-        let groups = Dictionary(grouping: bundle.slots) { "\($0.weekday)-\($0.startPeriod)" }
+        let groups = Dictionary(grouping: visibleSlots) { "\($0.weekday)-\($0.startPeriod)" }
         return groups.values
             .compactMap { slots -> (ScheduleSlot, Int)? in
                 guard let first = slots.first else { return nil }
@@ -216,6 +294,12 @@ struct ScheduleView: View {
             // 1. 学期（选课接口里带着，不用额外请求）
             let initData = try await APIClient.shared.electiveInit()
             let xnxq = initData.xkxnxq ?? "2026-2027-1"
+
+            // 当前教学周：默认停在这一周
+            if let w = try? await APIClient.shared.currentTeachingWeek(), w > 0 {
+                currentWeek = w
+                if !didPickWeek { selectedWeek = w; didPickWeek = true }
+            }
 
             // 2. xhid（课表页里的隐藏字段）
             let xhid = try await APIClient.shared.scheduleXhid(xnxq: xnxq)

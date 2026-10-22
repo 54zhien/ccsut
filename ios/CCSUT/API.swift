@@ -192,6 +192,13 @@ extension APIClient {
         return try await decode(send(req))
     }
 
+    /// 当前教学周（校历接口，实测返回 {"xlzc":"7"}）
+    func currentTeachingWeek() async throws -> Int {
+        struct WeekInfo: Decodable { let xlzc: String? }
+        let info: WeekInfo = try await get("/admin/api/getXlzc")
+        return Int(info.xlzc ?? "") ?? 1
+    }
+
     /// 校历周次
     func calendarWeeks() async throws -> [String] {
         let data = try await getRaw("/admin/api/getZclistByXnxq", query: [])
