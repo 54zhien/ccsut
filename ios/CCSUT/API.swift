@@ -43,8 +43,20 @@ final class APIClient {
 
     private init() {
         let cfg = URLSessionConfiguration.default
-        cfg.httpCookieStorage = HTTPCookieStorage.shared
-        cfg.httpShouldSetCookies = true
+
+        // 关键：关掉 URLSession 自带的 Cookie 管理。
+        //
+        // httpShouldSetCookies = true 时，URLSession 会用 HTTPCookieStorage
+        // 里的 Cookie 覆盖手写的 Cookie header。而 WebView 同步过来的那批
+        // Cookie 只有 3 条能被 HTTPCookieStorage 接受（JSESSIONID/route/uid），
+        // jw_uf、puid、username 全部被丢弃。
+        //
+        // 结果是 listV2 靠 JSESSIONID 能过，listjxbDataV2 因为缺 jw_uf 返回空。
+        // 所以这里彻底关掉自动管理，Cookie 完全由 CookieJar 手写，
+        // Set-Cookie 也由 send() 手动解析。
+        cfg.httpShouldSetCookies = false
+        cfg.httpCookieStorage = nil
+
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
         cfg.timeoutIntervalForRequest = 20
         session = URLSession(configuration: cfg)

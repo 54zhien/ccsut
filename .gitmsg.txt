@@ -1,10 +1,13 @@
-﻿fix(ios): 轮到认证 Cookie 才结束等待，消除误报
+﻿fix(ios): 关闭 URLSession 自动 Cookie 管理 —— 选课页空白的真凶
 
-现象：登录能成功，但中途会闪一下「只拿到会话 Cookie」。
+URLSessionConfiguration.httpShouldSetCookies 为 true 时，
+URLSession 会用 HTTPCookieStorage 里的 Cookie 覆盖手写的 Cookie header。
 
-原因：adoptCookies 的轮询以「拿到任意一条 Cookie」为结束条件，
-而打开 CAS 登录页的瞬间就会产生一条 JSESSIONID，
-此时立刻跳出循环，随后的认证检查必然失败。
+而 WebView 同步过去的 12 条里，HTTPCookieStorage 只接受了 3 条
+（JSESSIONID / route / uid），jw_uf、puid、username 全被丢弃。
 
-改为等到 jw_uf / puid / username 任一个出现（最多 6 秒），
-并把 finish 改成重试 3 次，文案简化为「登录没有完成，请再试一次」。
+于是 listV2 靠 JSESSIONID 能成功，
+listjxbDataV2 因为缺 jw_uf 只回 mysksjd、不回 initData —— 选课页 0 门。
+
+改为 httpShouldSetCookies = false、httpCookieStorage = nil，
+Cookie 完全由 CookieJar 手写，Set-Cookie 由 send() 手动解析。
