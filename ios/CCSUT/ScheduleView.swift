@@ -285,7 +285,9 @@ struct ScheduleView: View {
     /// 按 (星期, 大节) 归并
     private var cells: [(slot: ScheduleSlot, extra: Int)] {
         guard let bundle else { return [] }
-        let groups = Dictionary(grouping: bundle.slots) {
+        // 必须用 visibleSlots（已按 selectedWeek 过滤），
+        // 否则 18 周的课会全部叠在同一格
+        let groups = Dictionary(grouping: visibleSlots) {
             "\($0.weekday)-\($0.bigSection)"
         }
         return groups.values

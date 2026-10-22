@@ -54,6 +54,12 @@ struct ElectiveView: View {
                             Button("刷新") { Task { await load(force: true) } }
                         }
 
+                        Text("若显示 0 门，可能是本学期选课名额已满或批次已关闭")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+
                         if !batchLog.isEmpty {
                             VStack(alignment: .leading, spacing: 3) {
                                 ForEach(batchLog, id: \.self) { line in
@@ -178,7 +184,7 @@ struct ElectiveView: View {
                     do {
                         let page = try await APIClient.shared.teachingClasses(batch: (pcid, pcenc))
                         let n = page.initData?.count ?? 0
-                        log.append("\(pcid.prefix(8))… → \(n) 门")
+                        log.append("\(pcid.prefix(8))… enc\(pcenc.count)字 → \(n) 门")
                         for item in page.initData ?? [] where !seen.contains(item.id) {
                             seen.insert(item.id)
                             merged.append(item)
