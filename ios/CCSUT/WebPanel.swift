@@ -113,7 +113,7 @@ extension WKWebView {
                 body,
                 arguments: arguments,
                 in: nil,
-                contentWorld: .page
+                in: .page
             ) { result in
                 switch result {
                 case .success(let value): cont.resume(returning: value)
