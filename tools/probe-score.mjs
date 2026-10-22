@@ -53,8 +53,11 @@ async function req(path, { method = "GET", form = null, base = "https://tls.ccsu
 // ---------- 0. 会话是否活着 ----------
 
 const probe = await req("/admin/");
-const alive = probe.s === 302 && !probe.loc.includes("login");
-console.log(`会话检查  /admin/  ${probe.s} ${probe.loc.slice(0, 60)}`);
+// 注意：成功跳转的 URL 里 sfkqcas 参数编码了 cas/login，
+// 不能简单用 includes("login") 判断，否则必然误判
+const isLoginRedirect = /\/admin\/login|loginFailPage/.test(probe.loc);
+const alive = probe.s === 302 && !isLoginRedirect;
+console.log(`会话检查  /admin/  ${probe.s} ${isLoginRedirect ? "→ 登录页" : "→ " + probe.loc.slice(0, 48)}`);
 if (!alive) {
   console.error("\n✗ 会话已失效。先跑一次：node tools/capture.mjs");
   process.exit(2);
