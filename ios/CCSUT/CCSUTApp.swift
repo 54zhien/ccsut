@@ -139,31 +139,7 @@ struct ProfileView: View {
                     .padding(.vertical, 4)
                 }
 
-                Section("会话") {
-                    LabeledContent("状态") {
-                        Text(statusText)
-                            .foregroundStyle(session.phase == .loggedIn ? .green : .secondary)
-                    }
-                    LabeledContent("凭证") {
-                        Text(session.cookieSummary)
-                            .font(.caption.monospaced())
-                            .lineLimit(2)
-                            .multilineTextAlignment(.trailing)
-                    }
-                    if let days = session.tgcRemainingDays {
-                        LabeledContent("TGC 剩余") {
-                            Text("\(days, format: .number.precision(.fractionLength(1))) 天")
-                                .monospacedDigit()
-                        }
-                    }
-
-                    Button("立即续期") {
-                        Task { await session.refresh() }
-                    }
-                    .disabled(session.phase == .refreshing)
-                }
-
-                Section("教务") {
+                Section {
                     Button {
                         showScore = true
                     } label: {
@@ -187,7 +163,7 @@ struct ProfileView: View {
                     Task { await session.logout() }
                 }
             } message: {
-                Text("会清除本地保存的凭证，下次需要重新输入账号密码。")
+                Text("下次打开需要重新登录。")
             }
         }
     }
@@ -197,12 +173,4 @@ struct ProfileView: View {
         return String(first)
     }
 
-    private var statusText: String {
-        switch session.phase {
-        case .checking: return "检查中"
-        case .loggedOut: return "未登录"
-        case .loggedIn: return "正常"
-        case .refreshing: return "续期中"
-        }
-    }
 }

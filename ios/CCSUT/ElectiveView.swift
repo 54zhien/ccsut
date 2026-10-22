@@ -49,42 +49,12 @@ struct ElectiveView: View {
                             .buttonStyle(.borderedProminent)
                     }
                 } else if classes.isEmpty {
-                    VStack(spacing: 16) {
-                        ContentUnavailableView {
-                            Label("当前没有可选课程", systemImage: "tray")
-                        } description: {
-                            Text(initData.map { "选课学期 \($0.xkxnxq ?? "—")" } ?? "")
-                        } actions: {
-                            Button("刷新") { Task { await load(force: true) } }
-                        }
-
-                        Text("若显示 0 门，可能是本学期选课名额已满或批次已关闭")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Cookie \(cookieCount) 条：\(cookieNames)")
-                                .font(.caption2.monospaced())
-                                .lineLimit(3)
-                            ForEach(batchLog, id: \.self) { line in
-                                Text(line).font(.caption2.monospaced())
-                            }
-                            if !rawSnippet.isEmpty {
-                                Text("原始响应：")
-                                    .font(.caption2.monospaced())
-                                    .padding(.top, 2)
-                                Text(rawSnippet)
-                                    .font(.system(size: 9, design: .monospaced))
-                                    .lineLimit(8)
-                            }
-                        }
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 10))
-                        .padding(.horizontal, 20)
+                    ContentUnavailableView {
+                        Label("当前没有可选课程", systemImage: "tray")
+                    } description: {
+                        Text(initData.map { "选课学期 \($0.xkxnxq ?? "—")" } ?? "")
+                    } actions: {
+                        Button("刷新") { Task { await load(force: true) } }
                     }
                 } else {
                     list
@@ -248,16 +218,6 @@ struct ElectiveView: View {
             batchLog = log
             cookieCount = CookieJar.shared.count
             cookieNames = CookieJar.names.joined(separator: ",")
-
-            if merged.isEmpty {
-                // 拉一次原始响应，看看服务端到底回了什么
-                if let first = initData.pcencs?.first {
-                    rawSnippet = (try? await APIClient.shared.teachingClassesRaw(batch: (first.key, first.value))) ?? "<请求失败>"
-                } else {
-                    rawSnippet = (try? await APIClient.shared.electiveInitRaw()) ?? "<请求失败>"
-                }
-                if rawSnippet.count > 400 { rawSnippet = String(rawSnippet.prefix(400)) + "…" }
-            }
 
             if merged.isEmpty, let lastError { throw lastError }
 

@@ -33,7 +33,6 @@ struct LoginView: View {
                     brand
                     formCard
                     qrRow
-                    footer
                 }
                 .padding(.horizontal, 22)
                 .padding(.bottom, 40)
@@ -132,10 +131,6 @@ struct LoginView: View {
             .buttonStyle(.plain)
             .disabled(!canLogin)
             .padding(.top, 4)
-
-            Text("登录只需要一条短信，不需要密码")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.7))
         }
         .padding(20)
         .glassCard(radius: 26)
@@ -179,12 +174,6 @@ struct LoginView: View {
                 .foregroundStyle(.white)
         }
         .buttonStyle(.plain)
-    }
-
-    private var footer: some View {
-        Text("登录后状态保持 14 天，到期自动续期")
-            .font(.caption2)
-            .foregroundStyle(.white.opacity(0.7))
     }
 
     // MARK: 背景
