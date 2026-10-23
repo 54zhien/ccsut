@@ -74,6 +74,7 @@ struct LoginView: View {
         .onDisappear {
             timer?.cancel()
             loginTimeout?.cancel()
+            pendingFinish = false
             operationID = UUID()
         }
         .onChange(of: nav.currentURL) { _, url in
@@ -82,7 +83,9 @@ struct LoginView: View {
         }
         .onChange(of: nav.lastError) { _, err in
             if let err, busy != .done {
+                session.cancelLogin()
                 loginTimeout?.cancel()
+                pendingFinish = false
                 operationID = UUID()
                 hint = err
                 busy = .idle
@@ -431,7 +434,7 @@ struct LoginView: View {
         isFinishing = true
         defer {
             isFinishing = false
-            if pendingFinish, busy != .done {
+            if pendingFinish, busy != .done, session.phase == .loggedOut {
                 pendingFinish = false
                 Task { await finish() }
             }
@@ -459,6 +462,7 @@ struct LoginView: View {
             do { try await Task.sleep(for: .seconds(45)) } catch { return }
             guard operationID == id, busy != .done else { return }
             session.cancelLogin()
+            pendingFinish = false
             operationID = UUID()
             busy = .idle
             hint = "认证请求超时，请重试或使用网页登录"

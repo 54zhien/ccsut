@@ -421,12 +421,17 @@ final class SessionStore {
         CookieJar.commit(generation: generation)
         phase = .loggedIn
         lastError = nil
-        Task { await loadProfile() }
+        Task {
+            guard CookieJar.generation == generation, !isLoggingOut else { return }
+            await loadProfile()
+        }
         return CookieJar.generation == generation && !Task.isCancelled
     }
 
     /// 顺手把姓名学号读出来（/admin/xsd/xk/listV2 里有）
     func loadProfile() async {
+        guard !isLoggingOut, phase == .loggedIn || phase == .refreshing,
+              !CookieJar.shared.isEmpty else { return }
         let generation = CookieJar.generation
         // 先用缓存顶上，避免冷启动时「我的」页空白
         if studentName == nil { studentName = UserDefaults.standard.string(forKey: nameKey) }

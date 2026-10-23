@@ -111,6 +111,13 @@ struct SessionRegressionTests {
         check(afterFailure?.first(where: { $0.name == "jw_uf" })?.value == "previous",
               "unverified WebKit credentials do not overwrite Keychain")
 
+        SchoolProtocol.response = { (200, $0.url!, ["Set-Cookie": "jw_uf=verified; Path=/; Secure; HttpOnly"],
+                                     "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}") }
+        let validAdoption = SessionStore(api: api)
+        check(await validAdoption.adoptCookies(), "verified WebKit adoption succeeds")
+        check(CookieJar.header(for: "tls.ccsut.cn") == "jw_uf=verified",
+              "successful adoption keeps the probe's rotated Cookie")
+
         CookieJar.shared = [cookie("jw_uf", "old"), cookie("TGC", "fixture-tgc", domain: "auth.ccsut.cn")]
         var offlineRequests = 0
         SchoolProtocol.response = { _ in offlineRequests += 1; throw URLError(.timedOut) }
@@ -182,6 +189,11 @@ struct SessionRegressionTests {
         await loggedOut.logout()
         check(CookieJar.shared.isEmpty, "logout clears the authoritative Cookie jar")
         check(Keychain.load("ccsut.cookies.v2") == nil, "logout removes persisted credentials")
+        await loggedOut.loadProfile()
+        check(loggedOut.lastError == nil && loggedOut.studentName == nil && loggedOut.studentId == nil,
+              "late profile work cannot repopulate logged-out state")
+        check(((try? await WebStore.dataStore.httpCookieStore.cookieSnapshot()) ?? []).isEmpty,
+              "logout exposes a fresh empty WebKit Cookie store")
 
         do {
             let _: Int = try await CookieCallback.wait(timeout: .milliseconds(10)) { _ in }
