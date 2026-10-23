@@ -10,6 +10,8 @@
 		A0000000000000000000000A /* CCSUTApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000A /* CCSUTApp.swift */; };
 		A0000000000000000000000B /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000B /* Session.swift */; };
 		A0000000000000000000000C /* API.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000C /* API.swift */; };
+		A00000000000000000000018 /* EcardAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000019 /* EcardAPI.swift */; };
+		A00000000000000000000019 /* EcardTokenBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001A /* EcardTokenBridge.swift */; };
 		A0000000000000000000000D /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000D /* Models.swift */; };
 		A0000000000000000000000E /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000E /* LoginView.swift */; };
 		A0000000000000000000000F /* ScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000F /* ScheduleView.swift */; };
@@ -27,6 +29,8 @@
 		B0000000000000000000000A /* CCSUTApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCSUTApp.swift; sourceTree = "<group>"; };
 		B0000000000000000000000B /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		B0000000000000000000000C /* API.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = API.swift; sourceTree = "<group>"; };
+		B00000000000000000000019 /* EcardAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardAPI.swift; sourceTree = "<group>"; };
+		B0000000000000000000001A /* EcardTokenBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardTokenBridge.swift; sourceTree = "<group>"; };
 		B0000000000000000000000D /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		B0000000000000000000000E /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		B0000000000000000000000F /* ScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleView.swift; sourceTree = "<group>"; };
@@ -66,6 +70,8 @@
 				B0000000000000000000000A /* CCSUTApp.swift */,
 				B0000000000000000000000B /* Session.swift */,
 				B0000000000000000000000C /* API.swift */,
+				B00000000000000000000019 /* EcardAPI.swift */,
+				B0000000000000000000001A /* EcardTokenBridge.swift */,
 				B0000000000000000000000D /* Models.swift */,
 				B0000000000000000000000E /* LoginView.swift */,
 				B0000000000000000000000F /* ScheduleView.swift */,
@@ -162,6 +168,8 @@
 				A0000000000000000000000A /* CCSUTApp.swift in Sources */,
 				A0000000000000000000000B /* Session.swift in Sources */,
 				A0000000000000000000000C /* API.swift in Sources */,
+				A00000000000000000000018 /* EcardAPI.swift in Sources */,
+				A00000000000000000000019 /* EcardTokenBridge.swift in Sources */,
 				A0000000000000000000000D /* Models.swift in Sources */,
 				A0000000000000000000000E /* LoginView.swift in Sources */,
 				A0000000000000000000000F /* ScheduleView.swift in Sources */,
