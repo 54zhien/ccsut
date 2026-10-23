@@ -166,273 +166,52 @@ final class PageLoadGate {
 extension View {
     /// Apply directly to the page's vertical ScrollView. SwiftUI owns the
     /// refresh lifecycle, including empty/loading content and return animation.
-    func pageRefreshable(showsRefreshCount: Bool = false, action: @escaping @MainActor () async -> Void) -> some View {
-        modifier(PageRefreshable(showsRefreshCount: showsRefreshCount, action: action))
+    func pageRefreshable(action: @escaping @MainActor () async -> Void) -> some View {
+        modifier(PageRefreshable(action: action))
     }
 }
 
 private struct PageRefreshable: ViewModifier {
-    let showsRefreshCount: Bool
     let action: @MainActor () async -> Void
-#if DEBUG
-    @State private var refreshCount = 0
-    @State private var callbackEntryCount = 0
-    @State private var lastCallbackCancelled = false
-    @State private var scrollDiagnostic = "scrollProbe=waiting"
 
-    private var refreshDiagnostic: String {
-        "implementation=SwiftUI.refreshable; callbackEntered=\(callbackEntryCount); callbackCompleted=\(refreshCount); callbackCancelled=\(lastCallbackCancelled); callbackCount=\(refreshCount); \(scrollDiagnostic)"
-    }
-
-    private var diagnosticsEnabled: Bool {
-        InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh")
-    }
-#endif
-
-    @ViewBuilder
     func body(content: Content) -> some View {
         content
             .scrollBounceBehavior(.always, axes: .vertical)
-            .refreshable {
+            .refreshable { await action() }
+    }
+}
+
 #if DEBUG
-                callbackEntryCount += 1
-                lastCallbackCancelled = Task.isCancelled
-#endif
-                await action()
-#if DEBUG
-                if Task.isCancelled {
-                    lastCallbackCancelled = true
-                    return
-                }
-                refreshCount += 1
-#endif
-            }
-#if DEBUG
-            .background {
-                if diagnosticsEnabled {
-                    PageRefreshRuntimeProbe { scrollDiagnostic = $0 }
-                        .frame(width: 1, height: 1)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-            }
-            .overlay(alignment: .topTrailing) {
+/// Exposes fixture publication to UI tests without observing SwiftUI refresh-task cancellation.
+struct PageRefreshPublicationDiagnostics: View {
+    let count: Int
+
+    var body: some View {
+        Group {
+            if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh") {
                 VStack(alignment: .trailing, spacing: 0) {
-                    if showsRefreshCount && InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh") {
-                        Text("\(refreshCount)").font(.caption2)
-                            .accessibilityIdentifier("academic-refresh-count")
-                    }
-                    if diagnosticsEnabled {
-                        Text(refreshDiagnostic)
-                            .font(.system(size: 1))
-                            .foregroundStyle(.clear)
-                            .frame(width: 1, height: 1)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(refreshDiagnostic)
-                            .accessibilityIdentifier("page-refresh-diagnostic")
-                    }
+                    Text("\(count)")
+                        .font(.system(size: 1))
+                        .foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(count)")
+                        .accessibilityIdentifier("academic-publication-count")
+                    Text("implementation=preview.publish; publicationCount=\(count)")
+                        .font(.system(size: 1))
+                        .foregroundStyle(.clear)
+                        .frame(width: 1, height: 1)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("implementation=preview.publish; publicationCount=\(count)")
+                        .accessibilityIdentifier("page-refresh-diagnostic")
                 }
+                .frame(width: 1, height: 1, alignment: .topTrailing)
                 .allowsHitTesting(false)
             }
-#endif
-    }
-}
-
-#if DEBUG
-/// Read-only preview instrumentation for the native refresh failure. It records
-/// visible scroll-view pan geometry/control state without changing either.
-@MainActor
-private struct PageRefreshRuntimeProbe: UIViewRepresentable {
-    let onDiagnostic: @MainActor (String) -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(onDiagnostic: onDiagnostic) }
-
-    func makeUIView(context: Context) -> AnchorView {
-        let view = AnchorView()
-        view.coordinator = context.coordinator
-        return view
-    }
-
-    func updateUIView(_ view: AnchorView, context: Context) {
-        context.coordinator.onDiagnostic = onDiagnostic
-        view.coordinator = context.coordinator
-        context.coordinator.refreshTargets(from: view)
-    }
-
-    static func dismantleUIView(_ view: AnchorView, coordinator: Coordinator) {
-        coordinator.detach()
-        view.coordinator = nil
-    }
-
-    @MainActor
-    final class AnchorView: UIView {
-        weak var coordinator: Coordinator?
-        override init(frame: CGRect) {
-            super.init(frame: frame)
-            isUserInteractionEnabled = false
-            backgroundColor = .clear
-        }
-        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-        override func didMoveToWindow() { super.didMoveToWindow(); coordinator?.refreshTargets(from: self) }
-        override func didMoveToSuperview() { super.didMoveToSuperview(); coordinator?.refreshTargets(from: self) }
-        override func layoutSubviews() { super.layoutSubviews(); coordinator?.refreshTargets(from: self) }
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        var onDiagnostic: @MainActor (String) -> Void
-        private weak var anchor: AnchorView?
-        private var observed: [ObjectIdentifier: ObservedScrollView] = [:]
-        private var orderedScrollViewIDs: [ObjectIdentifier] = []
-        private var minimumOffsetY: [ObjectIdentifier: CGFloat] = [:]
-        private var minimumAdjustedY: [ObjectIdentifier: CGFloat] = [:]
-        private var minimumPullDepth: [ObjectIdentifier: CGFloat] = [:]
-        private var panEventCount = 0
-        private var lastPublishedDiagnostic: String?
-        private var pendingDiagnostic: String?
-        private var publishScheduled = false
-
-        init(onDiagnostic: @escaping @MainActor (String) -> Void) {
-            self.onDiagnostic = onDiagnostic
-        }
-
-        func refreshTargets(from anchor: AnchorView) {
-            self.anchor = anchor
-            guard let window = anchor.window else {
-                publish("event=attach; window=missing; panEvents=\(panEventCount)")
-                return
-            }
-
-            var scrollViews: [UIScrollView] = []
-            collectScrollViews(in: window, into: &scrollViews)
-            let visible = scrollViews.filter { scrollView in
-                let frame = scrollView.convert(scrollView.bounds, to: window)
-                return !scrollView.isHidden && scrollView.alpha > 0.01
-                    && frame.width >= window.bounds.width * 0.75
-                    && frame.height >= window.bounds.height * 0.4
-            }
-            orderedScrollViewIDs = visible.map { ObjectIdentifier($0) }
-            let identities = Set(orderedScrollViewIDs)
-            for identity in Array(observed.keys) where !identities.contains(identity) || observed[identity]?.scrollView == nil {
-                if let item = observed.removeValue(forKey: identity) {
-                    item.pan?.removeTarget(self, action: #selector(trackPan(_:)))
-                }
-                minimumOffsetY.removeValue(forKey: identity)
-                minimumAdjustedY.removeValue(forKey: identity)
-                minimumPullDepth.removeValue(forKey: identity)
-            }
-            for scrollView in visible {
-                let identity = ObjectIdentifier(scrollView)
-                if observed[identity]?.pan !== scrollView.panGestureRecognizer {
-                    observed[identity]?.pan?.removeTarget(self, action: #selector(trackPan(_:)))
-                    scrollView.panGestureRecognizer.addTarget(self, action: #selector(trackPan(_:)))
-                    observed[identity] = ObservedScrollView(scrollView, pan: scrollView.panGestureRecognizer)
-                }
-            }
-
-            let frames = visible.enumerated().map { index, scrollView in
-                describe(scrollView, index: index, in: window)
-            }
-            publish("event=attach; window=\(Int(window.bounds.width))x\(Int(window.bounds.height)); panEvents=\(panEventCount); scrolls=[\(frames.joined(separator: " | "))]")
-        }
-
-        @objc private func trackPan(_ recognizer: UIPanGestureRecognizer) {
-            guard let item = observed.values.first(where: { $0.pan === recognizer }),
-                  let scrollView = item.scrollView else { return }
-            let identity = ObjectIdentifier(scrollView)
-            sampleMinimum(for: scrollView, identity: identity)
-            switch recognizer.state {
-            case .began:
-                panEventCount += 1
-                publishSnapshot(event: "pan-began", source: scrollView)
-            case .ended, .cancelled, .failed:
-                publishSnapshot(event: "pan-\(String(describing: recognizer.state))", source: scrollView)
-            default:
-                break
-            }
-        }
-
-        private func sampleMinimum(for scrollView: UIScrollView, identity: ObjectIdentifier) {
-            let offsetY = scrollView.contentOffset.y
-            let adjustedY = offsetY + scrollView.adjustedContentInset.top
-            minimumOffsetY[identity] = min(minimumOffsetY[identity] ?? offsetY, offsetY)
-            minimumAdjustedY[identity] = min(minimumAdjustedY[identity] ?? adjustedY, adjustedY)
-            minimumPullDepth[identity] = max(minimumPullDepth[identity] ?? 0, -adjustedY)
-        }
-
-        private func publishSnapshot(event: String, source: UIScrollView) {
-            guard let window = anchor?.window else { return }
-            let sourceID = ObjectIdentifier(source)
-            let sourceIndex = orderedScrollViewIDs.firstIndex(of: sourceID) ?? -1
-            var targets = orderedScrollViewIDs.compactMap { observed[$0]?.scrollView }
-            if !targets.contains(where: { $0 === source }) { targets.append(source) }
-            let details = targets.enumerated().map { index, scrollView in
-                describe(scrollView, index: index, in: window)
-            }
-            publish("event=\(event); source=\(sourceIndex); panEvents=\(panEventCount); scrolls=[\(details.joined(separator: " | "))]")
-        }
-
-        private func describe(_ scrollView: UIScrollView, index: Int, in window: UIWindow) -> String {
-            let identity = ObjectIdentifier(scrollView)
-            let frame = scrollView.convert(scrollView.bounds, to: window)
-            let control = scrollView.refreshControl
-            let minOffset = minimumOffsetY[identity].map { String(format: "%.0f", Double($0)) } ?? "—"
-            let minAdjusted = minimumAdjustedY[identity].map { String(format: "%.0f", Double($0)) } ?? "—"
-            let minPull = minimumPullDepth[identity].map { String(format: "%.0f", Double($0)) } ?? "—"
-            return "#\(index):\(NSStringFromClass(type(of: scrollView))) frame=\(Int(frame.width))x\(Int(frame.height))@\(Int(frame.minX)),\(Int(frame.minY)) contentH=\(Int(scrollView.contentSize.height)) offsetY=\(Int(scrollView.contentOffset.y)) adjustedTop=\(Int(scrollView.adjustedContentInset.top)) minOffsetY=\(minOffset) minAdjustedY=\(minAdjusted) minPull=\(minPull) alwaysBounce=\(scrollView.alwaysBounceVertical) refreshControl=\(control.map { NSStringFromClass(type(of: $0)) } ?? "nil") refreshing=\(control?.isRefreshing ?? false) pan=\(String(describing: scrollView.panGestureRecognizer.state))"
-        }
-
-        private func collectScrollViews(in view: UIView, into result: inout [UIScrollView]) {
-            if let scrollView = view as? UIScrollView { result.append(scrollView) }
-            for child in view.subviews { collectScrollViews(in: child, into: &result) }
-        }
-
-        private func publish(_ message: String) {
-            guard message != pendingDiagnostic, message != lastPublishedDiagnostic else { return }
-            pendingDiagnostic = message
-            guard !publishScheduled else { return }
-            publishScheduled = true
-
-            // UIViewRepresentable lifecycle/layout callbacks can run during a
-            // SwiftUI update. Publish the observed state on the next main-actor
-            // turn so updating the diagnostic @State cannot mutate the view
-            // hierarchy synchronously from that update.
-            Task { @MainActor [weak self] in
-                await Task.yield()
-                guard let self else { return }
-                self.publishScheduled = false
-                guard let diagnostic = self.pendingDiagnostic else { return }
-                self.pendingDiagnostic = nil
-                guard diagnostic != self.lastPublishedDiagnostic else { return }
-                self.lastPublishedDiagnostic = diagnostic
-                self.onDiagnostic(diagnostic)
-            }
-        }
-
-        func detach() {
-            for item in observed.values { item.pan?.removeTarget(self, action: #selector(trackPan(_:))) }
-            observed.removeAll()
-            orderedScrollViewIDs.removeAll()
-            minimumOffsetY.removeAll()
-            minimumAdjustedY.removeAll()
-            minimumPullDepth.removeAll()
-            anchor = nil
-        }
-    }
-
-    @MainActor
-    private final class ObservedScrollView {
-        weak var scrollView: UIScrollView?
-        weak var pan: UIPanGestureRecognizer?
-
-        init(_ scrollView: UIScrollView, pan: UIPanGestureRecognizer) {
-            self.scrollView = scrollView
-            self.pan = pan
         }
     }
 }
 #endif
-
 /// Keep the active native pinned header glass, then hand off at close range.
 /// Keep per-frame geometry outside observation so scrolling does not redraw the list.
 @MainActor @Observable

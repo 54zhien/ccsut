@@ -28,6 +28,9 @@ struct ElectiveView: View {
     @State private var pending: PendingAction?
     @State private var workingId: String?
     @State private var actionMessage: String?
+#if DEBUG
+    @State private var previewPublicationCount = 0
+#endif
 
     private var classes: [TeachingClass] { electiveState.snapshot?.courses ?? [] }
 
@@ -71,12 +74,17 @@ struct ElectiveView: View {
                 .frame(maxWidth: .infinity, minHeight: classes.isEmpty ? viewport.size.height : 0)
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
-            .pageRefreshable(showsRefreshCount: true) { await load(force: true) }
+            .pageRefreshable { await load(force: true) }
             .scrollDismissesKeyboard(.immediately)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
         .academicDetailChrome(title: "选课")
+#if DEBUG
+        .overlay(alignment: .topTrailing) {
+            PageRefreshPublicationDiagnostics(count: previewPublicationCount)
+        }
+#endif
         .task {
             if classes.isEmpty { await load() }
         }
@@ -462,6 +470,7 @@ struct ElectiveView: View {
             guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
             initData = fixtureInit
             onLoaded(snapshot.courses.filter(\.isSelected).count, fixtureInit.xkxnxq ?? "")
+            previewPublicationCount += 1
             return
         }
         #endif

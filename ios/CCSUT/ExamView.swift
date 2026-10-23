@@ -24,6 +24,9 @@ struct ExamView: View {
     @State private var errorText: String?
     @State private var termHeaderTracker = AcademicTermHeaderTracker()
     @State private var referenceDate = Date()
+#if DEBUG
+    @State private var previewPublicationCount = 0
+#endif
 
     var body: some View {
         GeometryReader { viewport in
@@ -57,13 +60,18 @@ struct ExamView: View {
                 .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
-            .pageRefreshable(showsRefreshCount: true) { await load(force: true) }
+            .pageRefreshable { await load(force: true) }
             .coordinateSpace(name: "academic-scroll")
           }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
         .academicDetailChrome(title: "考试")
+#if DEBUG
+        .overlay(alignment: .topTrailing) {
+            PageRefreshPublicationDiagnostics(count: previewPublicationCount)
+        }
+#endif
         .task { if items.isEmpty { await load() } }
         .task {
             guard !InterfacePreview.enabled else { return }
@@ -229,7 +237,9 @@ struct ExamView: View {
             isLoading = true
             defer { isLoading = false }
             try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
             items = InterfacePreview.emptyPage ? [] : InterfacePreview.exams
+            previewPublicationCount += 1
             return
         }
         #endif

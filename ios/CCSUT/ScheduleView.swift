@@ -377,7 +377,6 @@ struct ScheduleView: View {
                 try? await Task.sleep(for: .seconds(30))
                 return
             }
-            if force { previewRefreshCount += 1 }
             bundle = InterfacePreview.schedule
             currentWeek = 7
             selectedWeek = 7
@@ -385,6 +384,7 @@ struct ScheduleView: View {
             referenceDate = ISO8601DateFormatter().date(from: "2026-10-23T09:41:00+08:00")
             if InterfacePreview.page == "course" { detail = cells.first?.courses.first }
             if InterfacePreview.page == "conflict" { choosing = cells.first(where: { $0.courses.count > 1 }) }
+            if force { previewRefreshCount += 1 }
             return
         }
         #endif

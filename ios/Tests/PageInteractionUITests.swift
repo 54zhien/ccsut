@@ -89,13 +89,11 @@ final class PageInteractionUITests: XCTestCase {
         let counter = app.staticTexts["refresh-count"]
         XCTAssertTrue(counter.waitForExistence(timeout: 5))
         XCTAssertEqual(counter.label, "0")
-        logPageRefreshDiagnostic(app, "schedule-before-pull")
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.42))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.86))
         start.press(forDuration: 0.1, thenDragTo: end)
         let refreshed = NSPredicate(format: "label == '1'").evaluate(with: counter) ||
             XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5) == .completed
-        logPageRefreshDiagnostic(app, "schedule-after-pull")
         XCTAssertTrue(refreshed)
         capture(app, "outer-page-refreshed")
         XCTAssertEqual(counter.label, "1")
@@ -213,21 +211,34 @@ final class PageInteractionUITests: XCTestCase {
         for empty in [false, true] {
             for page in ["scores", "exams", "electives"] {
                 let app = launch(page, refresh: true, empty: empty)
-                let counter = app.staticTexts["academic-refresh-count"]
+                let counter = app.staticTexts["academic-publication-count"]
                 XCTAssertTrue(counter.waitForExistence(timeout: 5))
-                XCTAssertEqual(counter.label, "0")
+                XCTAssertTrue(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5) == .completed,
+                              "Wait for the initial snapshot before testing a separate pull refresh")
+                let expectedContent: String
+                switch (page, empty) {
+                case ("scores", true): expectedContent = "暂无成绩"
+                case ("exams", true): expectedContent = "暂无考试安排"
+                case ("electives", true): expectedContent = "当前没有可选课程"
+                case ("scores", false): expectedContent = "高等数学"
+                case ("exams", false): expectedContent = "机械设计基础"
+                default: expectedContent = "工程制图"
+                }
+                let content = app.staticTexts.matching(identifier: expectedContent).firstMatch
+                XCTAssertTrue(content.waitForExistence(timeout: 3))
                 XCTAssertFalse(app.buttons["page-refresh"].exists)
                 XCTAssertFalse(app.buttons["刷新"].exists)
                 logPageRefreshDiagnostic(app, "\(page)-empty-\(empty)-before-pull")
-                // Start over the body text; the right side of a term header
-                // contains the interactive semester menu and can consume the drag.
+                // Drag the body away from the semester menu.
                 let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.35))
                 let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.85))
                 start.press(forDuration: 0.1, thenDragTo: end)
-                let refreshed = XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5) == .completed
+                let refreshed = XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '2'"), evaluatedWith: counter)], timeout: 5) == .completed
                 logPageRefreshDiagnostic(app, "\(page)-empty-\(empty)-after-pull")
-                XCTAssertTrue(refreshed, "\(page) must refresh via its scroll surface even when empty=\(empty)")
+                XCTAssertTrue(refreshed, "\(page) must publish exactly one refreshed snapshot even when empty=\(empty)")
+                XCTAssertTrue(content.waitForExistence(timeout: 3))
                 capture(app, "pull-refresh-\(page)-empty-\(empty)")
+                XCTAssertEqual(counter.label, "2")
                 app.terminate()
             }
         }

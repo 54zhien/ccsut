@@ -24,6 +24,9 @@ struct ScoreView: View {
     @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
     @State private var termHeaderTracker = AcademicTermHeaderTracker()
+#if DEBUG
+    @State private var previewPublicationCount = 0
+#endif
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -65,12 +68,17 @@ struct ScoreView: View {
                     .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
                 }
                 .scrollEdgeEffectStyle(.soft, for: .top)
-                .pageRefreshable(showsRefreshCount: true) { await load(force: true) }
+                .pageRefreshable { await load(force: true) }
                 .coordinateSpace(name: "academic-scroll")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemGroupedBackground))
             .academicDetailChrome(title: "成绩单")
+#if DEBUG
+            .overlay(alignment: .topTrailing) {
+                PageRefreshPublicationDiagnostics(count: previewPublicationCount)
+            }
+#endif
             .task { if items.isEmpty { await load() } }
         }
     }
@@ -238,9 +246,11 @@ struct ScoreView: View {
             isLoading = true
             defer { isLoading = false }
             try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
             let previewItems = InterfacePreview.emptyPage ? [] : InterfacePreview.scores
             items = previewItems
             onLoaded(previewItems)
+            previewPublicationCount += 1
             return
         }
         #endif
