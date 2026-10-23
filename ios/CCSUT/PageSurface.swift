@@ -25,10 +25,21 @@ enum SheetLayout {
 struct SheetSymbolButton: View {
     let symbol: String
     let label: String
+    var symbolSize: CGFloat? = nil
     let action: () -> Void
 
     var body: some View {
-        Button(label, systemImage: symbol, action: action)
+        Button(action: action) {
+            if let symbolSize {
+                // Image bounds, rather than a text baseline, define the center.
+                Image(systemName: symbol)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: symbolSize, height: symbolSize, alignment: .center)
+            } else {
+                Label(label, systemImage: symbol)
+            }
+        }
             .labelStyle(.iconOnly)
             .buttonStyle(.glass)
             .buttonBorderShape(.circle)

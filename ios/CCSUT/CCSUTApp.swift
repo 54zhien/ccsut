@@ -150,7 +150,7 @@ struct MainTabs: View {
                 AcademicView()
             }
         }
-        .tabBarMinimizeBehavior(.onScrollDown)   // iOS 26
+        .tabBarMinimizeBehavior(.never)
     }
 }
 
@@ -173,6 +173,7 @@ struct StudentAvatar: View {
 
 struct AccountButton: View {
     @Environment(\.deviceCornerRadius) private var deviceCornerRadius
+    @ScaledMetric(relativeTo: .body) private var profileSheetHeight: CGFloat = 320
     @State private var isPresented = false
 
     var body: some View {
@@ -186,7 +187,7 @@ struct AccountButton: View {
         .accessibilityLabel("账号")
         .sheet(isPresented: $isPresented) {
             ProfileView()
-                .presentationDetents([.medium])
+                .presentationDetents([.height(profileSheetHeight)])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(SheetLayout.cornerRadius(deviceCornerRadius))
         }

@@ -45,6 +45,8 @@ struct WebLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.deviceCornerRadius) private var deviceCornerRadius
+    @ScaledMetric(relativeTo: .body) private var topSymbolSize: CGFloat = 20
+    @ScaledMetric(relativeTo: .body) private var browserSymbolSize: CGFloat = 24
 
     private let request: LoginSheetRequest?
     private let ownsNavigation: Bool
@@ -107,9 +109,9 @@ struct WebLoginSheet: View {
 
     private var topControls: some View {
         HStack {
-            SheetSymbolButton(symbol: "xmark", label: "关闭网页登录") { dismiss() }
+            SheetSymbolButton(symbol: "xmark", label: "关闭网页登录", symbolSize: topSymbolSize) { dismiss() }
             Spacer()
-            SheetSymbolButton(symbol: "arrow.clockwise", label: "刷新网页", action: refresh)
+            SheetSymbolButton(symbol: "arrow.clockwise", label: "刷新网页", symbolSize: topSymbolSize, action: refresh)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topControlDiameter = $0 }
         .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius, diameter: topControlDiameter))
@@ -117,17 +119,19 @@ struct WebLoginSheet: View {
     }
 
     private var bottomControls: some View {
-        HStack(alignment: .bottom, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             if !status.isEmpty {
                 Text(AppMessages.readable(status))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(12)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, 16)
+                    .frame(height: bottomControlDiameter > 0 ? bottomControlDiameter : nil)
                     .glassEffect(.regular, in: .capsule)
             }
             Spacer(minLength: 0)
-            SheetSymbolButton(symbol: "safari", label: "在 Safari 中打开当前网址", action: openCurrentURLInSafari)
+            SheetSymbolButton(symbol: "safari", label: "在 Safari 中打开当前网址", symbolSize: browserSymbolSize, action: openCurrentURLInSafari)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bottomControlDiameter = $0 }
         }
         .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius, diameter: bottomControlDiameter))

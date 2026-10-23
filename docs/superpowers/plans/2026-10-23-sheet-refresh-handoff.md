@@ -81,3 +81,15 @@ Verified local Nagi source at `9f5cd1a6b2cfa638044a90b5713ad682c8f4b9dc`:
 CCSUT now uses that native bar structure for both roots and all three academic detail pages. The soft edge modifier is attached directly to each vertical ScrollView, rather than an outer geometry wrapper as in 6437f5c. The Search-derived masked material, explicit safe-area height/offset calculations, extra GeometryReader and system-edge suppression are removed. Native edge rendering owns the adaptive blur/gradient; the bar is never conditionally removed or faded with its controls. No solid material background is added.
 
 The existing native large sheet controls, static detail titles/interactive return support, content sizing, refresh lifecycle and pinned semester handoff are unchanged. The source differences establish which Nagi implementation is used; they do not prove that all reported device flashing has been resolved. As requested, validation remains source review, Release compilation and artifact integrity only, with no application tests or device acceptance claim.
+
+### Additional sheet and tab refinements before delivery
+
+Native-chrome commit `6fa3d4ce6a8458b6b3334c52568b69a2f5e32d58` compiled and packaged successfully in https://github.com/54zhien/ccsut/actions/runs/39975451198. It was not delivered: the user added web-control alignment, compact account-sheet and persistent tab-bar requests while packaging was in progress.
+
+- Web authentication status previously used caption text plus 12-point padding, independently of the native Safari button's height. Its glass capsule now uses the measured Safari control height with vertically centered, two-line text.
+- Web close/reload SF Symbols use centered, aspect-preserving 20-point image bounds instead of a text-label baseline. Safari uses 24-point image bounds. Both sizes follow Dynamic Type. Their buttons keep native `.glass`, circular borders, `.large` control sizing and the system foreground color. This is a layout correction; visual/optical centering on the device is not yet accepted.
+- Shared account/course close controls retain their default symbol configuration. Only web controls opt into explicitly centered image bounds.
+- The account sheet uses a 320-point content-height detent scaled with the body text size, replacing `.medium`. Its centered identity group, bottom full-width logout control, native close button and system glass surface remain.
+- The main TabView uses `.tabBarMinimizeBehavior(.never)` so both tabs remain expanded during scrolling.
+
+Apple API references: [symbol image configuration](https://developer.apple.com/documentation/uikit/configuring-and-displaying-symbol-images-in-your-ui), [Image sizing](https://developer.apple.com/documentation/swiftui/image), [never minimize tab bars](https://developer.apple.com/documentation/swiftui/tabbarminimizebehavior/never).
