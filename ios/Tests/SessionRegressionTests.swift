@@ -24,7 +24,9 @@ final class SchoolProtocol: URLProtocol {
 @main
 struct SessionRegressionTests {
     @MainActor static func main() async {
-        URLProtocol.registerClass(SchoolProtocol.self)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SchoolProtocol.self]
+        let api = APIClient(configuration: configuration)
         var failures = 0
         func check(_ condition: Bool, _ name: String) {
             print("\(condition ? "PASS" : "FAIL") \(name)")
@@ -41,7 +43,6 @@ struct SessionRegressionTests {
 
         defer {
             Keychain.delete("ccsut.cookies.v2")
-            URLProtocol.unregisterClass(SchoolProtocol.self)
         }
         CookieJar.shared = [cookie("jw_uf", "expired", expires: Date(timeIntervalSinceNow: -60))]
         check(CookieJar.header(for: "tls.ccsut.cn") == nil, "expired authentication Cookie is never sent")
@@ -57,20 +58,33 @@ struct SessionRegressionTests {
             return (200, req.url!, [:], "{\"ret\":0,\"data\":{\"xsxh\":\"\(sent)\"}}")
         }
         do {
-            let data = try await APIClient.shared.electiveInit()
+            let data = try await api.electiveInit()
             check(data.xsxh == "jw_uf=native-only", "business requests use the authoritative Cookie jar")
         } catch { check(false, "business requests use the authoritative Cookie jar: \(error)") }
 
+        CookieJar.shared = [cookie("jw_uf", "before-redirect")]
+        SchoolProtocol.response = { req in
+            if req.url!.path == "/admin/xsd/xk/listV2" {
+                return (302, req.url!, ["Location": "/redirected", "Set-Cookie": "jw_uf=redirected; Path=/; Secure"], "")
+            }
+            let sent = req.value(forHTTPHeaderField: "Cookie") ?? ""
+            return (200, req.url!, [:], "{\"ret\":0,\"data\":{\"xsxh\":\"\(sent)\"}}")
+        }
+        do {
+            let data = try await api.electiveInit()
+            check(data.xsxh == "jw_uf=redirected", "redirect response rotation is used on the next hop")
+        } catch { check(false, "redirect response rotation is used on the next hop: \(error)") }
+
         SchoolProtocol.response = { (503, $0.url!, [:], "unavailable") }
-        let unavailable = SessionStore()
+        let unavailable = SessionStore(api: api)
         check(!(await unavailable.probe()), "HTTP 503 is not a valid session")
 
         SchoolProtocol.response = { _ in (200, URL(string: "https://auth.ccsut.cn/backstage/cas/login")!, [:], "login form") }
-        let loginPage = SessionStore()
+        let loginPage = SessionStore(api: api)
         check(!(await loginPage.probe()), "CAS login page with HTTP 200 is not a valid session")
 
         SchoolProtocol.response = { _ in throw URLError(.timedOut) }
-        let coldStart = SessionStore()
+        let coldStart = SessionStore(api: api)
         await coldStart.refresh()
         check(coldStart.phase == .loggedOut, "failed renewal exits checking state")
         check(coldStart.lastError != nil, "failed renewal retains a user-visible reason")
@@ -78,12 +92,12 @@ struct SessionRegressionTests {
         CookieJar.shared = [cookie("jw_uf", "old")]
         SchoolProtocol.response = { (200, $0.url!, ["Set-Cookie": "jw_uf=rotated; Path=/; Secure; HttpOnly"],
                                      "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}") }
-        _ = try? await APIClient.shared.electiveInit()
+        _ = try? await api.electiveInit()
         let saved = Keychain.load("ccsut.cookies.v2").flatMap { try? JSONDecoder().decode([StoredCookie].self, from: $0) }
         check(saved?.contains(where: { $0.name == "jw_uf" && $0.value == "rotated" }) == true,
               "rotated response Cookie is persisted for the next launch")
 
-        let loggedOut = SessionStore()
+        let loggedOut = SessionStore(api: api)
         await loggedOut.logout()
         check(CookieJar.shared.isEmpty, "logout clears the authoritative Cookie jar")
         check(Keychain.load("ccsut.cookies.v2") == nil, "logout removes persisted credentials")
