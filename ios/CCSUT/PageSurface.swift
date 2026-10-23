@@ -11,15 +11,14 @@ enum AppMessages {
 }
 
 enum SheetLayout {
-    static let controlSize: CGFloat = 44
-
     static func cornerRadius(_ deviceRadius: CGFloat) -> CGFloat {
         deviceRadius > 0 ? deviceRadius : 32
     }
 
     // The circle and the sheet corner share a center: inset + diameter / 2 = radius.
-    static func controlInset(_ deviceRadius: CGFloat) -> CGFloat {
-        max(10, cornerRadius(deviceRadius) - controlSize / 2)
+    static func controlInset(_ deviceRadius: CGFloat, diameter: CGFloat) -> CGFloat {
+        guard diameter > 0 else { return 20 }
+        return max(0, cornerRadius(deviceRadius) - diameter / 2)
     }
 }
 
@@ -29,22 +28,21 @@ struct SheetSymbolButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.body.weight(.medium))
-                .foregroundStyle(.primary)
-                .frame(width: SheetLayout.controlSize, height: SheetLayout.controlSize)
-                .contentShape(.circle)
-        }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: .circle)
-        .tint(nil)
-        .accessibilityLabel(label)
+        Button(label, systemImage: symbol, action: action)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .controlSize(.large)
+            .fixedSize()
+            .foregroundStyle(.primary)
+            .tint(nil)
+            .accessibilityLabel(label)
     }
 }
 
 struct SheetHeader: View {
     @Environment(\.deviceCornerRadius) private var deviceCornerRadius
+    @State private var controlDiameter: CGFloat = 0
     let title: String
     let close: () -> Void
 
@@ -53,13 +51,14 @@ struct SheetHeader: View {
             Spacer()
             SheetSymbolButton(symbol: "xmark", label: "关闭\(title)", action: close)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlDiameter = $0 }
         .overlay {
             Text(title).font(.headline).accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 52)
+                .padding(.horizontal, controlDiameter + 8)
                 .allowsHitTesting(false)
         }
-        .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius))
-        .padding(.top, SheetLayout.controlInset(deviceCornerRadius))
+        .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius, diameter: controlDiameter))
+        .padding(.top, SheetLayout.controlInset(deviceCornerRadius, diameter: controlDiameter))
         .padding(.bottom, 8)
     }
 }

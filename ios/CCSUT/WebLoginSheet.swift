@@ -53,6 +53,8 @@ struct WebLoginSheet: View {
     @State private var nav = WebNavigator()
     @State private var status = ""
     @State private var didPrepare = false
+    @State private var topControlDiameter: CGFloat = 0
+    @State private var bottomControlDiameter: CGFloat = 0
 
     /// LoginView passes its already-running web view and navigator. They are moved
     /// into this sheet only after the source WebPanel has left the main view tree.
@@ -77,7 +79,7 @@ struct WebLoginSheet: View {
                 .overlay(alignment: .top) { topControls }
                 .overlay(alignment: .bottom) {
                     bottomControls
-                        .padding(.bottom, max(SheetLayout.controlInset(deviceCornerRadius), viewport.safeAreaInsets.bottom))
+                        .padding(.bottom, max(SheetLayout.controlInset(deviceCornerRadius, diameter: bottomControlDiameter), viewport.safeAreaInsets.bottom))
                 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -109,12 +111,13 @@ struct WebLoginSheet: View {
             Spacer()
             SheetSymbolButton(symbol: "arrow.clockwise", label: "刷新网页", action: refresh)
         }
-        .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius))
-        .padding(.top, SheetLayout.controlInset(deviceCornerRadius))
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topControlDiameter = $0 }
+        .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius, diameter: topControlDiameter))
+        .padding(.top, SheetLayout.controlInset(deviceCornerRadius, diameter: topControlDiameter))
     }
 
     private var bottomControls: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .bottom, spacing: 12) {
             if !status.isEmpty {
                 Text(AppMessages.readable(status))
                     .font(.caption)
@@ -125,8 +128,9 @@ struct WebLoginSheet: View {
             }
             Spacer(minLength: 0)
             SheetSymbolButton(symbol: "safari", label: "在 Safari 中打开当前网址", action: openCurrentURLInSafari)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bottomControlDiameter = $0 }
         }
-        .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius))
+        .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius, diameter: bottomControlDiameter))
     }
 
     private var currentURL: URL? {

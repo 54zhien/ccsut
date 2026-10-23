@@ -49,3 +49,11 @@ Comparison with the verified local Nagi checkout `9f5cd1a` identifies a porting 
 The follow-up restores Nagi's explicit frame and upward offset, using the local container's safe area and the measured header height for both coverage and mask stops. The blur remains mounted outside label/control opacity. The material itself remains the same adaptive UIKit systemMaterial used by Nagi; this is a gradient alpha mask over that material, not a separately implemented variable-radius Gaussian filter.
 
 This is a correction of the identified source-level layout deviation. Whether it explains the entire reported device appearance remains unverified. No application tests are authorized for this follow-up.
+
+### Additional steering: native button size and permanent mask
+
+The user reported the 44-point sheet circles were too small and explicitly requested the gradient mask remain present. Apple describes 44 points as a minimum hit region, not a prescribed rendered button diameter (https://developer.apple.com/design/human-interface-guidelines/buttons). Shared sheet controls now use native `Button` with an icon-only SF Symbol label, `.buttonStyle(.glass)`, `.buttonBorderShape(.circle)` and `.controlSize(.large)`. The manually assigned frame and symbol font are removed. Header/web inset calculations use the measured native control diameter. Account and timetable course headers share this component; web close, reload and Safari use it as well.
+
+The blur view and gradient mask are unconditionally mounted. Only the title and action content receive the visibility animation. Mask stops depend on container geometry, never scroll offset or header visibility.
+
+Intermediate blur-only commit `cc9975b04bc56e411e15a0358488937e53801d85` compiled and packaged successfully in https://github.com/54zhien/ccsut/actions/runs/39964534410. It was not delivered because the additional button-size request arrived before delivery. The final artifact must include both changes.
