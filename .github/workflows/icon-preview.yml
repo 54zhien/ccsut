@@ -35,6 +35,11 @@ jobs:
       - name: Render native icon appearances
         run: |
           RENDERER="$(xcode-select -p)/Applications/Icon Composer.app/Contents/Executables/ictool"
+          if [ ! -x "$RENDERER" ]; then
+            RENDERER=$(find /Applications -path '*/Icon Composer.app/Contents/Executables/ictool' -type f 2>/dev/null | sort -V | tail -1)
+          fi
+          test -x "$RENDERER"
+          echo "Icon Composer renderer: $RENDERER"
           "$RENDERER" --version
           for APPEARANCE in Default Dark TintedDark; do
             "$RENDERER" ios/CCSUT/AppIcon.icon --export-image \
