@@ -57,3 +57,12 @@ The user reported the 44-point sheet circles were too small and explicitly reque
 The blur view and gradient mask are unconditionally mounted. Only the title and action content receive the visibility animation. Mask stops depend on container geometry, never scroll offset or header visibility.
 
 Intermediate blur-only commit `cc9975b04bc56e411e15a0358488937e53801d85` compiled and packaged successfully in https://github.com/54zhien/ccsut/actions/runs/39964534410. It was not delivered because the additional button-size request arrived before delivery. The final artifact must include both changes.
+
+### Follow-up delivery evidence
+
+- Final production commit: `f0412c844384f03574aad759adae8e9480e8974a`.
+- Release compile/package success: https://github.com/54zhien/ccsut/actions/runs/39965258839.
+- Download: `D:/Codex/CCSUT-deliveries/f0412c8/CCSUT-f0412c8-unsigned.ipa`.
+- Size: 4,564,725 bytes; SHA256: `9f71690e587c98d2a816da82c134229d1d68feda8857f805beb336ea45adfee5`.
+- ZIP integrity, executable, bundle `com.imzhien.ccsut`, minimum iOS 26.0, AppIcon and actual high-refresh Boolean verified.
+- No app/UI/performance tests run; no claim of rendered blur or native button-size acceptance on the physical device.
