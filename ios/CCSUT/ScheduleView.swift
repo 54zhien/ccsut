@@ -81,6 +81,12 @@ struct ScheduleView: View {
             .task {
                 if bundle == nil { await load() }
             }
+            .sheet(item: $detail) { slot in
+                ScheduleDetailSheet(slot: slot)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                    .presentationCornerRadius(26)
+            }
         }
     }
 
@@ -269,6 +275,8 @@ struct ScheduleView: View {
         .padding(6)
         .frame(width: max(0, colWidth - 4), height: h, alignment: .topLeading)
         .background(tint.gradient, in: .rect(cornerRadius: 9))
+        .contentShape(.rect)
+        .onTapGesture { detail = slot }
         .offset(x: x, y: y)
     }
 
