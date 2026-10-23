@@ -55,13 +55,26 @@ def generate():
         })
         for element in elements:
             element = copy.deepcopy(element)
+            # Icon Composer's per-layer fill overrides SVG fill="none" on a
+            # stroked circle. Outline that stroke so its hole remains geometry.
+            for e in element.iter(f"{{{SVG}}}circle"):
+                if e.get("fill") == "none" and e.get("stroke"):
+                    cx, cy, radius, stroke = [float(e.get(k)) for k in ("cx", "cy", "r", "stroke-width")]
+                    outer, inner = radius + stroke / 2, radius - stroke / 2
+                    e.tag = f"{{{SVG}}}path"
+                    e.attrib.clear()
+                    e.set("id", "outlined-outer-border")
+                    e.set("fill", light)
+                    e.set("fill-rule", "evenodd")
+                    e.set("d", f"M {cx-outer},{cy} A {outer},{outer} 0 1 1 {cx+outer},{cy} A {outer},{outer} 0 1 1 {cx-outer},{cy} Z "
+                               f"M {cx-inner},{cy} A {inner},{inner} 0 1 0 {cx+inner},{cy} A {inner},{inner} 0 1 0 {cx-inner},{cy} Z")
             for e in element.iter():
                 if "fill" in e.attrib and e.get("fill") != "none":
                     e.set("fill", light)
                 if "stroke" in e.attrib and e.get("stroke") != "none":
                     e.set("stroke", light)
             root.append(element)
-        derived_paths.extend(e.get("d") for e in root.iter(f"{{{SVG}}}path"))
+        derived_paths.extend(e.get("d") for e in root.iter(f"{{{SVG}}}path") if e.get("id") != "outlined-outer-border")
         ET.ElementTree(root).write(OUTPUT / "Assets" / f"{name}.svg", encoding="utf-8", xml_declaration=True)
         layer = copy.deepcopy(template)
         layer.update({"name": name, "image-name": f"{name}.svg", "opacity": 1,
@@ -72,11 +85,11 @@ def generate():
                       ]})
         group["layers"].append(layer)
     assert sorted(derived_paths) == source_paths, "School seal path geometry was lost or duplicated"
-    # The only original non-path shapes are the outer circle and its two dots.
+    # Preserve the two solid dots; the stroked outer circle is now an annulus.
     assert sum(len(list(ET.parse(OUTPUT / "Assets" / f"{n}.svg").getroot().iter(f"{{{SVG}}}circle")))
-               for n, *_ in layers) == 3
+               for n, *_ in layers) == 2
     (OUTPUT / "icon.json").write_bytes((json.dumps(config, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
-    print(f"Preserved {len(source_paths)} outlined paths and three circles in five vector layers")
+    print(f"Preserved {len(source_paths)} outlined paths, two dots and the equivalent outer annulus in five vector layers")
 
 
 if __name__ == "__main__":
