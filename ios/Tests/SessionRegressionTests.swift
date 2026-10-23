@@ -65,7 +65,7 @@ struct SessionRegressionTests {
         let unavailable = SessionStore()
         check(!(await unavailable.probe()), "HTTP 503 is not a valid session")
 
-        SchoolProtocol.response = { (200, URL(string: "https://auth.ccsut.cn/backstage/cas/login")!, [:], "login form") }
+        SchoolProtocol.response = { _ in (200, URL(string: "https://auth.ccsut.cn/backstage/cas/login")!, [:], "login form") }
         let loginPage = SessionStore()
         check(!(await loginPage.probe()), "CAS login page with HTTP 200 is not a valid session")
 
