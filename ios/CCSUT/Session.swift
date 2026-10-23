@@ -485,6 +485,8 @@ final class SessionStore {
         refreshTask?.cancel()
         adoptionTask?.cancel()
         CookieJar.shared = []
+        // 一卡通缴费凭证随会话一起失效，避免切换账号后沿用上一个人的 token
+        EcardTokenBridge.clearCachedToken()
         Keychain.delete(cookieKey)
         UserDefaults.standard.removeObject(forKey: nameKey)
         UserDefaults.standard.removeObject(forKey: sidKey)

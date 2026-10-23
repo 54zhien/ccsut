@@ -185,15 +185,17 @@ struct ThirdDataMap: Decodable {
         let required = ["house_id", "house_no", "meter_id", "meter_no", "customer_name", "sno"]
         guard let detail else { return required }
         return required.filter { key in
-            guard let value = detail[key]?.stringValue else { return true }
-            return value.isEmpty
+            guard let value = detail[key]?.stringValue, !value.isEmpty else { return true }
+            return value == "null"
         }
     }
 
     var meterContext: MeterContext? {
         guard let d = detail else { return nil }
+        // 实测服务端要求这些字段原样回传 —— 包括字符串 "null"（如 sysId），
+        // 所以这里只把「空串」当缺失，不再把 "null" 转成 nil。
         func v(_ k: String) -> String? {
-            guard let s = d[k]?.stringValue, !s.isEmpty, s != "null" else { return nil }
+            guard let s = d[k]?.stringValue, !s.isEmpty else { return nil }
             return s
         }
         return MeterContext(
@@ -431,7 +433,8 @@ struct PayResultEnvelope: Decodable {
 enum RechargeOutcome {
     /// 订单状态已明确为已完成
     case completed(orderID: String)
-    /// 支付已提交，但还没拿到订单完成状态 —— UI 必须显示「结果待确认」
+    /// 支付结果未确认：可能已受理、也可能超时未处理。
+    /// UI 必须显示「结果待确认（订单 xxx）」，禁止引导用户重复缴费。
     case pending(orderID: String)
 
     var orderID: String {
@@ -720,15 +723,36 @@ final class EcardClient {
             throw EcardError.orderRejected("响应里没有订单号")
         }
 
-        guard let channel = order.payList?.first(where: { $0.isInternalBalance }) else {
-            throw EcardError.paymentChannelUnavailable
+        let balanceChannels = order.payList?.filter { $0.isInternalBalance } ?? []
+        guard !balanceChannels.isEmpty else { throw EcardError.paymentChannelUnavailable }
+
+        // 一次筛出「余额 + 免密 + id/code 完整」，
+        // 不能先取第一个再判免密 —— 第一个要密码、第二个免密时会误拒。
+        guard let channel = balanceChannels.first(where: {
+            $0.isPasswordFree && $0.id != nil && $0.code != nil
+        }) else {
+            throw EcardError.passwordRequired
         }
-        guard channel.isPasswordFree else { throw EcardError.passwordRequired }
         guard let payTypeID = channel.id, let payTypeCode = channel.code else {
             throw EcardError.paymentChannelUnavailable
         }
 
-        _ = try await pay(orderID: orderID, payTypeID: payTypeID, payTypeCode: payTypeCode)
+        do {
+            _ = try await pay(orderID: orderID, payTypeID: payTypeID, payTypeCode: payTypeCode)
+        } catch let error as EcardError {
+            switch error {
+            case .transport, .http:
+                // 支付可能已被服务端处理（超时 / 网关 5xx）。
+                // 先查单；查不到也把订单号交给 UI 显示「结果待确认」，
+                // 绝不直接抛错，否则用户会再缴一次。
+                if let status = try? await orderStatus(orderID: orderID), status == 1 {
+                    return .completed(orderID: orderID)
+                }
+                return .pending(orderID: orderID)
+            default:
+                throw error
+            }
+        }
 
         // 只有订单状态明确为「已完成」才算成功
         if let status = try? await orderStatus(orderID: orderID), status == 1 {
