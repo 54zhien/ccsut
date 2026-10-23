@@ -45,6 +45,9 @@ struct ScoreView: View {
                             Text("这学期还没出成绩，或者还没完成评教。")
                         }
                     } else {
+                        if let errorText {
+                            PageStatusNotice(message: errorText) { Task { await load(force: true) } }
+                        }
                         content
                     }
                 }
@@ -183,19 +186,24 @@ struct ScoreView: View {
         isLoading = true
         errorText = nil
         defer { isLoading = false }
-
+        let generation = CookieJar.generation
         do {
             let list = try await APIClient.shared.scoreList()
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
             items = list
         } catch let e as APIError {
+            guard CookieJar.generation == generation else { return }
             if case .notLoggedIn = e {
                 await session.refresh()
-                errorText = "会话过期，已尝试续期，请下拉刷新"
+                guard CookieJar.generation == generation else { return }
+                errorText = items.isEmpty ? "会话需要更新，请重试。" : "会话需要更新，请重试。原有成绩已保留。"
             } else {
-                errorText = e.localizedDescription
+                errorText = items.isEmpty ? e.localizedDescription : "成绩更新失败，当前显示上次加载的结果"
             }
         } catch {
-            errorText = error.localizedDescription
+            if CookieJar.generation == generation, !(error is CancellationError) {
+                errorText = items.isEmpty ? AppMessages.loadFailure : "成绩更新失败，当前显示上次加载的结果"
+            }
         }
     }
 }

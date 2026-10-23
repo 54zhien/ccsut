@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ScheduleView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.deviceCornerRadius) private var deviceCornerRadius
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -16,6 +17,10 @@ struct ScheduleView: View {
     @State private var weekUnavailable = false
     @State private var didPickWeek = false
     @State private var referenceDate: Date?
+    @State private var weekSnapshot: TeachingWeekSnapshot?
+    @State private var verifiedAccount: String?
+    @State private var bundleGeneration: UInt64?
+    @State private var calendarCheckedAt = Date()
     @State private var detail: ScheduleSlot?
     @State private var choosing: ScheduleCell?
     @State private var pendingDetail: ScheduleSlot?
@@ -35,6 +40,9 @@ struct ScheduleView: View {
                         VStack(spacing: 0) {
                             if let bundle, !bundle.isEmpty {
                                 VStack(spacing: 16) {
+                                    if let errorText {
+                                        PageStatusNotice(message: errorText) { Task { await load(force: true) } }
+                                    }
                                     weekBar().id("page-top")
                                     VStack(spacing: 8) {
                                         termSummary
@@ -103,6 +111,16 @@ struct ScheduleView: View {
                 AccountButton()
             }
             .task { if bundle == nil { await load() } }
+            .task {
+                guard !InterfacePreview.enabled else { return }
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                    if scenePhase == .active { await updateCalendar() }
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await updateCalendar(refresh: true) } }
+            }
             .overlay(alignment: .bottomTrailing) {
                 if InterfacePreview.page == "interactions" {
                     VStack {
@@ -371,46 +389,102 @@ struct ScheduleView: View {
         isLoading = true
         errorText = nil
         defer { isLoading = false }
+        let generation = CookieJar.generation
+        if let bundleGeneration, bundleGeneration != generation { clearAccountData() }
         do {
-            let initData = try await APIClient.shared.electiveInit()
-            let term = initData.xkxnxq ?? "2026-2027-1"
+            let context = try await APIClient.shared.timetableContext()
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            let term = context.term
             if let previousTerm = bundle?.title, previousTerm != term {
                 currentWeek = nil
                 referenceDate = nil
+                weekSnapshot = nil
+                weekUnavailable = true
                 didPickWeek = false
+                selectedWeek = 1
             }
-            let account = UserDefaults.standard.string(forKey: "ccsut.lastAccount") ?? session.studentId ?? ""
+            let profile = try await APIClient.shared.authenticatedProfile()
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            guard let account = profile.xsxh?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !account.isEmpty else { throw APIError.notLoggedIn }
+            if let verifiedAccount, verifiedAccount != account { clearAccountData() }
             let cacheKey = "ccsut.teachingWeek.v1"
-            let now = Date()
+            var candidate: TeachingWeekSnapshot?
             if let data = UserDefaults.standard.data(forKey: cacheKey),
                let saved = try? JSONDecoder().decode(TeachingWeekSnapshot.self, from: data),
-               let week = saved.week(on: now, term: term, account: account) {
-                applyCurrentWeek(week, at: now)
+               saved.week(on: Date(), term: term, account: account) != nil {
+                candidate = saved
             }
             do {
                 let week = try await APIClient.shared.currentTeachingWeek()
-                applyCurrentWeek(week, at: now)
-                let saved = TeachingWeekSnapshot(term: term, account: account, week: week, verifiedAt: now)
-                if let data = try? JSONEncoder().encode(saved) { UserDefaults.standard.set(data, forKey: cacheKey) }
+                guard CookieJar.generation == generation, !Task.isCancelled else { return }
+                candidate = TeachingWeekSnapshot(term: term, account: account, week: week, verifiedAt: Date())
             } catch {
-                weekUnavailable = currentWeek == nil
+                if error is CancellationError { throw error }
+                if let apiError = error as? APIError, case .notLoggedIn = apiError { throw error }
             }
-            let xhid = try await APIClient.shared.scheduleXhid(xnxq: term)
-            let items = try await APIClient.shared.scheduleItems(xnxq: term, xhid: xhid)
-            bundle = ScheduleBundle(title: term, slots: items.map(\.slot).filter { !$0.course.isEmpty }, periods: [1, 2, 3, 4])
-        } catch let error as APIError {
-            if case .notLoggedIn = error {
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            let items = try await APIClient.shared.scheduleItems(xnxq: term, xhid: context.studentKey)
+            let slots = try ScheduleValidation.slots(items)
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            bundle = ScheduleBundle(title: term, slots: slots, periods: [1, 2, 3, 4])
+            verifiedAccount = account
+            bundleGeneration = generation
+            weekSnapshot = candidate
+            rebaseCurrentWeek(at: Date())
+            if let candidate, let data = try? JSONEncoder().encode(candidate) {
+                UserDefaults.standard.set(data, forKey: cacheKey)
+            }
+        } catch {
+            guard CookieJar.generation == generation, !(error is CancellationError) else { return }
+            rebaseCurrentWeek(at: Date())
+            if let apiError = error as? APIError, case .notLoggedIn = apiError {
                 await session.refresh()
-                errorText = "会话过期，已尝试续期，请下拉刷新"
-            } else { errorText = error.localizedDescription }
-        } catch { errorText = error.localizedDescription }
+                guard CookieJar.generation == generation else { return }
+                errorText = "会话需要更新，请重试。"
+            } else {
+                errorText = bundle == nil ? error.localizedDescription : "课表更新失败，当前显示上次完整的课表，请重试"
+            }
+        }
     }
 
-    private func applyCurrentWeek(_ week: Int, at date: Date) {
+    private func rebaseCurrentWeek(at date: Date) {
+        if let bundleGeneration, bundleGeneration != CookieJar.generation { clearAccountData() }
+        guard let term = bundle?.title, let account = verifiedAccount,
+              let week = weekSnapshot?.week(on: date, term: term, account: account) else {
+            currentWeek = nil
+            referenceDate = nil
+            weekUnavailable = true
+            return
+        }
         currentWeek = week
         referenceDate = date
         weekUnavailable = false
         if !didPickWeek { selectedWeek = week }
+    }
+
+    private func clearAccountData() {
+        bundle = nil
+        bundleGeneration = nil
+        verifiedAccount = nil
+        weekSnapshot = nil
+        currentWeek = nil
+        referenceDate = nil
+        weekUnavailable = true
+        selectedWeek = 1
+        didPickWeek = false
+        detail = nil
+        choosing = nil
+        pendingDetail = nil
+    }
+
+    private func updateCalendar(refresh: Bool = false) async {
+        guard !InterfacePreview.enabled else { return }
+        let now = Date()
+        let changedDay = !calendar.isDate(now, inSameDayAs: calendarCheckedAt)
+        calendarCheckedAt = now
+        rebaseCurrentWeek(at: now)
+        if refresh || changedDay { await load(force: true) }
     }
 
     private static let palette: [Color] = [

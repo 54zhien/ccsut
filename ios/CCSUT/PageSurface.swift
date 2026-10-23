@@ -10,6 +10,27 @@ enum AppMessages {
     }
 }
 
+/// Appears only when existing content could not be refreshed.
+struct PageStatusNotice: View {
+    let message: String
+    var retry: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.circle")
+                .accessibilityHidden(true)
+            Text(message).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            if let retry { Button("重试", action: retry).buttonStyle(.plain).foregroundStyle(.tint) }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .contain)
+    }
+}
+
 enum SheetLayout {
     static func cornerRadius(_ deviceRadius: CGFloat) -> CGFloat {
         deviceRadius > 0 ? deviceRadius : 32

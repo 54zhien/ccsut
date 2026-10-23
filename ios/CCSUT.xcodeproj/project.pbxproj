@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A00000000000000000000020 /* APIResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000020; };
+		A00000000000000000000021 /* AcademicCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000021; };
+		A00000000000000000000022 /* AcademicAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000022; };
+		A00000000000000000000023 /* ElectiveState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000023; };
 		A0000000000000000000001F /* AcademicNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001F; };
 		A0000000000000000000001E /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001E /* AppIcon.icon */; };
 		A0000000000000000000000A /* CCSUTApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000A /* CCSUTApp.swift */; };
@@ -45,6 +49,10 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B00000000000000000000020 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIResponse.swift; sourceTree = "<group>"; };
+		B00000000000000000000021 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcademicCalendar.swift; sourceTree = "<group>"; };
+		B00000000000000000000022 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcademicAPI.swift; sourceTree = "<group>"; };
+		B00000000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElectiveState.swift; sourceTree = "<group>"; };
 		B0000000000000000000001F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcademicNavigation.swift; sourceTree = "<group>"; };
 		B0000000000000000000001E /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		B0000000000000000000000A /* CCSUTApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCSUTApp.swift; sourceTree = "<group>"; };
@@ -113,6 +121,10 @@
 				B00000000000000000000011 /* Assets.xcassets */,
 				B0000000000000000000001E /* AppIcon.icon */,
 				B0000000000000000000001F /* AcademicNavigation.swift */,
+				B00000000000000000000020 /* APIResponse.swift */,
+				B00000000000000000000021 /* AcademicCalendar.swift */,
+				B00000000000000000000022 /* AcademicAPI.swift */,
+				B00000000000000000000023 /* ElectiveState.swift */,
 			);
 			path = CCSUT;
 			sourceTree = "<group>";
@@ -199,6 +211,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				A0000000000000000000001F /* AcademicNavigation.swift in Sources */,
+				A00000000000000000000020 /* APIResponse.swift in Sources */,
+				A00000000000000000000021 /* AcademicCalendar.swift in Sources */,
+				A00000000000000000000022 /* AcademicAPI.swift in Sources */,
+				A00000000000000000000023 /* ElectiveState.swift in Sources */,
 				A0000000000000000000000A /* CCSUTApp.swift in Sources */,
 				A0000000000000000000000B /* Session.swift in Sources */,
 				A0000000000000000000000C /* API.swift in Sources */,

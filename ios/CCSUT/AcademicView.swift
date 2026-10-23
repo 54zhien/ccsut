@@ -3,7 +3,10 @@ import SwiftUI
 /// Stable, independently spaced entry cards; optional reminders follow the entries.
 struct AcademicView: View {
     private enum Destination: Hashable { case scores, exams, electives }
+    @Environment(\.scenePhase) private var scenePhase
     @State private var nextExam: ExamItem?
+    @State private var upcomingError: String?
+    @State private var reminderGeneration: UInt64?
     @State private var loadGate = PageLoadGate()
     @State private var path: [Destination] = []
     @State private var didNavigatePreview = false
@@ -28,6 +31,9 @@ struct AcademicView: View {
                         }
                         .accessibilityIdentifier("academic-electives")
                         if let nextExam {
+                            if let upcomingError {
+                                PageStatusNotice(message: upcomingError) { Task { await loadUpcomingExam() } }
+                            }
                             NavigationLink(value: Destination.exams) { upcomingCard(nextExam) }
                                 .padding(.top, 8)
                         }
@@ -69,6 +75,19 @@ struct AcademicView: View {
                     default: break
                     }
                 }
+            }
+            .task {
+                guard !InterfacePreview.enabled else { return }
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                    if scenePhase == .active, let date = nextExam?.startDate, date < Date() {
+                        nextExam = nil
+                        await loadUpcomingExam()
+                    }
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await loadUpcomingExam() } }
             }
         }
     }
@@ -127,18 +146,33 @@ struct AcademicView: View {
             return
         }
         #endif
+        let generation = CookieJar.generation
+        if let reminderGeneration, reminderGeneration != generation {
+            nextExam = nil
+            upcomingError = nil
+        }
         do {
-            let info = try await APIClient.shared.electiveInit()
-            guard let term = info.xkxnxq, !term.isEmpty else { return }
-            let exams = try await APIClient.shared.examList(xnxq: term)
+            let context = try await APIClient.shared.timetableContext()
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            let exams = try await APIClient.shared.examList(xnxq: context.term)
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
             let now = Date()
             let limit = now.addingTimeInterval(60 * 86400)
             nextExam = exams.filter {
                 guard let date = $0.startDate else { return false }
                 return date >= now && date <= limit
             }.min { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
+            reminderGeneration = generation
+            upcomingError = nil
         } catch {
             // An optional reminder never prevents access to the full academic pages.
+            guard CookieJar.generation == generation, !(error is CancellationError) else { return }
+            if let date = nextExam?.startDate, date >= Date() {
+                upcomingError = "近期考试暂未更新，当前显示上次记录"
+            } else {
+                nextExam = nil
+                upcomingError = nil
+            }
         }
     }
 }

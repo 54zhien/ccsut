@@ -7,7 +7,9 @@ struct TeachingWeekSnapshot: Codable {
     let verifiedAt: Date
 
     func week(on date: Date, term: String, account: String) -> Int? {
-        guard self.term == term, self.account == account, (1...53).contains(week) else { return nil }
+        guard !account.isEmpty, !term.isEmpty, date >= verifiedAt,
+              date.timeIntervalSince(verifiedAt) <= 28 * 86400,
+              self.term == term, self.account == account, (1...53).contains(week) else { return nil }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
         calendar.firstWeekday = 2

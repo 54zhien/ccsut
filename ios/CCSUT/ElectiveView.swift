@@ -5,7 +5,7 @@
 //  选课 · 教学班浏览
 //
 //  数据来源：/admin/xsd/xk/listjxbDataV2（JSON，实测 71 KB）
-//  本页只做只读浏览与筛选；真正的选课/退课属于写操作，走教务官方页面。
+//  展示教学班并通过官方接口执行选课/退课；写操作只使用已验证的完整快照。
 //
 
 import SwiftUI
@@ -15,10 +15,11 @@ struct ElectiveView: View {
     @Environment(\.deviceCornerRadius) private var deviceCornerRadius
 
     @State private var initData: ElectiveInit?
-    @State private var classes: [TeachingClass] = []
+    @State private var electiveState = ElectiveState<TeachingClass>()
     @State private var keyword = ""
     @State private var selectedFilter: Filter = .all
     @State private var isLoading = false
+    @State private var activeLoadRequests = 0
     @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
     @State private var detail: TeachingClass?
@@ -26,8 +27,7 @@ struct ElectiveView: View {
     @State private var workingId: String?
     @State private var actionMessage: String?
 
-    /// jxbid → pcid，选课/退课时必须带对批次
-    @State private var batchMap: [String: String] = [:]
+    private var classes: [TeachingClass] { electiveState.snapshot?.courses ?? [] }
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "全部"
@@ -60,6 +60,9 @@ struct ElectiveView: View {
                             Text(initData.map { "选课学期 \(SchedulePresentation.termTitle($0.xkxnxq ?? "—"))" } ?? "")
                         }
                     } else {
+                        if let errorText {
+                            PageStatusNotice(message: errorText) { Task { await load(force: true) } }
+                        }
                         list
                     }
                 }
@@ -117,8 +120,9 @@ struct ElectiveView: View {
             ForEach(filtered) { item in
                 ClassCard(
                     item: item,
-                    onAction: { pending = PendingAction(item: item, enrolling: !item.isSelected) },
-                    isWorking: workingId == item.id
+                    onAction: { pending = PendingAction(courseID: item.id, title: item.kcmc, enrolling: !item.isSelected) },
+                    isWorking: workingId == item.id,
+                    canPerformAction: isActionAllowed(for: item)
                 )
                 .contentShape(.rect)
                 .onTapGesture { detail = item }
@@ -139,7 +143,7 @@ struct ElectiveView: View {
             }
             Button("取消", role: .cancel) { pending = nil }
         } message: { action in
-            Text(action.item.kcmc ?? "")
+            Text(action.title ?? "")
         }
         .alert("操作结果", isPresented: Binding(
             get: { actionMessage != nil },
@@ -176,29 +180,158 @@ struct ElectiveView: View {
     /// 执行选课/退课
     private func perform(_ action: PendingAction) async {
         pending = nil
-        guard let pcid = batchMap[action.item.id] else {
-            actionMessage = "找不到这条课程所属的选课批次，请下拉刷新后重试"
+        let generation = CookieJar.generation
+        if let ownerGeneration = electiveState.snapshotGeneration, ownerGeneration != generation {
+            _ = handleCookieGenerationChange(expected: ownerGeneration)
+            actionMessage = "登录账号已切换，旧课程状态已清除；请重新加载后再操作"
+            return
+        }
+        guard !isLoading else {
+            actionMessage = "课程刷新仍在完成，请等待刷新后重新确认"
+            return
+        }
+        let kind: ElectiveActionKind = action.enrolling ? .enroll : .drop
+        let decision = electiveState.beginAction(for: action.courseID, kind: kind, generation: generation)
+        guard case .allowed(let pcid) = decision else {
+            actionMessage = actionBlockMessage(decision)
             return
         }
 
-        workingId = action.item.id
-        defer { workingId = nil }
+        workingId = action.courseID
+        defer {
+            workingId = nil
+            electiveState.finishAction()
+        }
 
         do {
-            let msg = action.enrolling
-                ? try await APIClient.shared.enroll(jxbid: action.item.id, pcid: pcid)
-                : try await APIClient.shared.dropClass(jxbid: action.item.id, pcid: pcid)
-            actionMessage = msg
-            await load(force: true)
-        } catch let e as APIError {
-            if case .business(_, let text) = e {
-                // 服务端把业务限制（超门数、时间冲突、已满）放在 msg 里，直接展示
-                actionMessage = text
-            } else {
-                actionMessage = e.localizedDescription
+            guard !handleCookieGenerationChange(expected: generation) else {
+                actionMessage = "登录状态已切换，操作结果未确认；请先刷新当前账号的课程"
+                return
             }
+            let msg = action.enrolling
+                ? try await APIClient.shared.enroll(jxbid: action.courseID, pcid: pcid,
+                                                    expectedGeneration: generation)
+                : try await APIClient.shared.dropClass(jxbid: action.courseID, pcid: pcid,
+                                                       expectedGeneration: generation)
+            guard !handleCookieGenerationChange(expected: generation) else {
+                actionMessage = "登录状态已切换，操作结果未确认；请先刷新当前账号的课程"
+                return
+            }
+            await load(force: true, reconcileMutation: true, expectedGeneration: generation)
+            guard !handleCookieGenerationChange(expected: generation) else {
+                actionMessage = "登录状态已切换，操作结果未确认；请先刷新当前账号的课程"
+                return
+            }
+            actionMessage = hasVerifiedSnapshot(for: generation) && errorText == nil
+                ? msg
+                : "操作已返回成功，但课程状态刷新失败；请核对页面提示后再操作"
         } catch {
-            actionMessage = error.localizedDescription
+            guard !handleCookieGenerationChange(expected: generation) else {
+                actionMessage = "登录状态已切换，操作结果未确认；旧课程数据已清除"
+                return
+            }
+            if let e = error as? APIError {
+                switch e {
+                case .notLoggedIn:
+                    await renewAuthenticationAndReconcile(expectedGeneration: generation)
+                case .business(_, let text):
+                    if ElectiveMutationRecovery.isAuthenticationRejection(text) {
+                        await renewAuthenticationAndReconcile(expectedGeneration: generation)
+                    } else {
+                        await load(force: true, reconcileMutation: true, expectedGeneration: generation)
+                        guard !handleCookieGenerationChange(expected: generation) else {
+                            actionMessage = "登录状态已切换，旧课程数据已清除"
+                            return
+                        }
+                        actionMessage = text
+                    }
+                default:
+                    await load(force: true, reconcileMutation: true, expectedGeneration: generation)
+                    guard !handleCookieGenerationChange(expected: generation) else {
+                        actionMessage = "登录状态已切换，旧课程数据已清除"
+                        return
+                    }
+                    actionMessage = "提交结果未知，已重新查询课程状态；请核对页面提示后再操作"
+                }
+            } else {
+                await load(force: true, reconcileMutation: true, expectedGeneration: generation)
+                guard !handleCookieGenerationChange(expected: generation) else {
+                    actionMessage = "登录状态已切换，旧课程数据已清除"
+                    return
+                }
+                actionMessage = "提交结果未知，已重新查询课程状态；请核对页面提示后再操作"
+            }
+        }
+    }
+
+    private func renewAuthenticationAndReconcile(expectedGeneration: UInt64) async {
+        await session.refresh()
+        guard !handleCookieGenerationChange(expected: expectedGeneration) else {
+            actionMessage = "登录状态已切换，旧课程数据已清除；请重新加载当前账号"
+            return
+        }
+        await load(force: true, refreshAuthentication: false, reconcileMutation: true,
+                   expectedGeneration: expectedGeneration)
+        guard !handleCookieGenerationChange(expected: expectedGeneration) else {
+            actionMessage = "登录状态已切换，旧课程数据已清除；请重新加载当前账号"
+            return
+        }
+        actionMessage = hasVerifiedSnapshot(for: expectedGeneration)
+            ? "会话已续期并刷新课程，请重新确认选课或退课"
+            : "会话已续期，但课程刷新未成功；当前已禁用操作，请重试"
+    }
+
+    private func hasVerifiedSnapshot(for generation: UInt64) -> Bool {
+        electiveState.isSnapshotVerified && electiveState.snapshotGeneration == generation
+    }
+
+    /// A request from an old cookie generation must never keep or publish its account's data.
+    private func handleCookieGenerationChange(expected: UInt64) -> Bool {
+        let currentGeneration = CookieJar.generation
+        let hasCurrentGenerationSnapshot = electiveState.snapshotGeneration == currentGeneration
+        guard !ElectiveMutationRecovery.canContinueAfterAwait(
+            expectedGeneration: expected,
+            currentGeneration: currentGeneration,
+            state: &electiveState
+        ) else { return false }
+        // A stale continuation must not wipe UI state already loaded for the new account.
+        guard !hasCurrentGenerationSnapshot else { return true }
+        initData = nil
+        pending = nil
+        detail = nil
+        errorText = "登录账号已切换，旧课程数据已清除；请刷新验证当前账号"
+        return true
+    }
+
+    private func isActionAllowed(for item: TeachingClass) -> Bool {
+        guard !isLoading else { return false }
+        let kind: ElectiveActionKind = item.isSelected ? .drop : .enroll
+        if case .allowed = electiveState.actionDecision(for: item.id, kind: kind,
+                                                        generation: CookieJar.generation) { return true }
+        return false
+    }
+
+    private func actionBlockMessage(_ decision: ElectiveActionDecision) -> String {
+        guard case .denied(let reason) = decision else { return "课程状态已变化，请重新确认" }
+        switch reason {
+        case .snapshotUnverified:
+            return "课程数据尚未验证完成，请刷新后再操作"
+        case .courseMissing:
+            return "课程已不在当前列表，请刷新后重新选择"
+        case .missingBatch:
+            return "找不到这条课程所属的选课批次，请下拉刷新后重试"
+        case .ambiguousBatch:
+            return "这条课程出现在多个选课批次，无法确定操作批次；请在教务官方页面操作"
+        case .unavailable:
+            return "该课程当前不可选"
+        case .full:
+            return "该课程名额已满"
+        case .alreadySelected:
+            return "这条课程已选，请刷新后确认状态"
+        case .notSelected:
+            return "这条课程当前未选，无法退课；请刷新后确认状态"
+        case .actionInProgress:
+            return "已有选课或退课操作正在处理，请稍后再试"
         }
     }
 
@@ -259,72 +392,142 @@ struct ElectiveView: View {
 
     // MARK: 加载
 
-    private func load(force: Bool = false) async {
-        await loadGate.run { await fetch(force: force) }
+    private func load(force: Bool = false, refreshAuthentication: Bool = true,
+                      reconcileMutation: Bool = false,
+                      expectedGeneration: UInt64? = nil) async {
+        guard reconcileMutation || !electiveState.isActionInProgress else { return }
+        if let expectedGeneration, handleCookieGenerationChange(expected: expectedGeneration) { return }
+        activeLoadRequests += 1
+        isLoading = true
+        defer {
+            activeLoadRequests -= 1
+            isLoading = activeLoadRequests > 0
+        }
+        await loadGate.run {
+            if let expectedGeneration,
+               handleCookieGenerationChange(expected: expectedGeneration) { return }
+            await fetch(force: force, refreshAuthentication: refreshAuthentication,
+                        expectedGeneration: expectedGeneration)
+        }
     }
 
-    private func fetch(force: Bool) async {
+    private func fetch(force: Bool, refreshAuthentication: Bool,
+                       expectedGeneration: UInt64? = nil) async {
+        let generation = CookieJar.generation
+        if let expectedGeneration, expectedGeneration != generation {
+            _ = handleCookieGenerationChange(expected: expectedGeneration)
+            return
+        }
+        if electiveState.refreshStarted(generation: generation) {
+            initData = nil
+            pending = nil
+            detail = nil
+        }
         #if DEBUG
         if InterfacePreview.enabled {
-            isLoading = true
-            defer { isLoading = false }
             try? await Task.sleep(for: .milliseconds(250))
-            classes = InterfacePreview.emptyPage ? [] : InterfacePreview.classes
+            guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
+            let previewClasses = InterfacePreview.emptyPage ? [] : InterfacePreview.classes
+            var builder = ElectiveSnapshotBuilder<TeachingClass>()
+            builder.append(records(for: previewClasses))
+            electiveState.publish(builder.snapshot, generation: generation)
             initData = InterfacePreview.electiveInit
             return
         }
         #endif
 
-        guard !isLoading else { return }
-        isLoading = true
         errorText = nil
-        defer { isLoading = false }
 
         do {
             let initData = try await APIClient.shared.electiveInit()
-            self.initData = initData
-
+            guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
             // pcencs 里可能有多个选课批次（实测有 2 个：网络课 63 门 + 面授课 75 门）
             // 必须逐个拉、合并去重；只取第一个会漏掉一大半
-            var merged: [TeachingClass] = []
-            var seen = Set<String>()
-            var lastError: Error?
-
-
+            var builder = ElectiveSnapshotBuilder<TeachingClass>()
+            var batchError: Error?
             if let batches = initData.pcencs, !batches.isEmpty {
-                for (pcid, pcenc) in batches {
+                for (pcid, pcenc) in batches.sorted(by: { $0.key < $1.key }) {
+                    guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
+                    let normalizedPCID = pcid.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let normalizedPCENC = pcenc.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !normalizedPCID.isEmpty,
+                          !normalizedPCENC.isEmpty else {
+                        if batchError == nil { batchError = APIError.decoding("选课批次缺少编号或加密串") }
+                        continue
+                    }
                     do {
-                        let page = try await APIClient.shared.teachingClasses(batch: (pcid, pcenc))
-                        let n = page.initData?.count ?? 0
-                        for item in page.initData ?? [] where !seen.contains(item.id) {
-                            seen.insert(item.id)
-                            merged.append(item)
-                            batchMap[item.id] = pcid
-                        }
+                        let page = try await APIClient.shared.teachingClasses(batch: (normalizedPCID, normalizedPCENC))
+                        guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
+                        guard let items = page.initData else { throw APIError.empty }
+                        builder.append(records(for: items), batchID: normalizedPCID)
                     } catch {
-                        lastError = error
+                        guard !handleCookieGenerationChange(expected: generation) else { return }
+                        if error is CancellationError { throw error }
+                        if batchError == nil { batchError = error }
                     }
                 }
+                if let batchError { throw batchError }
             } else {
                 let page = try await APIClient.shared.teachingClasses(batch: nil)
-                merged = page.initData ?? []
+                guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
+                guard let items = page.initData else { throw APIError.empty }
+                builder.append(records(for: items))
             }
 
-
-            if merged.isEmpty, let lastError { throw lastError }
-
-            classes = merged.sorted {
+            let fetched = builder.snapshot
+            let sortedClasses = fetched.courses.sorted {
                 ($0.kcmc ?? "").localizedStandardCompare($1.kcmc ?? "") == .orderedAscending
             }
+            // Course rows and their batch memberships become visible in one verified snapshot.
+            let sortedSnapshot = ElectiveSnapshot(
+                courses: sortedClasses,
+                courseIDs: fetched.courseIDs,
+                batchIDsByCourse: fetched.batchIDsByCourse,
+                actionFactsByCourse: fetched.actionFactsByCourse
+            )
+            guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
+            electiveState.publish(sortedSnapshot, generation: generation)
+            self.initData = initData
         } catch let e as APIError {
+            guard !handleCookieGenerationChange(expected: generation) else { return }
+            if Task.isCancelled {
+                electiveState.refreshFailed()
+                return
+            }
             if case .notLoggedIn = e {
-                await session.refresh()
-                errorText = "会话过期，已尝试自动续期，请下拉刷新"
+                if refreshAuthentication {
+                    await session.refresh()
+                    guard !handleCookieGenerationChange(expected: generation) else { return }
+                    errorText = "会话已失效，已尝试续期；请重试验证课程数据"
+                } else {
+                    errorText = "会话续期后仍无法读取课程数据，请重新登录或重试"
+                }
             } else {
                 errorText = e.localizedDescription
             }
+            electiveState.refreshFailed()
         } catch {
+            guard !handleCookieGenerationChange(expected: generation) else { return }
+            if Task.isCancelled {
+                electiveState.refreshFailed()
+                return
+            }
             errorText = error.localizedDescription
+            electiveState.refreshFailed()
+        }
+    }
+
+    private func records(for items: [TeachingClass]) -> [ElectiveCourseRecord<TeachingClass>] {
+        items.map {
+            ElectiveCourseRecord(
+                id: $0.id,
+                value: $0,
+                actionFacts: ElectiveCourseActionFacts(
+                    isSelected: $0.isSelected,
+                    selectionFlag: $0.sfkxk,
+                    isFull: $0.isFull
+                )
+            )
         }
     }
 }
@@ -333,7 +536,8 @@ struct ElectiveView: View {
 
 struct PendingAction: Identifiable {
     let id = UUID()
-    let item: TeachingClass
+    let courseID: String
+    let title: String?
     let enrolling: Bool
 }
 
@@ -341,6 +545,7 @@ struct ClassCard: View {
     let item: TeachingClass
     var onAction: (() -> Void)? = nil
     var isWorking: Bool = false
+    var canPerformAction: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -415,8 +620,8 @@ struct ClassCard: View {
                         .foregroundStyle(item.isSelected ? Color.red : Color.accentColor)
                     }
                     .buttonStyle(.plain)
-                    .disabled(isWorking || (!item.isSelected && item.isFull))
-                    .opacity((!item.isSelected && item.isFull) ? 0.45 : 1)
+                    .disabled(isWorking || !canPerformAction)
+                    .opacity(canPerformAction || isWorking ? 1 : 0.45)
                 }
             }
             .padding(.top, 2)

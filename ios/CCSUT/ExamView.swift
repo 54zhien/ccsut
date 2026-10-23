@@ -14,22 +14,14 @@ import SwiftUI
 
 struct ExamView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var items: [ExamItem] = []
     @State private var isLoading = false
     @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
-    @State private var loadedTerms: Set<String> = []
     @State private var termHeaderTracker = AcademicTermHeaderTracker()
-
-    /// 从新到旧的学期列表
-    private static let terms = [
-        "2026-2027-1",
-        "2025-2026-2",
-        "2025-2026-1",
-        "2024-2025-2",
-        "2024-2025-1",
-    ]
+    @State private var referenceDate = Date()
 
     var body: some View {
         GeometryReader { viewport in
@@ -53,6 +45,9 @@ struct ExamView: View {
                             Text("这个学期的考试还没排出来。")
                         }
                     } else {
+                        if let errorText {
+                            PageStatusNotice(message: errorText) { Task { await load(force: true) } }
+                        }
                         content
                     }
                 }
@@ -66,6 +61,16 @@ struct ExamView: View {
         .background(Color(.systemGroupedBackground))
         .academicDetailChrome(title: "考试")
         .task { if items.isEmpty { await load() } }
+        .task {
+            guard !InterfacePreview.enabled else { return }
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                if scenePhase == .active { referenceDate = Date() }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { referenceDate = Date() }
+        }
     }
 
     // MARK: 内容
@@ -103,7 +108,7 @@ struct ExamView: View {
 
     /// 即将开始的那场（未来 60 天内最近的一场）
     private var upcoming: [ExamItem] {
-        let now = Date()
+        let now = referenceDate
         let limit = Calendar.current.date(byAdding: .day, value: 60, to: now) ?? now
         return items
             .filter { exam in
@@ -118,10 +123,7 @@ struct ExamView: View {
     }
 
     private var terms: [String] {
-        let keys = Set(grouped.keys)
-        let known = Self.terms.filter { keys.contains($0) }
-        let extra = keys.subtracting(Self.terms).sorted(by: >)
-        return known + extra
+        grouped.keys.sorted(by: >)
     }
 
     // MARK: 置顶卡片
@@ -225,41 +227,22 @@ struct ExamView: View {
         errorText = nil
         defer { isLoading = false }
 
-        var collected: [ExamItem] = []
-        var firstError: Error?
-
-        for term in Self.terms {
-            do {
-                var list = try await APIClient.shared.examList(xnxq: term)
-                // 服务端的 dataXnxq 恒为当前学期，不能用来分组。
-                // 每条记录真正属于哪个学期，只有发起请求的人知道。
-                for i in list.indices { list[i].term = term }
-                collected.append(contentsOf: list)
-            } catch let e as APIError {
-                if case .notLoggedIn = e {
-                    await session.refresh()
-                    errorText = "会话过期，已尝试续期，请下拉刷新"
-                    return
-                }
-                if firstError == nil { firstError = e }
-            } catch {
-                if firstError == nil { firstError = error }
+        let generation = CookieJar.generation
+        do {
+            let terms = try await APIClient.shared.availableExamTerms()
+            let complete = try await ExamSnapshotLoader.load(terms: terms) { term in
+                guard CookieJar.generation == generation else { throw CancellationError() }
+                return try await APIClient.shared.examList(xnxq: term)
             }
-        }
-
-        if collected.isEmpty, let firstError {
-            errorText = firstError.localizedDescription
-            return
-        }
-
-        // 按时间倒序，没有时间的排最后
-        items = collected.sorted { a, b in
-            switch (a.startDate, b.startDate) {
-            case let (x?, y?): return x > y
-            case (nil, _?): return false
-            case (_?, nil): return true
-            default: return false
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            items = complete
+        } catch {
+            guard CookieJar.generation == generation, !(error is CancellationError) else { return }
+            if let apiError = error as? APIError, case .notLoggedIn = apiError {
+                await session.refresh()
             }
+            guard CookieJar.generation == generation else { return }
+            errorText = items.isEmpty ? "考试安排未能完整加载，请重试" : "部分学期未能更新，当前保留上次完整的考试安排"
         }
     }
 }

@@ -549,6 +549,11 @@ final class NoRedirect: NSObject, URLSessionTaskDelegate {
 }
 
 enum CookieJar {
+    struct RequestCookies {
+        let hasCookies: Bool
+        let header: String?
+    }
+
     private static let lock = NSRecursiveLock()
     private nonisolated(unsafe) static var cookies: [HTTPCookie] = []
     private nonisolated(unsafe) static var revision: UInt64 = 0
@@ -596,9 +601,34 @@ enum CookieJar {
     }
 
     static func header(for url: URL) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return makeHeader(for: url, cookies: activeCookiesLocked)
+    }
+
+    /// Validates the generation and derives the matching Cookie header under one lock.
+    /// A caller must never check `generation` separately from reading this header.
+    static func requestCookies(for url: URL, expectedGeneration: UInt64) throws -> RequestCookies {
+        lock.lock(); defer { lock.unlock() }
+        guard expectedGeneration == revision else { throw CancellationError() }
+        let activeCookies = activeCookiesLocked
+        return RequestCookies(
+            hasCookies: !activeCookies.isEmpty,
+            header: makeHeader(for: url, cookies: activeCookies)
+        )
+    }
+
+    static func header(for url: URL, expectedGeneration: UInt64) throws -> String? {
+        try requestCookies(for: url, expectedGeneration: expectedGeneration).header
+    }
+
+    private static var activeCookiesLocked: [HTTPCookie] {
+        cookies.filter { isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
+    }
+
+    private static func makeHeader(for url: URL, cookies: [HTTPCookie]) -> String? {
         guard let host = url.host?.lowercased() else { return nil }
         let path = url.path.isEmpty ? "/" : url.path
-        let matched = shared.filter { c in
+        let matched = cookies.filter { c in
             let d = c.domain.hasPrefix(".") ? String(c.domain.dropFirst()) : c.domain
             let domainMatches = host == d || (c.domain.hasPrefix(".") && host.hasSuffix("." + d))
             let pathMatches = path == c.path || (path.hasPrefix(c.path) &&
