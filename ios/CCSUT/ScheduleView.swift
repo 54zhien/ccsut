@@ -11,7 +11,8 @@ struct ScheduleView: View {
     @State private var isLoading = false
     @State private var errorText: String?
     @State private var selectedWeek = 1
-    @State private var currentWeek = 1
+    @State private var currentWeek: Int?
+    @State private var weekUnavailable = false
     @State private var didPickWeek = false
     @State private var referenceDate: Date?
     @State private var detail: ScheduleSlot?
@@ -151,21 +152,27 @@ struct ScheduleView: View {
     }
 
     private var termSummary: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(SchedulePresentation.termTitle(bundle?.title ?? ""))
-                .font(.footnote).foregroundStyle(.secondary)
-                .lineLimit(1).minimumScaleFactor(0.85)
-            Spacer(minLength: 4)
-            if selectedWeek != currentWeek {
-                Button("回到本周") { selectWeek(currentWeek) }
-                    .font(.caption.weight(.medium)).frame(minHeight: 44)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(SchedulePresentation.termTitle(bundle?.title ?? ""))
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                Spacer(minLength: 4)
+                if let currentWeek, selectedWeek != currentWeek {
+                    Button("回到本周") { selectWeek(currentWeek) }
+                        .font(.caption.weight(.medium)).frame(minHeight: 44)
+                }
+            }
+            if weekUnavailable {
+                Text("本周周次暂未获取，请下拉重试")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }
         .frame(minHeight: 28)
         .padding(.horizontal, 16)
     }
 
-    private var maxWeek: Int { max(18, bundle?.slots.flatMap(\.weeks).max() ?? 18, currentWeek) }
+    private var maxWeek: Int { max(18, bundle?.slots.flatMap(\.weeks).max() ?? 18, currentWeek ?? 1) }
 
     private func selectWeek(_ week: Int) {
         didPickWeek = true
@@ -320,7 +327,7 @@ struct ScheduleView: View {
     }
 
     private func date(for day: Int) -> Date? {
-        guard let referenceDate else { return nil }
+        guard let referenceDate, let currentWeek else { return nil }
         let weekday = (calendar.component(.weekday, from: referenceDate) + 5) % 7
         let offset = (selectedWeek - currentWeek) * 7 + day - 1 - weekday
         return calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: referenceDate))
@@ -359,13 +366,26 @@ struct ScheduleView: View {
         do {
             let initData = try await APIClient.shared.electiveInit()
             let term = initData.xkxnxq ?? "2026-2027-1"
-            if let week = try? await APIClient.shared.currentTeachingWeek(), week > 0 {
-                currentWeek = week
-                referenceDate = Date()
-                if !didPickWeek {
-                    selectedWeek = week
-                    didPickWeek = true
-                }
+            if let previousTerm = bundle?.title, previousTerm != term {
+                currentWeek = nil
+                referenceDate = nil
+                didPickWeek = false
+            }
+            let account = UserDefaults.standard.string(forKey: "ccsut.lastAccount") ?? session.studentId ?? ""
+            let cacheKey = "ccsut.teachingWeek.v1"
+            let now = Date()
+            if let data = UserDefaults.standard.data(forKey: cacheKey),
+               let saved = try? JSONDecoder().decode(TeachingWeekSnapshot.self, from: data),
+               let week = saved.week(on: now, term: term, account: account) {
+                applyCurrentWeek(week, at: now)
+            }
+            do {
+                let week = try await APIClient.shared.currentTeachingWeek()
+                applyCurrentWeek(week, at: now)
+                let saved = TeachingWeekSnapshot(term: term, account: account, week: week, verifiedAt: now)
+                if let data = try? JSONEncoder().encode(saved) { UserDefaults.standard.set(data, forKey: cacheKey) }
+            } catch {
+                weekUnavailable = currentWeek == nil
             }
             let xhid = try await APIClient.shared.scheduleXhid(xnxq: term)
             let items = try await APIClient.shared.scheduleItems(xnxq: term, xhid: xhid)
@@ -376,6 +396,13 @@ struct ScheduleView: View {
                 errorText = "会话过期，已尝试续期，请下拉刷新"
             } else { errorText = error.localizedDescription }
         } catch { errorText = error.localizedDescription }
+    }
+
+    private func applyCurrentWeek(_ week: Int, at date: Date) {
+        currentWeek = week
+        referenceDate = date
+        weekUnavailable = false
+        if !didPickWeek { selectedWeek = week }
     }
 
     private static let palette: [Color] = [
@@ -395,7 +422,7 @@ struct ScheduleView: View {
 private struct WeekSelector: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var selectedWeek: Int
-    let currentWeek: Int
+    let currentWeek: Int?
     let maxWeek: Int
     let onSelectWeek: (Int) -> Void
 

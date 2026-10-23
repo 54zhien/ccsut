@@ -47,6 +47,8 @@ struct LoginView: View {
     @FocusState private var focused: Field?
     private enum Field { case account, code }
     private let fieldInset: CGFloat = 20
+    @State private var brandHeight: CGFloat = 180
+    @State private var credentialsHeight: CGFloat = 113
 
     private enum Busy: Equatable {
         case idle
@@ -79,8 +81,6 @@ struct LoginView: View {
         }
         .sheet(isPresented: $showWebSheet, onDismiss: restoreWebViewToLogin) {
             WebLoginSheet(webView: webView, navigator: nav)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
         }
         .onAppear(perform: start)
         .onDisappear {
@@ -118,8 +118,10 @@ struct LoginView: View {
                 ScrollView {
                     VStack(spacing: 30) {
                         brand
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { brandHeight = $0 }
                             .padding(.bottom, 18)
                         credentialsForm
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { credentialsHeight = $0 }
                         actions
                         if !hint.isEmpty {
                             Text(AppMessages.readable(hint))
@@ -131,9 +133,11 @@ struct LoginView: View {
                         }
                     }
                     .padding(.horizontal, 28)
-                    .padding(.vertical, 32)
+                    .padding(.top, max(24, (viewport.size.height + viewport.safeAreaInsets.bottom - viewport.safeAreaInsets.top) / 2
+                                      - brandHeight - 48 - credentialsHeight / 2))
+                    .padding(.bottom, 32)
                     .frame(maxWidth: 480)
-                    .frame(maxWidth: .infinity, minHeight: viewport.size.height, alignment: .center)
+                    .frame(maxWidth: .infinity, minHeight: viewport.size.height, alignment: .top)
                 }
                 .scrollBounceBehavior(.basedOnSize)
                 .scrollDismissesKeyboard(.interactively)

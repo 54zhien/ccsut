@@ -17,15 +17,12 @@ struct SheetHeader: View {
     var body: some View {
         HStack {
             Spacer()
-            Button(action: close) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 24, height: 24)
-            }
+            Button(role: .close, action: close)
             .buttonStyle(.glass)
             .buttonBorderShape(.circle)
             .controlSize(.large)
+            .foregroundStyle(.primary)
+            .tint(nil)
             .accessibilityLabel("关闭\(title)")
         }
         .overlay {

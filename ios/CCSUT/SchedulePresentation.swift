@@ -1,5 +1,25 @@
 import Foundation
 
+struct TeachingWeekSnapshot: Codable {
+    let term: String
+    let account: String
+    let week: Int
+    let verifiedAt: Date
+
+    func week(on date: Date, term: String, account: String) -> Int? {
+        guard self.term == term, self.account == account, (1...53).contains(week) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        calendar.firstWeekday = 2
+        guard let start = calendar.dateInterval(of: .weekOfYear, for: verifiedAt)?.start,
+              let end = calendar.dateInterval(of: .weekOfYear, for: date)?.start,
+              let days = calendar.dateComponents([.day], from: start, to: end).day,
+              (0...28).contains(days) else { return nil }
+        let result = week + days / 7
+        return (1...53).contains(result) ? result : nil
+    }
+}
+
 struct ScheduleCell: Identifiable {
     let weekday: Int
     let section: Int

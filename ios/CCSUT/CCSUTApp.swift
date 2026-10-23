@@ -156,15 +156,28 @@ struct MainTabs: View {
 
 // MARK: - 账号入口与面板
 
+struct StudentAvatar: View {
+    @Environment(SessionStore.self) private var session
+    let size: CGFloat
+
+    var body: some View {
+        let name = session.studentName ?? (InterfacePreview.enabled ? "预览同学" : "")
+        Text(name.first.map(String.init) ?? "同")
+            .font(.system(size: size * 0.4, weight: .semibold))
+            .foregroundStyle(Color.accentColor)
+            .frame(width: size, height: size)
+            .background(Color.accentColor.opacity(0.12), in: .circle)
+            .accessibilityHidden(true)
+    }
+}
+
 struct AccountButton: View {
     @Environment(\.deviceCornerRadius) private var deviceCornerRadius
-    @Environment(SessionStore.self) private var session
     @State private var isPresented = false
 
     var body: some View {
         Button { isPresented = true } label: {
-            Image(systemName: "person.crop.circle")
-                .font(.system(size: 20, weight: .medium))
+            StudentAvatar(size: 28)
                 .frame(width: 48, height: 48)
                 .contentShape(Circle())
         }
@@ -187,19 +200,14 @@ struct ProfileView: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var showLogoutAlert = false
+    @State private var identityHeight: CGFloat = 150
 
     var body: some View {
-        VStack(spacing: 0) {
-            SheetHeader(title: "账号") { dismiss() }
+        GeometryReader { viewport in
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: 0) {
                     VStack(spacing: 14) {
-                        Text(initials)
-                            .font(.system(size: 30, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
-                            .frame(width: 76, height: 76)
-                            .background(Color.accentColor.opacity(0.12), in: .circle)
-                            .accessibilityHidden(true)
+                        StudentAvatar(size: 76)
 
                         VStack(spacing: 6) {
                             Text(session.studentName ?? (InterfacePreview.enabled ? "预览同学" : "已登录"))
@@ -212,21 +220,28 @@ struct ProfileView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .center)
                     }
-                    .padding(.top, 12)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { identityHeight = $0 }
+                    .padding(.bottom, 24)
 
                     Button(role: .destructive) { showLogoutAlert = true } label: {
                         Text("退出登录")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .center)
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 44)
                     }
                     .buttonStyle(.glass)
                     .buttonBorderShape(.capsule)
                     .tint(.red)
                 }
                 .padding(.horizontal, 24)
+                .padding(.top, max(72, (viewport.size.height - identityHeight) / 2))
                 .padding(.bottom, 24)
+                .frame(maxWidth: .infinity)
             }
             .scrollBounceBehavior(.basedOnSize)
+            .overlay(alignment: .top) {
+                SheetHeader(title: "账号") { dismiss() }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .alert("退出登录", isPresented: $showLogoutAlert) {
@@ -239,8 +254,4 @@ struct ProfileView: View {
         }
     }
 
-    private var initials: String {
-        let name = session.studentName ?? (InterfacePreview.enabled ? "预览同学" : "")
-        return name.first.map(String.init) ?? "?"
-    }
 }

@@ -22,41 +22,37 @@ import OSLog
 
 struct WebPanel: UIViewRepresentable {
     let webView: WKWebView
-    var onRefresh: (() -> Void)? = nil
+    var onContentHeight: ((CGFloat) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> WKWebView {
-        if let onRefresh {
+        // Refresh is only available from the web sheet's explicit button.
+        webView.scrollView.refreshControl = nil
+        webView.scrollView.alwaysBounceVertical = false
+        if let onContentHeight {
             let coordinator = context.coordinator
-            coordinator.onRefresh = onRefresh
-            coordinator.control.addTarget(coordinator, action: #selector(Coordinator.refresh), for: .valueChanged)
-            webView.scrollView.refreshControl = coordinator.control
-            webView.scrollView.alwaysBounceVertical = true
-            coordinator.observation = webView.observe(\.isLoading, options: [.new]) { [weak coordinator] _, change in
-                guard change.newValue == false else { return }
-                Task { @MainActor in coordinator?.control.endRefreshing() }
+            coordinator.onContentHeight = onContentHeight
+            coordinator.observation = webView.scrollView.observe(\.contentSize, options: [.new]) { [weak coordinator] _, change in
+                guard let height = change.newValue?.height, height.isFinite, height > 0 else { return }
+                Task { @MainActor in coordinator?.onContentHeight?(ceil(height)) }
             }
         }
         return webView
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
-        context.coordinator.onRefresh = onRefresh
+        context.coordinator.onContentHeight = onContentHeight
     }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
-        if uiView.scrollView.refreshControl === coordinator.control {
-            uiView.scrollView.refreshControl = nil
-        }
         coordinator.observation?.invalidate()
+        coordinator.onContentHeight = nil
     }
 
     final class Coordinator: NSObject {
-        let control = UIRefreshControl()
-        var onRefresh: (() -> Void)?
+        var onContentHeight: ((CGFloat) -> Void)?
         var observation: NSKeyValueObservation?
-        @objc func refresh() { onRefresh?() }
     }
 }
 

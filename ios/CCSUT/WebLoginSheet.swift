@@ -2,7 +2,7 @@
 //  WebLoginSheet.swift
 //  CCSUT
 //
-//  统一身份认证 · 底部弹起的 large sheet
+//  统一身份认证 · 高度跟随网页内容的系统玻璃 sheet
 //
 //  CAS 有三个页签：扫码登录 / 密码登录 / 验证码登录
 //  这里只走两条不需要密码的：
@@ -52,6 +52,9 @@ struct WebLoginSheet: View {
     @State private var nav = WebNavigator()
     @State private var status = ""
     @State private var didPrepare = false
+    @State private var contentHeight: CGFloat = 320
+    @State private var topControlsHeight: CGFloat = 64
+    @State private var bottomControlsHeight: CGFloat = 64
 
     /// LoginView passes its already-running web view and navigator. They are moved
     /// into this sheet only after the source WebPanel has left the main view tree.
@@ -71,37 +74,17 @@ struct WebLoginSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                WebPanel(webView: webView, onRefresh: refresh)
-                if !status.isEmpty {
-                    Text(AppMessages.readable(status))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭网页登录", systemImage: "xmark") { dismiss() }
-                        .labelStyle(.iconOnly)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("刷新网页", systemImage: "arrow.clockwise", action: refresh)
-                        .labelStyle(.iconOnly)
-                }
-                ToolbarItem(placement: .bottomBar) { Spacer() }
-                ToolbarItem(placement: .bottomBar) {
-                    Button("Safari", systemImage: "safari", action: openCurrentURLInSafari)
-                        .labelStyle(.titleAndIcon)
-                        .disabled(currentURL == nil)
-                        .accessibilityLabel("在 Safari 中打开当前网址")
-                }
-            }
+        VStack(spacing: 0) {
+            topControls
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topControlsHeight = $0 }
+            WebPanel(webView: webView, onContentHeight: { height in
+                if abs(contentHeight - height) > 1 { contentHeight = height }
+            })
+            bottomControls
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bottomControlsHeight = $0 }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .tint(nil)
         .onAppear {
             if ownsNavigation { start() }
             else { nav.recoverLoginPageIfNeeded(in: webView) }
@@ -116,8 +99,49 @@ struct WebLoginSheet: View {
         .onChange(of: nav.lastError) { _, err in
             if err != nil { status = AppMessages.loadFailure }
         }
-        .presentationDetents([.large])
+        .presentationDetents([.height(max(320, contentHeight) + topControlsHeight + bottomControlsHeight)])
+        .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.visible)
+    }
+
+    private var topControls: some View {
+        HStack {
+            Button(role: .close) { dismiss() }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .accessibilityLabel("关闭网页登录")
+            Spacer()
+            Button("刷新网页", systemImage: "arrow.clockwise", action: refresh)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+        }
+        .controlSize(.large)
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    private var bottomControls: some View {
+        HStack(spacing: 12) {
+            if !status.isEmpty {
+                Text(AppMessages.readable(status))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Button("Safari", systemImage: "safari", action: openCurrentURLInSafari)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.capsule)
+                .controlSize(.large)
+                .foregroundStyle(.primary)
+                .accessibilityLabel("在 Safari 中打开当前网址")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
 
     private var currentURL: URL? {
@@ -186,9 +210,9 @@ struct WebLoginSheet: View {
             case "no-code":
                 status = "账号已填好 · 点「获取验证码」，收到短信后填进去再点登录"
             case "no-tab":
-                status = "认证页没渲染出页签，请下拉刷新"
+                status = "认证页没渲染出页签，请点右上角刷新"
             case "no-form":
-                status = "没找到验证码登录表单，请下拉刷新"
+                status = "没找到验证码登录表单，请点右上角刷新"
             case "no-account":
                 status = "账号框是空的，请手动填一下"
             case "send-failed":

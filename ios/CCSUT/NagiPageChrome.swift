@@ -241,15 +241,14 @@ private struct AcademicDetailChrome: ViewModifier {
 }
 
 extension View {
-    /// Keep the bar material outside title/control opacity animations. Both root
-    /// and detail pages register the same persistent bar and soft edge effect.
+    /// Root and detail pages share the native bar and soft scroll-edge effect.
+    /// Do not put an opaque bar background over the system's progressive blur.
     fileprivate func nagiTopBar<Bar: View>(@ViewBuilder content: () -> Bar) -> some View {
         toolbar(.hidden, for: .navigationBar)
             .scrollEdgeEffectStyle(.soft, for: .top)
             .safeAreaBar(edge: .top, spacing: 0) {
                 content()
                     .frame(maxWidth: .infinity)
-                    .background(.bar)
             }
     }
 
