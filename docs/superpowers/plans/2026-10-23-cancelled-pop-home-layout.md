@@ -187,3 +187,10 @@ and leave too much unused lower space. Keep the icon and business logic unchange
   review, Release compilation and IPA ZIP/bundle/icon integrity. No full UI suite
   or simulator motion acceptance is claimed for this new effect. Device feel is
   intentionally left for the user to try in the requested preview package.
+- Preview productione8cc551e9ae38bd94abaa979aeb0ac78ce2a8026 passed Release
+  39939117700. Independent source review found no confirmed history, ownership,
+  or concurrency issue. Downloaded IPA is3761271bytes, ZIP intact, with bundle
+  com.imzhien.ccsut and primary iconAppIcon. SHA256:
+  c4c6ce0b3e8d3778ca4b89db87fda78a821f9b6e9e870277ae4f21e6ee052717.
+  Full regression/UI tests were intentionally not run on this preview at the
+  user's request; no native motion or final full-suite acceptance is claimed.
