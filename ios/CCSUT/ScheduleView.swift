@@ -11,6 +11,7 @@ struct ScheduleView: View {
     @State private var isLoading = false
     @State private var errorText: String?
     @State private var selectedWeek = 1
+    @State private var weekScrollID: String? = "schedule-week-1"
     @State private var currentWeek = 1
     @State private var didPickWeek = false
     @State private var referenceDate: Date?
@@ -168,45 +169,44 @@ struct ScheduleView: View {
 
     private func selectWeek(_ week: Int) {
         didPickWeek = true
-        withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { selectedWeek = week }
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
+            selectedWeek = week
+            weekScrollID = "schedule-week-\(week)"
+        }
     }
 
     private var weekBar: some View {
         GlassEffectContainer(spacing: 8) {
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(1...maxWeek, id: \.self) { week in
-                            Button { selectWeek(week) } label: {
-                                Text(week == currentWeek ? "本周" : "第 \(week) 周")
-                                    .font(.subheadline.weight(week == selectedWeek ? .semibold : .medium))
-                                    .monospacedDigit()
-                                    .padding(.horizontal, 14)
-                                    .frame(minWidth: 84, minHeight: 44)
-                                    .foregroundStyle(week == selectedWeek ? Color.accentColor : Color.primary)
-                            }
-                            .buttonStyle(.plain)
-                            .glassEffect(week == selectedWeek ? .regular.tint(.accentColor.opacity(0.18)).interactive() : .regular.interactive(), in: .capsule)
-                            .overlay(alignment: .bottom) {
-                                if week == currentWeek && week != selectedWeek {
-                                    Circle().fill(Color.accentColor).frame(width: 4, height: 4).padding(.bottom, 4)
-                                }
-                            }
-                            .accessibilityLabel(week == currentWeek ? "本周" : "第 \(week) 周")
-                            .accessibilityAddTraits(week == selectedWeek ? [.isSelected] : [])
-                            .id(week)
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(1...maxWeek, id: \.self) { week in
+                        Button { selectWeek(week) } label: {
+                            Text(week == currentWeek ? "本周" : "第 \(week) 周")
+                                .font(.subheadline.weight(week == selectedWeek ? .semibold : .medium))
+                                .monospacedDigit()
+                                .padding(.horizontal, 14)
+                                .frame(minWidth: 84, minHeight: 44)
+                                .foregroundStyle(week == selectedWeek ? Color.accentColor : Color.primary)
                         }
+                        .buttonStyle(.plain)
+                        .glassEffect(week == selectedWeek ? .regular.tint(.accentColor.opacity(0.18)).interactive() : .regular.interactive(), in: .capsule)
+                        .overlay(alignment: .bottom) {
+                            if week == currentWeek && week != selectedWeek {
+                                Circle().fill(Color.accentColor).frame(width: 4, height: 4).padding(.bottom, 4)
+                            }
+                        }
+                        .accessibilityLabel(week == currentWeek ? "本周" : "第 \(week) 周")
+                        .accessibilityAddTraits(week == selectedWeek ? [.isSelected] : [])
+                        .id("schedule-week-\(week)")
                     }
-                    .scrollTargetLayout()
-                    .padding(.horizontal, 16).padding(.vertical, 8)
                 }
-                .scrollIndicators(.hidden)
-                .scrollTargetBehavior(.viewAligned(anchor: .center))
-                .onChange(of: selectedWeek) { _, week in
-                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) { proxy.scrollTo(week, anchor: .center) }
-                }
-                .onAppear { proxy.scrollTo(selectedWeek, anchor: .center) }
+                .scrollTargetLayout()
+                .padding(.vertical, 8)
             }
+            .scrollIndicators(.hidden)
+            .scrollTargetBehavior(.viewAligned(anchor: .center))
+            .contentMargins(.horizontal, 16, for: .scrollContent)
+            .scrollPosition(id: $weekScrollID, anchor: .center)
         }
     }
 
@@ -370,6 +370,7 @@ struct ScheduleView: View {
             bundle = InterfacePreview.schedule
             currentWeek = 7
             selectedWeek = 7
+            weekScrollID = "schedule-week-7"
             didPickWeek = true
             referenceDate = ISO8601DateFormatter().date(from: "2026-10-23T09:41:00+08:00")
             if InterfacePreview.page == "course" { detail = cells.first?.courses.first }
@@ -388,7 +389,11 @@ struct ScheduleView: View {
             if let week = try? await APIClient.shared.currentTeachingWeek(), week > 0 {
                 currentWeek = week
                 referenceDate = Date()
-                if !didPickWeek { selectedWeek = week; didPickWeek = true }
+                if !didPickWeek {
+                    selectedWeek = week
+                    weekScrollID = "schedule-week-\(week)"
+                    didPickWeek = true
+                }
             }
             let xhid = try await APIClient.shared.scheduleXhid(xnxq: term)
             let items = try await APIClient.shared.scheduleItems(xnxq: term, xhid: xhid)

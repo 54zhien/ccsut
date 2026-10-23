@@ -49,6 +49,17 @@ jobs:
           if [ -d "$RUNNER_TEMP/ui-tests.xcresult" ]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-tests.xcresult" --output-path "$RUNNER_TEMP/ui-test-attachments"
           fi
+      - name: Publish interaction evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCSUT-ui-interactions
+          path: |
+            ${{ runner.temp }}/ui-test.log
+            ${{ runner.temp }}/ui-test-attachments/*.png
+            ${{ runner.temp }}/ui-test-attachments/manifest.json
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Render preview screens
         if: ${{ !cancelled() && steps.simulator.conclusion == 'success' }}
         run: bash ios/Tests/render-preview.sh

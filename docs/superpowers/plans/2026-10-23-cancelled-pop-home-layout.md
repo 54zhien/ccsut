@@ -74,18 +74,42 @@ and leave too much unused lower space. Keep the icon and business logic unchange
 
 - Pixel check of the native cancellation recording from UI 39919624951: at 590px
   normalized width, resting frame22 versus held frames24–27 gives content shift
-  116px and title shift116.5px, or0.5px relative error throughout the hold. This
+  116px and title shift 116.5px, or 0.5px relative error throughout the hold. This
   independently verifies the score header motion despite the old probe failure.
 - Independent review of cecd9b0..e9d08ee found no confirmed refresh, lifecycle,
   time-label or week-selection defects. WKWebView refresh was inspected in source;
   no live school login or new authenticated network operation was performed.
 - Production e9d08eeb1afebda33bfdf490b41af664f778eef9 passed Release
-  39923025817 and regression39923023769. The IPA ZIP is intact; bundle and primary
-  icon remaincom.imzhien.ccsut / AppIcon. Downloaded IPA SHA256:
+  39923025817 and regression 39923023769. The IPA ZIP is intact; bundle and primary
+  icon remain com.imzhien.ccsut / AppIcon. Downloaded IPA SHA256:
   c4eb6b17eb9237972997671b22170ede9a93c6572ceecc1e0ded7ee500bce979.
 - UI 39923023789 passed ten of eleven tests, including the corrected process
   sampler on all three details and populated/empty pull refresh. It found a real
-  initial week-centering failure: chip midpoint217pt versus viewport201pt.
+  initial week-centering failure: chip midpoint 217pt versus viewport 201pt.
   Keep this RED result. Configure native view-aligned settling with an explicit
   center anchor, and register the unpadded HStack as the target layout. Keep the
-  existing16pt edge inset; do not introduce added edge blank space.
+  existing 16pt edge inset; do not introduce added edge blank space.
+
+- The successful native cancellation captures in e9d08ee report 96/88/80 process
+  samples for score/exam/elective respectively, each with 0.000pt local drift.
+  Pop completion/cancellation, back taps, vertical scrolling, six populated/empty
+  refresh cases, home settlement and pinned term geometry all passed in that run.
+- Inspected native e9d08ee screenshots: light/dark home including the no-reminder
+  case, normal/floating score term strips, and regular/compact timetable top and
+  bottom. All four supplied time ranges fit their original rail without clipping;
+  smaller corners, no top refresh buttons, and the three-card home are visible.
+- Center correction a610ece3f4ef4f2d3ea3f46bffb81e6c535f7635 passed Release
+  39926497996 and regression 39926495719. Its IPA passed ZIP/bundle/icon checks;
+  SHA256: fce873d8389dc838bafb9dd08f5c99da820ccf58ec0345031ac6ef172acda7a8.
+- UI 39926495887 retained the same ten passing checks but the initial chip moved
+  to58pt instead of201pt. The anchor-only candidate is rejected. Replace the
+  week bar's legacy ScrollViewReader/onAppear command with a centered semantic
+  scrollPosition binding initialized alongside the selected week before layout.
+  Use prefixed String week identities, separate from timetable day/period Int
+  identities, and move the existing16pt inset to native scroll content margins.
+  Check initial center, selecting the next week, and returning to the current week.
+- Publish interaction logs/screenshots as an early artifact before the slower
+  compact-simulator render; this preserves immediate failure evidence without
+  changing the full suite or its pass criteria. Both previous center failures are
+  retained. The browser live-log fallback was unavailable locally; it made no
+  repository or account changes.

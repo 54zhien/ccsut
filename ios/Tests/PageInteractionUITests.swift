@@ -48,12 +48,19 @@ final class PageInteractionUITests: XCTestCase {
         let semester = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "2026")).firstMatch
         XCTAssertTrue(semester.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["本周"].exists)
+        capture(app, "current-week-initial")
         XCTAssertEqual(app.buttons["本周"].frame.midX, app.frame.midX, accuracy: 2)
         XCTAssertFalse(app.buttons["page-refresh"].exists)
         for (index, times) in ["8:20 至 10:00", "10:20 至 12:00", "14:00 至 15:40", "16:00 至 17:40"].enumerated() {
             let period = app.descendants(matching: .any).matching(identifier: "schedule-period-\(index + 1)").firstMatch
             XCTAssertTrue(period.label.contains(times))
         }
+        let nextWeek = app.buttons["第 8 周"]
+        nextWeek.tap()
+        XCTAssertEqual(nextWeek.frame.midX, app.frame.midX, accuracy: 2)
+        app.buttons["回到本周"].tap()
+        XCTAssertEqual(app.buttons["本周"].frame.midX, app.frame.midX, accuracy: 2)
+        capture(app, "current-week-returned")
         let weekday = app.staticTexts.matching(NSPredicate(format: "label == %@", "周一")).firstMatch
         let originalTermY = semester.frame.minY
         let originalDayY = weekday.frame.minY
