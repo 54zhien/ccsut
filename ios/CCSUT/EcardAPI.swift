@@ -4,16 +4,20 @@
 //
 //  一卡通缴费（新中新 Synjones 缴费大厅 charge-app 4.0.107 / BladeX 后端）
 //
-//  与教务系统完全不同的一套：
-//    - 鉴权不是 Cookie，而是两个固定 Header + bearer token
-//    - 没有签名、没有加密请求体
-//    - 业务接口在 /charge/**，建单与支付在 /blade-pay/pay
-//    - 校外被 aTrust 零信任网关挡住，校内直连可达
+//  ⚠️ 状态：协议已实测跑通，但**尚未完成 iOS 构建与真机支付验证**。
+//     在真机走通一笔小额并获得明确的「订单已完成」之前，
+//     不要把本文件当作稳定依赖对外承诺。
 //
-//  token 来源：GET /charge/feeitem/toAppitem?feeitemid=408 → 302 的 Location 里带 ?token=
-//  （见 EcardTokenBridge.swift，用 WKWebView 在跳转瞬间截获）
+//  认证：两个固定 Header
+//    Authorization: Basic <前端硬编码的 charge:charge_secret>
+//    synjones-auth: bearer <access_token>   ← EcardTokenBridge 提供
+//  没有请求签名、没有加密请求体。
 //
-//  已实测：建单 → payList 直接返回「卡账户 CARDTSM」→ 支付 POST paystep=2 完成
+//  接口层级（全部实测）：
+//    GET  /charge/feeitem/singleFeeitem?feeitemid=408
+//    POST /charge/feeitem/getThirdData   level=0 校区 / 1 楼栋 / 2 房间 / 3(且 type=IEC) 明细
+//    POST /blade-pay/pay                 建单（paystep=0）→ 支付（paystep=2）
+//    GET  /charge/pay/getpayinfo?orderid=
 //
 
 import Foundation
@@ -21,19 +25,38 @@ import Foundation
 // MARK: - 错误
 
 enum EcardError: LocalizedError {
+    /// 后端返回 {code:xxx,msg:"..."} 的业务错误
     case business(Int, String)
     case http(Int)
     case decoding(String)
+    /// 网络层错误（断网、超时、TLS 等），统一收口成这一种
+    case transport(String)
     case noToken
     case canceled
+    /// 建单被拒（code 非 200 或 success=false）
+    case orderRejected(String)
+    /// 建单返回里没有可用的余额支付通道
+    case paymentChannelUnavailable
+    /// 通道要求支付密码，本层不处理
+    case passwordRequired
+    /// 房间明细缺少关键字段
+    case incompleteRoomDetail([String])
+    /// 支付已提交但订单状态未确认
+    case paymentUnconfirmed(String)
 
     var errorDescription: String? {
         switch self {
         case .business(let code, let msg): return "缴费接口返回错误 [\(code)] \(msg)"
         case .http(let code):              return "网络错误 HTTP \(code)"
         case .decoding(let what):          return "数据解析失败：\(what)"
+        case .transport(let what):         return "网络异常：\(what)"
         case .noToken:                     return "未获取到缴费凭证，请重新登录"
-        case .canceled:                    return "已取消"
+        case .canceled:                    return "操作已取消"
+        case .orderRejected(let msg):      return "建单失败：\(msg)"
+        case .paymentChannelUnavailable:   return "当前没有可用的余额支付方式"
+        case .passwordRequired:            return "该支付方式需要支付密码，请到一卡通页面完成"
+        case .incompleteRoomDetail(let ks):return "房间信息不完整，缺少：\(ks.joined(separator: "、"))"
+        case .paymentUnconfirmed(let oid): return "支付已提交，结果待确认（订单 \(oid)）"
         }
     }
 }
@@ -62,7 +85,6 @@ struct FeeItem: Decodable {
     let daymaxmoney: String?
     /// 快捷金额，实测 "10,50,100"
     let dayout: String?
-    /// 电控实现类，实测 IECWServiceImpl
     let implInterface: String?
     let feeitemImplBean: FeeItemImpl?
 
@@ -76,7 +98,7 @@ struct FeeItem: Decodable {
 
     // flag[4] → 0 选择模式 / 1 输入模式 / 4 IEC 电表模式
     // flag[7] → 是否需要输入金额
-    // flag[9] → 是否展示「信息」区块（"2" 表示需要先改密码）
+    // flag[9] → "2" 表示需要先改密码
     var isSelectMode: Bool { bit(4) == "0" }
     var needsAmount:  Bool { bit(7) == "1" }
     var requiresPasswordChange: Bool { bit(9) == "2" }
@@ -92,8 +114,15 @@ struct FeeItem: Decodable {
     }
     var maxAmount: Decimal? { maxmoney.flatMap { Decimal(string: $0) } }
     var dayMaxAmount: Decimal? { daymaxmoney.flatMap { Decimal(string: $0) } }
-    /// 电控厂商，实测「威胜电控」
     var vendorName: String? { feeitemImplBean?.implname }
+
+    /// 金额是否落在服务端给出的范围内
+    func accepts(amount: Decimal) -> Bool {
+        guard amount > 0 else { return false }
+        if let max = maxAmount, amount > max { return false }
+        if let dayMax = dayMaxAmount, amount > dayMax { return false }
+        return true
+    }
 }
 
 struct FeeItemImpl: Decodable {
@@ -101,7 +130,7 @@ struct FeeItemImpl: Decodable {
     let code: String?
 }
 
-// MARK: - 级联字典（校区 → 楼栋 → 房间）
+// MARK: - 级联字典
 
 struct ThirdDataEnvelope: Decodable {
     let code: Int
@@ -112,39 +141,61 @@ struct ThirdDataEnvelope: Decodable {
 struct ThirdDataMap: Decodable {
     /// 级别定义：campus(1) → building(2) → room(3)
     let total: [ThirdLevel]?
-    /// 当前层可选项；value 是 32 位 hash，不是明文房号
+    /// 当前层可选项
     let data: [ThirdOption]?
-    /// 第三级（选中房间后）data 是对象，这里保留原始字典
+    /// 第三级 data 是对象，保留原始字典
     let detail: [String: JSONValue]?
-    /// 展示用文案，实测 {"房间信息":"…","表类型":"电表","剩余金额":"-1150.093"}
+    /// 展示文案，实测 {"房间信息":"…","表类型":"电表","剩余金额":"-1150.093"}
     let showData: [String: String]?
-    /// 实测 "IEC"
     let dataType: String?
 
     enum CodingKeys: String, CodingKey { case total, data, showData, dataType }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        total = try c.decodeIfPresent([ThirdLevel].self, forKey: .total)
-        showData = try c.decodeIfPresent([String: String].self, forKey: .showData)
-        dataType = try c.decodeIfPresent(String.self, forKey: .dataType)
+        total     = try c.decodeIfPresent([ThirdLevel].self, forKey: .total)
+        showData  = try c.decodeIfPresent([String: String].self, forKey: .showData)
+        dataType  = try c.decodeIfPresent(String.self, forKey: .dataType)
 
-        if let list = try? c.decodeIfPresent([ThirdOption].self, forKey: .data) {
-            data = list
-            detail = nil
-        } else if let obj = try? c.decodeIfPresent([String: JSONValue].self, forKey: .data) {
-            data = nil
-            detail = obj
+        // 明确区分「字段缺失」与「类型不对」：后者直接报错，不再静默当成空列表
+        if c.contains(.data), try !c.decodeNil(forKey: .data) {
+            if let list = try? c.decode([ThirdOption].self, forKey: .data) {
+                data = list
+                detail = nil
+            } else if let obj = try? c.decode([String: JSONValue].self, forKey: .data) {
+                data = nil
+                detail = obj
+            } else {
+                throw DecodingError.typeMismatch(
+                    Any.self,
+                    DecodingError.Context(
+                        codingPath: c.codingPath + [CodingKeys.data],
+                        debugDescription: "map.data 既不是数组也不是对象"
+                    )
+                )
+            }
         } else {
             data = nil
             detail = nil
         }
     }
 
-    /// 从 detail 里提取 MeterContext（字段名与建单请求一致）
+    /// 房间明细缺少的必填字段（空数组表示齐了）
+    var missingMeterKeys: [String] {
+        let required = ["house_id", "house_no", "meter_id", "meter_no", "customer_name", "sno"]
+        guard let detail else { return required }
+        return required.filter { key in
+            guard let value = detail[key]?.stringValue else { return true }
+            return value.isEmpty
+        }
+    }
+
     var meterContext: MeterContext? {
         guard let d = detail else { return nil }
-        func v(_ k: String) -> String? { d[k]?.stringValue }
+        func v(_ k: String) -> String? {
+            guard let s = d[k]?.stringValue, !s.isEmpty, s != "null" else { return nil }
+            return s
+        }
         return MeterContext(
             avgPrice: v("avgPrice"),
             buyTime: v("buy_time"),
@@ -188,39 +239,35 @@ struct ThirdOption: Decodable {
 /// 建单时服务端要求把房间与电表信息原样回传（实测字段）。
 ///
 /// 注意：实测请求里每个值都是 **JSON 编码后的字符串**（带外层双引号），
-/// 例如 `house_no="208"`，所以 `formFields` 会统一做 JSON 编码。
+/// 例如 `house_no="208"`，所以 `formFields` 统一做 JSON 编码。
 struct MeterContext {
-    var avgPrice: String?          // 电价，实测 "0.619" 元/度
+    var avgPrice: String?
     var buyTime: String?
     var ctpt: String?
-    var customerName: String?      // "17栋南-208"
-    var customerNo: String?        // "17栋南-208"
-    var freeBalance: String?       // 卡余额，实测 "59.06"
-    var houseAddr: String?         // "长沙工业学院17栋南208"
-    var houseID: String?           // "0182AE9EAE78619594D5A9038B1D54"
-    var houseNo: String?           // "208"
+    var customerName: String?
+    var customerNo: String?
+    var freeBalance: String?
+    var houseAddr: String?
+    var houseID: String?
+    var houseNo: String?
     var meterBalance: String?
     var meterBalanceTime: String?
-    var meterID: String?           // "318031214406D2F8A0D715541F081F7D"
-    var meterNo: String?           // "59910060428"
+    var meterID: String?
+    var meterNo: String?
     var meterStatus: String?
-    var meterType: String?         // "1"
-    var payType: String?           // "0"
+    var meterType: String?
+    var payType: String?
     var payid: String?
-    var sysId: String?             // 实测 "null"，原样回传
-    var walletBalance: String?     // 电表钱包余额，实测 "343.43028"
-    var sno: String?               // 学号
+    var sysId: String?
+    var walletBalance: String?
+    var sno: String?
     var userName: String?
-    var myCustomInfo: String?      // "房间:长沙工业学院 17栋南 208"
+    var myCustomInfo: String?
 
-    /// 电价（元/度），用于把金额换算成电量给用户看
     var pricePerKWh: Decimal? { avgPrice.flatMap { Decimal(string: $0) } }
-    /// 电表余额（元）
     var walletAmount: Decimal? { walletBalance.flatMap { Decimal(string: $0) } }
-    /// 卡余额（元）
     var cardAmount: Decimal? { freeBalance.flatMap { Decimal(string: $0) } }
 
-    /// 建单 form 里的上下文字段（每个值做 JSON 编码，带外层引号）
     var formFields: [String: String] {
         var out: [String: String] = [:]
         func put(_ key: String, _ value: String?) {
@@ -260,10 +307,9 @@ struct MeterContext {
     }
 }
 
-/// 第三级返回的完整明细：上下文 + 展示文案
+/// 第三级返回的完整明细
 struct MeterDetail {
     let context: MeterContext
-    /// {"房间信息":"长沙工业学院17栋南101","表类型":"电表","剩余金额":"-1150.093"}
     let show: [String: String]
     let dataType: String?
 
@@ -286,20 +332,17 @@ struct CreateOrderEnvelope: Decodable {
 
 struct CreatedOrder: Decodable {
     let orderid: String?
-    /// 建单后服务端直接给到下一步：实测 2
     let paystep: Int?
-    /// 支付截止时间，实测 "2026-10-24 01:48:49"
     let payExpDate: String?
-    /// 建单响应里的可用支付方式（snake_case 一套）
     let payList: [OrderPayChannel]?
 }
 
 struct OrderPayChannel: Decodable {
     let id: String?
     let name: String?
-    let code: String?          // 实测 "CARDTSM"
+    let code: String?
     let icon: String?
-    let nopassword: String?    // "0"
+    let nopassword: String?
     let partnerKey: String?
 
     enum CodingKeys: String, CodingKey {
@@ -315,34 +358,38 @@ struct OrderPayChannel: Decodable {
         icon       = try c.decodeIfPresent(String.self, forKey: .icon)
         nopassword = try c.decodeIfPresent(String.self, forKey: .nopassword)
         partnerKey = try c.decodeIfPresent(String.self, forKey: .partnerKey)
-        // 建单响应是 snake_case（pay_type_name / pay_type_code），
-        // getpayinfo 是 camelCase（name / code），这里两套都认
         name = try c.decodeIfPresent(String.self, forKey: .name)
             ?? c.decodeIfPresent(String.self, forKey: .nameSnake)
         code = try c.decodeIfPresent(String.self, forKey: .code)
             ?? c.decodeIfPresent(String.self, forKey: .codeSnake)
     }
 
-    /// 卡余额 / 账户余额类通道：可在 App 内直接完成
     var isInternalBalance: Bool {
         let c = (code ?? "").uppercased()
         return c.hasPrefix("ACCOUNT") || c.hasPrefix("CARD")
     }
-    /// 免密
+    /// 只有明确 `"0"` 才认为免密；缺失或其它值都按「需要密码」处理
     var isPasswordFree: Bool { nopassword == "0" }
 }
 
-/// GET /charge/pay/getpayinfo 的返回（camelCase 一套）
 struct PayInfoEnvelope: Decodable {
     let code: Int?
     let msg: String?
+    let order: PayOrder?
     let payList: [PayChannel]?
+}
+
+struct PayOrder: Decodable {
+    let orderid: String?
+    /// 1 = 订单已完成（付费成功）
+    let status: Int?
+    let payexpdate: String?
 }
 
 struct PayChannel: Decodable {
     let payid: Int?
     let name: String?
-    let code: String?          // 实测 "CARDTSM"
+    let code: String?
     let icon: String?
     let noticurl: String?
     let nopassword: Int?
@@ -361,7 +408,6 @@ struct PayChannel: Decodable {
     var isPasswordFree: Bool { nopassword == 0 }
 }
 
-/// 支付那一步的返回
 struct PayResultEnvelope: Decodable {
     let code: Int
     let msg: String?
@@ -372,7 +418,6 @@ struct PayResultEnvelope: Decodable {
         let paystep: Int?
         let orderid: String?
         let accountno: String?
-        /// 需要输入支付密码时服务端会回一个映射，用于后续校验
         let passwordMap: String?
 
         enum CodingKeys: String, CodingKey {
@@ -382,17 +427,30 @@ struct PayResultEnvelope: Decodable {
     }
 }
 
+/// 缴费结果：**不要把「没抛错」当成成功**
+enum RechargeOutcome {
+    /// 订单状态已明确为已完成
+    case completed(orderID: String)
+    /// 支付已提交，但还没拿到订单完成状态 —— UI 必须显示「结果待确认」
+    case pending(orderID: String)
+
+    var orderID: String {
+        switch self {
+        case .completed(let id), .pending(let id): return id
+        }
+    }
+    var isCompleted: Bool {
+        if case .completed = self { return true }
+        return false
+    }
+}
+
 // MARK: - 客户端
 
-/// 一个 token 对应一个实例；token 有效期以 JWT exp 为准（实测约 2 个月）
 final class EcardClient {
 
     static let base = URL(string: "https://ecard.ccsut.cn")!
-
-    /// 前端硬编码的客户端凭证（bundle 原文，不是用户凭证）
     private static let basicAuth = "Basic Y2hhcmdlOmNoYXJnZV9zZWNyZXQ="
-
-    /// 电表缴费的固定项目号
     static let electricityFeeItemID = "408"
 
     private let token: String
@@ -410,8 +468,8 @@ final class EcardClient {
 
     // MARK: 基础请求
 
-    /// `path` 要带 `/charge` 前缀：app.js 里 axios 的 baseURL 就是
-    /// `https://ecard.ccsut.cn/charge`；只有 `/blade-pay/**`、`/blade-auth/**` 在根。
+    /// `path` 要带 `/charge` 前缀（app.js 里 axios 的 baseURL 就是 `/charge`）；
+    /// 只有 `/blade-pay/**`、`/blade-auth/**` 在根。
     private func makeRequest(_ path: String,
                              method: String = "GET",
                              query: [URLQueryItem] = [],
@@ -446,7 +504,16 @@ final class EcardClient {
     }
 
     private func send<T: Decodable>(_ req: URLRequest) async throws -> T {
-        let (data, resp) = try await session.data(for: req)
+        let data: Data
+        let resp: URLResponse
+        do {
+            (data, resp) = try await session.data(for: req)
+        } catch let error as URLError {
+            if error.code == .cancelled { throw EcardError.canceled }
+            throw EcardError.transport(error.localizedDescription)
+        } catch {
+            throw EcardError.transport(error.localizedDescription)
+        }
 
         // 业务异常时后端仍返回 200，错误在 body 的 code 里
         if let probe = try? JSONDecoder().decode(CodeProbe.self, from: data),
@@ -458,8 +525,25 @@ final class EcardClient {
 
         do {
             return try JSONDecoder().decode(T.self, from: data)
+        } catch let error as DecodingError {
+            throw EcardError.decoding(Self.describe(error))
         } catch {
-            throw EcardError.decoding(String(describing: error))
+            throw EcardError.decoding(error.localizedDescription)
+        }
+    }
+
+    private static func describe(_ error: DecodingError) -> String {
+        switch error {
+        case .typeMismatch(_, let ctx):
+            return "类型不匹配 @\(ctx.codingPath.map(\.stringValue).joined(separator: "."))"
+        case .keyNotFound(let key, let ctx):
+            return "缺少字段 \(key.stringValue) @\(ctx.codingPath.map(\.stringValue).joined(separator: "."))"
+        case .valueNotFound(_, let ctx):
+            return "值为空 @\(ctx.codingPath.map(\.stringValue).joined(separator: "."))"
+        case .dataCorrupted(let ctx):
+            return "数据损坏 @\(ctx.codingPath.map(\.stringValue).joined(separator: "."))"
+        @unknown default:
+            return "未知解析错误"
         }
     }
 
@@ -475,7 +559,6 @@ final class EcardClient {
         return item
     }
 
-    /// level 1 → 楼栋；level 2 + building → 房间；level 3 + building + room → 房间/电表明细
     func thirdData(feeitemID: String = EcardClient.electricityFeeItemID,
                    type: String = "select",
                    level: Int,
@@ -493,15 +576,13 @@ final class EcardClient {
         return map
     }
 
-    /// 校区列表（level=0）
-    /// 实测返回 `[{"name":"长沙工业学院","value":"64245573A76997B39B273F05932AE43D"}]`，
-    /// 这个 value 后面每一级都要带上。
+    /// level=0 → 校区
     func campuses(feeitemID: String = EcardClient.electricityFeeItemID) async throws -> [ThirdOption] {
         let map = try await thirdData(feeitemID: feeitemID, level: 0)
         return map.data ?? []
     }
 
-    /// 楼栋（level=1 + campus）
+    /// level=1 → 楼栋
     func buildings(campus: String,
                    feeitemID: String = EcardClient.electricityFeeItemID) async throws -> [ThirdOption] {
         let map = try await thirdData(feeitemID: feeitemID,
@@ -510,7 +591,7 @@ final class EcardClient {
         return map.data ?? []
     }
 
-    /// 房间（level=2 + campus + building）
+    /// level=2 → 房间
     func rooms(campus: String,
                building: String,
                feeitemID: String = EcardClient.electricityFeeItemID) async throws -> [ThirdOption] {
@@ -520,10 +601,7 @@ final class EcardClient {
         return map.data ?? []
     }
 
-    /// 房间/电表明细（level=3 + type=IEC + campus + building + room）
-    ///
-    /// 实测请求：`type=IEC&level=3&campus=<hash>&building=<hash>&room=<hash>`
-    /// 返回 `map.data` 是对象（→ MeterContext），`map.showData` 是可直接渲染的文案。
+    /// level=3 + type=IEC → 房间/电表明细
     func meterDetail(campus: String,
                      building: String,
                      room: String,
@@ -531,33 +609,39 @@ final class EcardClient {
         let selection: [String: String] = [
             "campus": campus, "building": building, "room": room
         ]
-
         let map = try await thirdData(feeitemID: feeitemID,
                                       type: "IEC",
                                       level: 3,
                                       selection: selection)
+
+        let missing = map.missingMeterKeys
+        guard missing.isEmpty else { throw EcardError.incompleteRoomDetail(missing) }
         guard let context = map.meterContext else {
-            throw EcardError.business(-1, "没有返回房间明细")
+            throw EcardError.incompleteRoomDetail(["map.data"])
         }
-        return MeterDetail(context: context,
-                           show: map.showData ?? [:],
-                           dataType: map.dataType)
+        return MeterDetail(context: context, show: map.showData ?? [:], dataType: map.dataType)
     }
 
     // MARK: 建单
 
     /// 建单。实测请求：
-    /// `feeitemid=408&tranamt=10&flag=choose&source=app&paystep=0&abstract=&third_party=…`
-    /// 再叠加 `MeterContext.formFields`（房间与电表明细，值做 JSON 编码）。
+    /// `feeitemid=408&tranamt=10&flag=choose&source=app&paystep=0&abstract=`
+    /// 再叠加 `MeterContext.formFields`（值做 JSON 编码）。
     ///
     /// - Parameters:
-    ///   - amount: 金额（元），上限见 `FeeItem.maxAmount` / `dayMaxAmount`
-    ///   - context: 第三级 getThirdData 带回的房间/电表上下文
-    ///   - thirdParty: 实测里有一个未解出的 `third_party` 值，先留空
+    ///   - thirdParty: 实测请求里有一个未解出的 `third_party` 值，先留空。
+    ///   - expectedRoom: 传了就会校验 `context.houseID` 与它一致，
+    ///     防止"切换房间后仍用上一间房的上下文"造成充错房间。
     func createOrder(amount: Decimal,
                      context: MeterContext,
                      thirdParty: String? = nil,
+                     expectedRoom: String? = nil,
                      feeitemID: String = EcardClient.electricityFeeItemID) async throws -> CreatedOrder {
+        guard amount > 0 else { throw EcardError.orderRejected("金额必须大于 0") }
+        if let expectedRoom, context.houseID != expectedRoom {
+            throw EcardError.orderRejected("房间上下文与所选房间不一致")
+        }
+
         var form: [String: String] = [
             "feeitemid": feeitemID,
             "tranamt":   NSDecimalNumber(decimal: amount).stringValue,
@@ -572,23 +656,34 @@ final class EcardClient {
         let req = makeRequest("\(Self.base.absoluteString)/blade-pay/pay",
                               method: "POST", form: form)
         let env: CreateOrderEnvelope = try await send(req)
-        guard let created = env.data, let orderID = created.orderid, !orderID.isEmpty else {
-            throw EcardError.business(env.code, env.msg ?? "建单失败")
-        }
-        _ = orderID
-        return created    }
 
-    /// 订单 + 可用支付方式（getpayinfo）
+        // 明确要求 success=true 且拿到订单号，不能只看有没有 orderid
+        guard env.code == 200, env.success == true else {
+            throw EcardError.orderRejected(env.msg ?? "success 不为 true")
+        }
+        guard let created = env.data,
+              let orderID = created.orderid,
+              !orderID.isEmpty
+        else {
+            throw EcardError.orderRejected("响应里没有订单号")
+        }
+        return created
+    }
+
     func payInfo(orderID: String) async throws -> PayInfoEnvelope {
         let req = makeRequest("/charge/pay/getpayinfo",
                               query: [URLQueryItem(name: "orderid", value: orderID)])
         return try await send(req)
     }
 
+    /// 订单状态。1 = 已完成
+    func orderStatus(orderID: String) async throws -> Int? {
+        try await payInfo(orderID: orderID).order?.status
+    }
+
     // MARK: 支付
 
-    /// 走「卡账户 / 卡余额」通道付掉。
-    /// 实测请求：`paytypeid=69&payType=CARDTSM&paystep=2&orderid=…`
+    /// 支付（paystep=2）。实测请求：`paytypeid=69&payType=CARDTSM&paystep=2&orderid=…`
     func pay(orderID: String,
              payTypeID: String,
              payTypeCode: String) async throws -> PayResultEnvelope {
@@ -600,34 +695,52 @@ final class EcardClient {
         ]
         let req = makeRequest("\(Self.base.absoluteString)/blade-pay/pay",
                               method: "POST", form: form)
-        return try await send(req)
+        let env: PayResultEnvelope = try await send(req)
+        guard env.code == 200, env.success != false else {
+            throw EcardError.business(env.code, env.msg ?? "支付失败")
+        }
+        return env
     }
 
-    /// 便捷：建单 → 自动挑「卡余额」通道 → 支付
+    /// 建单 → 挑余额通道 → 支付 → **再确认订单状态**
     ///
-    /// 通道优先取建单响应里的 `payList`（实测返回 `CARDTSM` 卡账户），
-    /// 取不到才退回 `69 / CARDTSM`（实测值）。
+    /// 通道必须同时满足：
+    ///   1. 是 ACCOUNT / CARD 类余额通道
+    ///   2. 明确免密（`nopassword == "0"`）
+    /// 不满足就抛错，绝不回退到硬编码通道。
     func rechargeElectricity(amount: Decimal,
-                             context: MeterContext) async throws -> PayResultEnvelope {
-        let order = try await createOrder(amount: amount, context: context)
+                             context: MeterContext,
+                             expectedRoom: String? = nil,
+                             feeitemID: String = EcardClient.electricityFeeItemID) async throws -> RechargeOutcome {
+        let order = try await createOrder(amount: amount,
+                                          context: context,
+                                          expectedRoom: expectedRoom,
+                                          feeitemID: feeitemID)
         guard let orderID = order.orderid else {
-            throw EcardError.business(-1, "没有拿到订单号")
+            throw EcardError.orderRejected("响应里没有订单号")
         }
 
-        let channel = order.payList?.first(where: { $0.isInternalBalance })
-        let payTypeID = channel?.id ?? "69"
-        let payTypeCode = channel?.code ?? "CARDTSM"
+        guard let channel = order.payList?.first(where: { $0.isInternalBalance }) else {
+            throw EcardError.paymentChannelUnavailable
+        }
+        guard channel.isPasswordFree else { throw EcardError.passwordRequired }
+        guard let payTypeID = channel.id, let payTypeCode = channel.code else {
+            throw EcardError.paymentChannelUnavailable
+        }
 
-        return try await pay(orderID: orderID,
-                             payTypeID: payTypeID,
-                             payTypeCode: payTypeCode)
+        _ = try await pay(orderID: orderID, payTypeID: payTypeID, payTypeCode: payTypeCode)
+
+        // 只有订单状态明确为「已完成」才算成功
+        if let status = try? await orderStatus(orderID: orderID), status == 1 {
+            return .completed(orderID: orderID)
+        }
+        return .pending(orderID: orderID)
     }
 }
 
 // MARK: - 金额工具
 
 extension Decimal {
-    /// 接口要的两位小数文本
     var ecardAmountText: String {
         let n = NSDecimalNumber(decimal: self)
         return n.rounding(accordingToBehavior: NSDecimalNumberHandler(
@@ -637,14 +750,13 @@ extension Decimal {
         )).stringValue
     }
 
-    /// 按电价换算电量（度），用于「充 10 元 ≈ 16.2 度」这类提示
     func kWh(pricePerKWh: Decimal?) -> Decimal? {
         guard let price = pricePerKWh, price > 0 else { return nil }
         return self / price
     }
 }
 
-// MARK: - 松散 JSON（第三级返回结构未完全定型时兜底）
+// MARK: - 松散 JSON
 
 enum JSONValue: Decodable {
     case string(String), number(Double), bool(Bool)
