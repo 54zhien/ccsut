@@ -204,14 +204,14 @@ struct ScheduleView: View {
                       }
                       .onAppear {
                           if InterfacePreview.page == "bottom" || InterfacePreview.page == "header-hidden" {
-                              verticalProxy.scrollTo(4, anchor: .bottom)
+                              verticalProxy.scrollTo(4, anchor: .top)
                           }
                       }
                       .task {
                           #if DEBUG
                           if InterfacePreview.page == "header-motion" {
                               try? await Task.sleep(for: .seconds(2))
-                              withAnimation(.easeInOut(duration: 0.5)) { verticalProxy.scrollTo(4, anchor: .bottom) }
+                              withAnimation(.easeInOut(duration: 0.5)) { verticalProxy.scrollTo(4, anchor: .top) }
                               try? await Task.sleep(for: .seconds(2))
                               withAnimation(.easeInOut(duration: 0.5)) { verticalProxy.scrollTo(1, anchor: .top) }
                           }
