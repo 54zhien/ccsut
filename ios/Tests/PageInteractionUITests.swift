@@ -3,9 +3,10 @@ import XCTest
 final class PageInteractionUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
-    private func launch(_ page: String) -> XCUIApplication {
+    private func launch(_ page: String, longList: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", page]
+        if longList { app.launchArguments.append("--preview-long-list") }
         app.launch()
         return app
     }
@@ -74,13 +75,13 @@ final class PageInteractionUITests: XCTestCase {
             let entry = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
             XCTAssertTrue(entry.waitForExistence(timeout: 5))
             entry.tap()
-            let back = app.buttons["返回教务"]
+            let back = app.navigationBars.buttons.firstMatch
             XCTAssertTrue(back.waitForExistence(timeout: 5))
             XCTAssertLessThan(back.frame.midX, app.frame.width * 0.25)
             capture(app, "academic-\(title)")
             back.tap()
             XCTAssertTrue(app.buttons["账号"].waitForExistence(timeout: 5))
-            XCTAssertFalse(back.exists)
+            XCTAssertFalse(app.navigationBars.firstMatch.exists)
         }
     }
 
@@ -98,5 +99,29 @@ final class PageInteractionUITests: XCTestCase {
             XCTAssertTrue(app.buttons["账号"].waitForExistence(timeout: 5),
                           "Each academic detail must support interactive edge swipe back")
         }
+    }
+
+    func testAcademicTitlesAndTermStripsRemainStableWhenPinned() {
+        var stripWidths: [CGFloat] = []
+        for (page, title) in [("scores", "成绩单"), ("exams", "考试")] {
+            let app = launch(page, longList: true)
+            let navigationTitle = app.navigationBars.staticTexts[title]
+            XCTAssertTrue(navigationTitle.waitForExistence(timeout: 5))
+            let titleFrame = navigationTitle.frame
+            XCTAssertEqual(titleFrame.midX, app.frame.midX, accuracy: 6)
+            let header = app.descendants(matching: .any).matching(identifier: "term-header-2026-2027-1").firstMatch
+            XCTAssertTrue(header.waitForExistence(timeout: 5))
+            stripWidths.append(header.frame.width)
+            XCTAssertEqual(header.frame.width, app.frame.width - 32, accuracy: 2)
+            XCTAssertEqual(header.value as? String, "inline")
+            app.swipeUp()
+            XCTAssertTrue(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value == 'floating'"), evaluatedWith: header)], timeout: 5) == .completed)
+            capture(app, "floating-term-\(page)")
+            XCTAssertTrue(navigationTitle.isHittable)
+            XCTAssertEqual(navigationTitle.frame.midY, titleFrame.midY, accuracy: 2)
+            XCTAssertEqual(header.frame.width, stripWidths.last!, accuracy: 2)
+            app.terminate()
+        }
+        XCTAssertEqual(stripWidths[0], stripWidths[1], accuracy: 2)
     }
 }

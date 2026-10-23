@@ -18,7 +18,6 @@ struct ScoreView: View {
 
     @State private var items: [ScoreItem] = []
     @State private var isLoading = false
-    @State private var headerScrollOffset: CGFloat = 0
     @State private var errorText: String?
     @State private var selectedTerm: String?
 
@@ -47,7 +46,7 @@ struct ScoreView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
-        .nagiPageChrome(title: "成绩单", scrollOffset: headerScrollOffset, showsBackButton: true) {
+        .academicDetailChrome(title: "成绩单") {
             NagiRefreshButton(isLoading: isLoading) { Task { await load(force: true) } }
         }
         .refreshable { await load(force: true) }
@@ -97,7 +96,7 @@ struct ScoreView: View {
             }
             .padding(.vertical, 12)
         }
-        .trackVerticalPageOffset($headerScrollOffset)
+        .coordinateSpace(name: "academic-scroll")
     }
 
     private var summaryCard: some View {
@@ -131,30 +130,28 @@ struct ScoreView: View {
     }
 
     private func termHeader(_ term: ScoreTerm) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(SchedulePresentation.termTitle(term.name))
-                    .font(.subheadline.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                if term.failedCount > 0 {
-                    Text("\(term.failedCount) 门未通过")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.red)
+        AcademicTermStrip(term: term.name) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(SchedulePresentation.termTitle(term.name))
+                        .font(.subheadline.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    if term.failedCount > 0 {
+                        Text("\(term.failedCount) 门未通过")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.red)
+                    }
                 }
+                HStack(spacing: 12) {
+                    Text(String(format: "GPA %.2f", term.gpa))
+                    Text("\(String(format: "%.1f", term.credits)) 学分")
+                    Text("\(term.items.count) 门课程")
+                }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
-            HStack(spacing: 12) {
-                Text(String(format: "GPA %.2f", term.gpa))
-                Text("\(String(format: "%.1f", term.credits)) 学分")
-                Text("\(term.items.count) 门课程")
-            }
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemGroupedBackground))
     }
 
     // MARK: - 加载

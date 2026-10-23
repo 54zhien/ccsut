@@ -37,8 +37,8 @@ struct ScheduleView: View {
                                 }
                                 .padding(.top, 12)
                                 .padding(.bottom, 12)
-                                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: deviceCornerRadius))
-                                .clipShape(.rect(cornerRadius: deviceCornerRadius))
+                                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+                                .clipShape(.rect(cornerRadius: 28))
                                 .padding(.horizontal, 12)
                                 .id("timetable-panel")
                                 Color.clear.frame(height: 1).id("page-end")

@@ -39,7 +39,7 @@ struct AcademicView: View {
                     }
                 }
 
-                Section("教务服务") {
+                Section {
                     NavigationLink(value: Destination.scores) {
                         service("成绩查询", subtitle: "课程成绩、学分与绩点", symbol: "chart.bar.doc.horizontal", tint: .blue)
                     }
@@ -63,6 +63,7 @@ struct AcademicView: View {
             .nagiPageChrome(title: "教务", scrollOffset: headerScrollOffset) {
                 AccountButton()
             }
+            .navigationTitle("教务")
             .navigationDestination(for: Destination.self) { destination in
                 switch destination {
                 case .scores: ScoreView()

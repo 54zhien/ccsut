@@ -236,7 +236,41 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
     }
 }
 
+/// Detail pages use the native navigation bar so the system owns interactive pop.
+/// Their titles stay centered and visible while retaining the shared blur.
+private struct AcademicDetailChrome<Actions: View>: ViewModifier {
+    let title: String
+    @ViewBuilder let actions: () -> Actions
+
+    func body(content: Content) -> some View {
+        content
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.visible, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .scrollEdgeEffectHidden(true, for: .top)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { actions() }
+                    .sharedBackgroundVisibility(.hidden)
+            }
+            .background(alignment: .top) {
+                GeometryReader { geometry in
+                    let height = geometry.safeAreaInsets.top + 12
+                    NagiHeaderGaussianBlur(statusBarFraction: height > 0 ? max(geometry.safeAreaInsets.top - 44, 0) / height : 0)
+                        .frame(height: height)
+                        .offset(y: -geometry.safeAreaInsets.top)
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+    }
+}
+
 extension View {
+    func academicDetailChrome<Actions: View>(title: String, @ViewBuilder actions: @escaping () -> Actions) -> some View {
+        modifier(AcademicDetailChrome(title: title, actions: actions))
+    }
+
     func nagiPageChrome<Actions: View>(title: String, scrollOffset: CGFloat, showsBackButton: Bool = false, @ViewBuilder actions: @escaping () -> Actions) -> some View {
         modifier(NagiPageChrome(title: title, scrollOffset: scrollOffset, showsBackButton: showsBackButton, actions: actions))
     }

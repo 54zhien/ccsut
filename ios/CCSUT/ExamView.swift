@@ -17,7 +17,6 @@ struct ExamView: View {
 
     @State private var items: [ExamItem] = []
     @State private var isLoading = false
-    @State private var headerScrollOffset: CGFloat = 0
     @State private var errorText: String?
     @State private var loadedTerms: Set<String> = []
 
@@ -57,7 +56,7 @@ struct ExamView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
-        .nagiPageChrome(title: "考试", scrollOffset: headerScrollOffset, showsBackButton: true) {
+        .academicDetailChrome(title: "考试") {
             NagiRefreshButton(isLoading: isLoading) { Task { await load(force: true) } }
         }
         .refreshable { await load(force: true) }
@@ -95,7 +94,7 @@ struct ExamView: View {
             }
             .padding(.vertical, 12)
         }
-        .trackVerticalPageOffset($headerScrollOffset)
+        .coordinateSpace(name: "academic-scroll")
     }
 
     /// 即将开始的那场（未来 60 天内最近的一场）
@@ -176,18 +175,17 @@ struct ExamView: View {
     }
 
     private func termHeader(_ term: String, count: Int) -> some View {
-        HStack {
-            Text(SchedulePresentation.termTitle(term))
-                .font(.subheadline.weight(.semibold))
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer()
-            Text("\(count) 场")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+        AcademicTermStrip(term: term) {
+            HStack {
+                Text(SchedulePresentation.termTitle(term))
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Text("\(count) 场")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(Color(.systemGroupedBackground))
     }
 
     private func timeText(_ exam: ExamItem) -> String {
@@ -215,7 +213,7 @@ struct ExamView: View {
             isLoading = true
             defer { isLoading = false }
             try? await Task.sleep(for: .milliseconds(250))
-            items = [InterfacePreview.exam]
+            items = InterfacePreview.exams
             return
         }
         #endif

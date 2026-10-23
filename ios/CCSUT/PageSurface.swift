@@ -78,6 +78,35 @@ struct NagiRefreshButton: View {
     }
 }
 
+/// Both academic lists share the same inset and surface when a section pins.
+struct AcademicTermStrip<Content: View>: View {
+    let term: String
+    @ViewBuilder var content: () -> Content
+    @State private var isFloating = false
+
+    var body: some View {
+        content()
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                if isFloating {
+                    Color.clear.glassEffect(.regular, in: Capsule())
+                } else {
+                    Capsule().fill(Color(.secondarySystemGroupedBackground))
+                }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("term-header-\(term)")
+            .accessibilityValue(isFloating ? "floating" : "inline")
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .onGeometryChange(for: Bool.self) { geometry in
+                geometry.frame(in: .named("academic-scroll")).minY <= 0.5
+            } action: { isFloating = $0 }
+    }
+}
+
 struct NagiBackButton: View {
     @Environment(\.dismiss) private var dismiss
 

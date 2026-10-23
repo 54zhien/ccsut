@@ -19,7 +19,6 @@ struct ElectiveView: View {
     @State private var keyword = ""
     @State private var selectedFilter: Filter = .all
     @State private var isLoading = false
-    @State private var headerScrollOffset: CGFloat = 0
     @State private var errorText: String?
     @State private var detail: TeachingClass?
     @State private var pending: PendingAction?
@@ -65,7 +64,7 @@ struct ElectiveView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
-        .nagiPageChrome(title: "选课", scrollOffset: headerScrollOffset, showsBackButton: true) {
+        .academicDetailChrome(title: "选课") {
             NagiRefreshButton(isLoading: isLoading) { Task { await load(force: true) } }
         }
         .refreshable { await load(force: true) }
@@ -126,7 +125,6 @@ struct ElectiveView: View {
             .padding(.top, 12)
             .padding(.bottom, 24)
         }
-        .trackVerticalPageOffset($headerScrollOffset)
         .scrollDismissesKeyboard(.immediately)
         .background(Color(.systemGroupedBackground))
         .confirmationDialog(
