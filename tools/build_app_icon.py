@@ -66,8 +66,8 @@ def generate():
                     e.set("id", "outlined-outer-border")
                     e.set("fill", light)
                     e.set("fill-rule", "evenodd")
-                    e.set("d", f"M {cx-outer},{cy} A {outer},{outer} 0 1 1 {cx+outer},{cy} A {outer},{outer} 0 1 1 {cx-outer},{cy} Z "
-                               f"M {cx-inner},{cy} A {inner},{inner} 0 1 0 {cx+inner},{cy} A {inner},{inner} 0 1 0 {cx-inner},{cy} Z")
+                    e.set("d", f"M {cx-outer:.3f},{cy:.3f} A {outer:.3f},{outer:.3f} 0 1 1 {cx+outer:.3f},{cy:.3f} A {outer:.3f},{outer:.3f} 0 1 1 {cx-outer:.3f},{cy:.3f} Z "
+                               f"M {cx-inner:.3f},{cy:.3f} A {inner:.3f},{inner:.3f} 0 1 0 {cx+inner:.3f},{cy:.3f} A {inner:.3f},{inner:.3f} 0 1 0 {cx-inner:.3f},{cy:.3f} Z")
             for e in element.iter():
                 if "fill" in e.attrib and e.get("fill") != "none":
                     e.set("fill", light)
@@ -75,7 +75,9 @@ def generate():
                     e.set("stroke", light)
             root.append(element)
         derived_paths.extend(e.get("d") for e in root.iter(f"{{{SVG}}}path") if e.get("id") != "outlined-outer-border")
-        ET.ElementTree(root).write(OUTPUT / "Assets" / f"{name}.svg", encoding="utf-8", xml_declaration=True)
+        xml = ET.tostring(root, encoding="unicode", xml_declaration=True)
+        xml = "\n".join(line.rstrip() for line in xml.splitlines()) + "\n"
+        (OUTPUT / "Assets" / f"{name}.svg").write_bytes(xml.encode("utf-8"))
         layer = copy.deepcopy(template)
         layer.update({"name": name, "image-name": f"{name}.svg", "opacity": 1,
                       "position": {"scale": 1, "translation-in-points": [0, 0]},

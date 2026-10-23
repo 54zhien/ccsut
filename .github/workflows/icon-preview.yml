@@ -16,6 +16,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Select matching Xcode
+        run: |
+          XCODE=$(ls -1d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
       - name: Compile native icon and inspect appearances
         run: |
           set -euo pipefail
@@ -27,14 +32,15 @@ jobs:
           xcrun assetutil --info "$RUNNER_TEMP/icon-preview/Assets.car" > "$RUNNER_TEMP/icon-preview/catalog.json"
           python3 tools/verify_app_icon.py "$RUNNER_TEMP/icon-preview/catalog.json" \
             > "$RUNNER_TEMP/icon-preview/verification.json"
-      - name: Locate native icon renderer
-        if: always()
+      - name: Render native icon appearances
         run: |
-          find /Applications/Xcode*.app -iname '*ictool*' -type f 2>/dev/null | head -20 > "$RUNNER_TEMP/icon-preview/render-tools.txt"
-          while IFS= read -r renderer; do
-            "$renderer" --help >> "$RUNNER_TEMP/icon-preview/render-help.txt" 2>&1 || true
-          done < "$RUNNER_TEMP/icon-preview/render-tools.txt"
-          find "$RUNNER_TEMP/icon-preview" -maxdepth 2 -type f
+          RENDERER="$(xcode-select -p)/Applications/Icon Composer.app/Contents/Executables/ictool"
+          "$RENDERER" --version
+          for APPEARANCE in Default Dark TintedDark; do
+            "$RENDERER" ios/CCSUT/AppIcon.icon --export-image \
+              --output-file "$RUNNER_TEMP/icon-preview/$APPEARANCE.png" \
+              --platform iOS --rendition "$APPEARANCE" --width 1024 --height 1024 --scale 1
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
