@@ -22,6 +22,7 @@ struct ScheduleView: View {
     @State private var selectedWeek = 1
     @State private var currentWeek = 1
     @State private var didPickWeek = false
+    @State private var detail: ScheduleSlot?
 
     // 4 大节，每行给足高度
     private let rows = 4
