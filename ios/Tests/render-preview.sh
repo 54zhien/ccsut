@@ -9,6 +9,7 @@ if not devices: raise SystemExit("No available iPhone simulator")
 devices.sort(key=lambda d: ("Pro" in d["name"], "Max" not in d["name"], d["name"]), reverse=True)
 print(devices[0]["udid"])
 ')
+if [ -n "${GITHUB_ENV:-}" ]; then echo "CCSUT_PREVIEW_DEVICE=$DEVICE" >> "$GITHUB_ENV"; fi
 APP="$RUNNER_TEMP/UIPreview/Build/Products/Debug-iphonesimulator/CCSUT.app"
 OUT="$RUNNER_TEMP/ui-screenshots"
 mkdir -p "$OUT"
@@ -24,6 +25,7 @@ capture() {
   xcrun simctl io "$DEVICE" screenshot "$OUT/$1-$2.png"
 }
 
+capture loading light
 capture schedule light
 capture schedule dark
 capture academic light

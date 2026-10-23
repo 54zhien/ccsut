@@ -25,6 +25,20 @@
 		A0000000000000000000001A /* InterfacePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001A /* InterfacePreview.swift */; };
 		A0000000000000000000001B /* SchedulePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001B /* SchedulePresentation.swift */; };
 		A0000000000000000000001C /* NagiPageChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001C /* NagiPageChrome.swift */; };
+
+900000000000000000000001 = {isa = PBXBuildFile; fileRef = 900000000000000000000002; };
+900000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/PageInteractionUITests.swift; sourceTree = "<group>"; };
+900000000000000000000003 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = CCSUTUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+900000000000000000000004 = {isa = PBXNativeTarget; buildConfigurationList = 90000000000000000000000A; buildPhases = (900000000000000000000005,900000000000000000000006,900000000000000000000007,); buildRules = (); dependencies = (90000000000000000000000C,); name = CCSUTUITests; productName = CCSUTUITests; productReference = 900000000000000000000003; productType = "com.apple.product-type.bundle.ui-testing"; };
+900000000000000000000005 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (900000000000000000000001,); runOnlyForDeploymentPostprocessing = 0; };
+900000000000000000000006 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+900000000000000000000007 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+90000000000000000000000A = {isa = XCConfigurationList; buildConfigurations = (900000000000000000000008,900000000000000000000009,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+90000000000000000000000B = {isa = PBXContainerItemProxy; containerPortal = D00000000000000000000002; proxyType = 1; remoteGlobalIDString = D00000000000000000000001; remoteInfo = CCSUT; };
+90000000000000000000000C = {isa = PBXTargetDependency; target = D00000000000000000000001; targetProxy = 90000000000000000000000B; };
+900000000000000000000008 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.imzhien.ccsut.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = CCSUT; CODE_SIGNING_ALLOWED = NO; }; name = Debug; };
+900000000000000000000009 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.imzhien.ccsut.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = CCSUT; CODE_SIGNING_ALLOWED = NO; }; name = Release; };
+
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -64,6 +78,7 @@
 			isa = PBXGroup;
 			children = (
 				C00000000000000000000002 /* CCSUT */,
+                900000000000000000000002,
 				C00000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -97,6 +112,7 @@
 			isa = PBXGroup;
 			children = (
 				B00000000000000000000012 /* CCSUT.app */,
+                900000000000000000000003,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -151,6 +167,7 @@
 			projectRoot = "";
 			targets = (
 				D00000000000000000000001 /* CCSUT */,
+                900000000000000000000004,
 			);
 		};
 /* End PBXProject section */

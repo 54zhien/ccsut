@@ -28,6 +28,13 @@ jobs:
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-build.log"
       - name: Render preview screens
         run: bash ios/Tests/render-preview.sh
+      - name: Verify native page interactions
+        run: |
+          set -o pipefail
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -35,5 +42,7 @@ jobs:
           path: |
             ${{ runner.temp }}/ui-screenshots/
             ${{ runner.temp }}/ui-build.log
+            ${{ runner.temp }}/ui-test.log
+            ${{ runner.temp }}/ui-tests.xcresult/
           if-no-files-found: error
           retention-days: 14

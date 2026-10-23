@@ -17,6 +17,7 @@ struct ScheduleView: View {
     @State private var choosing: ScheduleCell?
     @State private var pendingDetail: ScheduleSlot?
     @State private var headerScrollOffset: CGFloat = 0
+    @State private var previewRefreshCount = 0
     private let railWidth: CGFloat = 44
     private let headerHeight: CGFloat = 52
     private let weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -57,6 +58,8 @@ struct ScheduleView: View {
                     }
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("schedule-surface")
             .background(Color(.systemGroupedBackground))
             .nagiPageChrome(title: "课表", scrollOffset: headerScrollOffset) {
                 HStack(spacing: 8) {
@@ -77,6 +80,13 @@ struct ScheduleView: View {
             }
             .refreshable { await load(force: true) }
             .task { if bundle == nil { await load() } }
+            .overlay(alignment: .bottomTrailing) {
+                if InterfacePreview.page == "interactions" {
+                    Text("\(previewRefreshCount)")
+                        .accessibilityIdentifier("refresh-count")
+                        .padding(.bottom, 100)
+                }
+            }
             .sheet(item: $detail) { slot in
                 ScheduleDetailSheet(slot: slot)
                     .presentationDetents([.medium, .large])
@@ -349,6 +359,13 @@ struct ScheduleView: View {
     private func load(force: Bool = false) async {
         #if DEBUG
         if InterfacePreview.enabled {
+            if InterfacePreview.page == "loading" {
+                isLoading = true
+                defer { isLoading = false }
+                try? await Task.sleep(for: .seconds(30))
+                return
+            }
+            if force { previewRefreshCount += 1 }
             bundle = InterfacePreview.schedule
             currentWeek = 7
             selectedWeek = 7
