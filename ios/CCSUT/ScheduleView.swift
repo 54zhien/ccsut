@@ -84,12 +84,12 @@ struct ScheduleView: View {
                                 .frame(maxWidth: .infinity, minHeight: viewport.size.height)
                             }
                         }
-                        .pageRefreshControl { await load(force: true) }
                     }
                     .accessibilityIdentifier("schedule-scroll")
                     .scrollIndicators(.hidden)
                     .scrollEdgeEffectStyle(.soft, for: .top)
                     .scrollBounceBehavior(.always, axes: .vertical)
+                    .pageRefreshable { await load(force: true) }
                     .onScrollGeometryChange(for: CGFloat.self) { geometry in
                         max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
                     } action: { _, offset in headerScrollOffset = offset }

@@ -63,9 +63,9 @@ struct ScoreView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
-                    .pageRefreshControl(showsRefreshCount: true) { await load(force: true) }
                 }
                 .scrollEdgeEffectStyle(.soft, for: .top)
+                .pageRefreshable(showsRefreshCount: true) { await load(force: true) }
                 .coordinateSpace(name: "academic-scroll")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

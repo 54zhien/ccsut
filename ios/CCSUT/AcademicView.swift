@@ -47,10 +47,10 @@ struct AcademicView: View {
                     .padding(.bottom, 28)
                     .frame(maxWidth: 720)
                     .frame(maxWidth: .infinity)
-                    .pageRefreshControl { await loadUpcomingExam() }
                 }
                 .scrollEdgeEffectStyle(.soft, for: .top)
                 .scrollBounceBehavior(.always, axes: .vertical)
+                .pageRefreshable { await loadUpcomingExam() }
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
                     max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
                 } action: { _, offset in headerScrollOffset = offset }

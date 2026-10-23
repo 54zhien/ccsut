@@ -300,8 +300,20 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testLargeTextKeepsAcademicControlsAccessible() {
+        func reveal(_ element: XCUIElement, in app: XCUIApplication, movingForward: Bool) -> Bool {
+            for _ in 0..<14 {
+                if element.isHittable { return true }
+                let startY: CGFloat = movingForward ? 0.74 : 0.42
+                let endY: CGFloat = movingForward ? 0.56 : 0.62
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY))
+                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0)
+            }
+            return element.isHittable
+        }
+
         for page in ["schedule", "scores", "exams"] {
-            let app = launch(page, largeText: true)
+            let app = launch(page, longList: page == "exams", largeText: true)
             let control = page == "schedule" ? app.buttons["本周"] : app.buttons["返回教务"]
             XCTAssertTrue(control.waitForExistence(timeout: 5))
             XCTAssertTrue(control.isHittable)
@@ -317,6 +329,33 @@ final class PageInteractionUITests: XCTestCase {
                 let detail = app.staticTexts["平时(40%)"]
                 XCTAssertTrue(detail.waitForExistence(timeout: 3))
                 capture(app, "large-text-score-details")
+
+                let menu = app.buttons.matching(identifier: "academic-term-jump-menu").firstMatch
+                XCTAssertTrue(reveal(menu, in: app, movingForward: false), "Large-text semester menu must be reachable")
+                menu.tap()
+                let target = app.buttons["academic-term-jump-2025-2026-2"]
+                XCTAssertTrue(target.waitForExistence(timeout: 5))
+                XCTAssertTrue(target.isHittable)
+                target.tap()
+                let historical = app.staticTexts["机械设计基础"]
+                XCTAssertTrue(historical.waitForExistence(timeout: 5))
+                XCTAssertTrue(historical.isHittable, "Historical score must be visible after the large-text jump")
+                capture(app, "large-text-scores-historical-term")
+            } else if page == "exams" {
+                let menu = app.buttons.matching(identifier: "academic-term-jump-menu").firstMatch
+                XCTAssertTrue(reveal(menu, in: app, movingForward: true), "Large-text exam semester menu must be reachable")
+                menu.tap()
+                let target = app.buttons["academic-term-jump-2025-2026-2"]
+                XCTAssertTrue(target.waitForExistence(timeout: 5))
+                XCTAssertTrue(target.isHittable)
+                target.tap()
+                let historical = app.staticTexts["历史学期考试"]
+                XCTAssertTrue(historical.waitForExistence(timeout: 5))
+                XCTAssertTrue(historical.isHittable, "Historical exam must be visible after the large-text jump")
+                let examDay = app.staticTexts.matching(NSPredicate(format: "label == %@ OR label == %@", "20", "20日")).firstMatch
+                XCTAssertTrue(examDay.waitForExistence(timeout: 5))
+                XCTAssertTrue(examDay.isHittable, "Historical ExamRow date rail must be visible at large text")
+                capture(app, "large-text-exams-historical-date-rail")
             }
             app.terminate()
         }

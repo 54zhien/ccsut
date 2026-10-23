@@ -164,42 +164,39 @@ final class PageLoadGate {
 }
 
 extension View {
-    /// Apply to the content INSIDE the vertical ScrollView, so the nearest
-    /// ancestor is the page scroll view, never the week selector or a web view.
-    func pageRefreshControl(showsRefreshCount: Bool = false, action: @escaping @MainActor () async -> Void) -> some View {
-        modifier(PageRefreshContent(showsRefreshCount: showsRefreshCount, action: action))
+    /// Apply directly to the page's vertical ScrollView. SwiftUI owns the
+    /// refresh lifecycle, including empty/loading content and return animation.
+    func pageRefreshable(showsRefreshCount: Bool = false, action: @escaping @MainActor () async -> Void) -> some View {
+        modifier(PageRefreshable(showsRefreshCount: showsRefreshCount, action: action))
     }
 }
 
-private struct PageRefreshContent: ViewModifier {
+private struct PageRefreshable: ViewModifier {
     let showsRefreshCount: Bool
     let action: @MainActor () async -> Void
+#if DEBUG
     @State private var refreshCount = 0
-    @State private var refreshDiagnostic = "waiting for scroll attachment"
+    @State private var refreshDiagnostic = "implementation=SwiftUI.refreshable; callbackCount=0"
 
     private var diagnosticsEnabled: Bool {
-        #if DEBUG
         InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh")
-        #else
-        false
-        #endif
     }
+#endif
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         content
-            .background {
-                PageRefreshAttachment {
-                    await action()
-                    refreshCount += 1
-                } diagnosticsEnabled: {
-                    diagnosticsEnabled
-                } onDiagnostic: {
-                    refreshDiagnostic = $0
-                }
-                .allowsHitTesting(false)
+            .scrollBounceBehavior(.always, axes: .vertical)
+            .refreshable {
+                await action()
+#if DEBUG
+                guard !Task.isCancelled else { return }
+                refreshCount += 1
+                refreshDiagnostic = "implementation=SwiftUI.refreshable; callbackCount=\(refreshCount)"
+#endif
             }
+#if DEBUG
             .overlay(alignment: .topTrailing) {
-                #if DEBUG
                 VStack(alignment: .trailing, spacing: 0) {
                     if showsRefreshCount && InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh") {
                         Text("\(refreshCount)").font(.caption2)
@@ -216,158 +213,8 @@ private struct PageRefreshContent: ViewModifier {
                     }
                 }
                 .allowsHitTesting(false)
-                #endif
             }
-    }
-}
-
-/// UIKit owns the pull distance, retained loading inset and final return animation.
-/// Keep this attachment outside loading/empty/data branches and end only after await.
-private struct PageRefreshAttachment: UIViewRepresentable {
-    let action: @MainActor () async -> Void
-    let diagnosticsEnabled: () -> Bool
-    let onDiagnostic: @MainActor (String) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(action: action, diagnosticsEnabled: diagnosticsEnabled, onDiagnostic: onDiagnostic)
-    }
-    func makeUIView(context: Context) -> AnchorView {
-        let view = AnchorView()
-        view.coordinator = context.coordinator
-        view.isUserInteractionEnabled = false
-        return view
-    }
-    func updateUIView(_ view: AnchorView, context: Context) {
-        context.coordinator.action = action
-        context.coordinator.diagnosticsEnabled = diagnosticsEnabled
-        context.coordinator.onDiagnostic = onDiagnostic
-        view.connect()
-    }
-    static func dismantleUIView(_ view: AnchorView, coordinator: Coordinator) {
-        coordinator.detach()
-    }
-
-    final class AnchorView: UIView {
-        weak var coordinator: Coordinator?
-        override func didMoveToWindow() { super.didMoveToWindow(); connect() }
-        override func didMoveToSuperview() { super.didMoveToSuperview(); connect() }
-        override func layoutSubviews() { super.layoutSubviews(); connect() }
-
-        func connect() {
-            guard window != nil else { return }
-            var ancestor = superview
-            while let view = ancestor {
-                if let scrollView = view as? UIScrollView {
-                    coordinator?.attach(to: scrollView)
-                    return
-                }
-                ancestor = view.superview
-            }
-        }
-    }
-
-    @MainActor final class Coordinator: NSObject {
-        var action: @MainActor () async -> Void
-        var diagnosticsEnabled: () -> Bool
-        var onDiagnostic: @MainActor (String) -> Void
-        private weak var scrollView: UIScrollView?
-        private let control = UIRefreshControl()
-        private var task: Task<Void, Never>?
-        private weak var diagnosticPanRecognizer: UIPanGestureRecognizer?
-        private var minimumObservedOffsetY: CGFloat?
-        private var valueChangedCount = 0
-        private var lastDiagnostic: String?
-
-        init(action: @escaping @MainActor () async -> Void,
-             diagnosticsEnabled: @escaping () -> Bool,
-             onDiagnostic: @escaping @MainActor (String) -> Void) {
-            self.action = action
-            self.diagnosticsEnabled = diagnosticsEnabled
-            self.onDiagnostic = onDiagnostic
-            super.init()
-            control.addTarget(self, action: #selector(refresh), for: .valueChanged)
-        }
-
-        func attach(to view: UIScrollView) {
-            if scrollView === view {
-                installDiagnosticPanObserver(on: view)
-                reportDiagnostic("attach-check")
-                return
-            }
-            detach()
-            scrollView = view
-            view.alwaysBounceVertical = true
-            view.refreshControl = control
-            installDiagnosticPanObserver(on: view)
-            reportDiagnostic("attached")
-        }
-
-        private func installDiagnosticPanObserver(on view: UIScrollView) {
-            guard diagnosticsEnabled() else { return }
-            guard diagnosticPanRecognizer !== view.panGestureRecognizer else { return }
-            diagnosticPanRecognizer?.removeTarget(self, action: #selector(trackPan(_:)))
-            diagnosticPanRecognizer = view.panGestureRecognizer
-            view.panGestureRecognizer.addTarget(self, action: #selector(trackPan(_:)))
-            minimumObservedOffsetY = view.contentOffset.y
-        }
-
-        @objc private func trackPan(_ recognizer: UIPanGestureRecognizer) {
-            guard diagnosticsEnabled(), let scrollView,
-                  recognizer === scrollView.panGestureRecognizer else { return }
-            if recognizer.state == .began {
-                minimumObservedOffsetY = scrollView.contentOffset.y
-            } else if minimumObservedOffsetY == nil || scrollView.contentOffset.y < minimumObservedOffsetY! {
-                minimumObservedOffsetY = scrollView.contentOffset.y
-            }
-            switch recognizer.state {
-            case .ended, .cancelled, .failed:
-                reportDiagnostic("pan-\(recognizer.state)")
-            default:
-                break
-            }
-        }
-
-        private func reportDiagnostic(_ event: String) {
-            guard diagnosticsEnabled(), let scrollView else { return }
-            let minimumY = minimumObservedOffsetY.map { String(format: "%.1f", Double($0)) } ?? "n/a"
-            let message = [
-                "event=\(event)",
-                "target=\(NSStringFromClass(type(of: scrollView)))",
-                "frame=\(scrollView.frame)",
-                "contentSize=\(scrollView.contentSize)",
-                "alwaysBounceVertical=\(scrollView.alwaysBounceVertical)",
-                "refreshControlMatches=\(scrollView.refreshControl === control)",
-                "contentOffsetY=\(String(format: "%.1f", Double(scrollView.contentOffset.y)))",
-                "minimumObservedOffsetY=\(minimumY)",
-                "valueChangedCount=\(valueChangedCount)"
-            ].joined(separator: "; ")
-            guard message != lastDiagnostic else { return }
-            lastDiagnostic = message
-            onDiagnostic(message)
-        }
-
-        @objc private func refresh() {
-            valueChangedCount += 1
-            reportDiagnostic("valueChanged")
-            guard task == nil else { return }
-            task = Task { @MainActor [weak self] in
-                guard let self else { return }
-                await action()
-                guard !Task.isCancelled else { return }
-                control.endRefreshing()
-                task = nil
-            }
-        }
-
-        func detach() {
-            diagnosticPanRecognizer?.removeTarget(self, action: #selector(trackPan(_:)))
-            diagnosticPanRecognizer = nil
-            task?.cancel()
-            task = nil
-            control.endRefreshing()
-            if scrollView?.refreshControl === control { scrollView?.refreshControl = nil }
-            scrollView = nil
-        }
+#endif
     }
 }
 
