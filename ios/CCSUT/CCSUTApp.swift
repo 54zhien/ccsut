@@ -167,5 +167,4 @@ struct ProfileView: View {
         guard let name = session.studentName, let first = name.first else { return "?" }
         return String(first)
     }
-
 }

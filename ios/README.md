@@ -1,136 +1,157 @@
-# CCSUT · iOS 客户端
+# 长工教务 · iOS
 
 长沙工业学院教务系统的原生 iOS 客户端。
-**SwiftUI + Swift 6 + iOS 26**，全部使用 Apple 当前最新接口。
+SwiftUI + Swift 6 + iOS 26。
 
 ---
 
-## 技术选型（为什么是这些）
+## 功能
 
-| 层 | 选择 | 理由 |
+| 模块 | 数据源 | 实测规模 |
 |---|---|---|
-| UI | SwiftUI | Apple 官方唯一推荐方向，UIKit 已进入维护期 |
-| 状态 | `@Observable` 宏 | iOS 17 起取代 `ObservableObject`，[官方迁移指南](https://developer.apple.com/documentation/SwiftUI/Migrating-from-the-observable-object-protocol-to-the-observable-macro) |
-| 网页 | **WebView + WebPage**（WebKit for SwiftUI） | iOS 26 原生，不再需要 `UIViewRepresentable` 包 `WKWebView` |
-| 注入 JS | `callJavaScript(_:arguments:)` | 参数自动转义，不用手写 JSON |
-| 材质 | `glassEffect` | iOS 26 Liquid Glass |
-| 标签栏 | `Tab(_:systemImage:value:)` + `tabBarMinimizeBehavior` | iOS 18 / 26 新语法 |
-| 密钥 | Keychain（`Security`） | 系统级，比 UserDefaults 安全 |
+| 课表 | `POST /admin/xsd/pkgl/xskb/sdpkkbList` | 98 条 / 10 门课 / 4 大节 × 7 天 |
+| 成绩 | `GET /admin/ydd/inf/getXscjJson?xnxq=111` | 61 门 / 5 个学期 |
+| 选课 | `POST /admin/xsd/xk/listjxbDataV2` | 138 门（63 网课 + 75 面授） |
+| 会话 | `TGC` 14 天 | 冷启动免登录，到期静默续期 |
 
-**部署目标：iOS 26.0**。用了 iOS 26 专属 API，低于这个版本编译不过。
-如果你要兼容 iOS 18，需要把 `WebView`/`WebPage` 换回 `UIViewRepresentable + WKWebView`，并把 `glassEffect` 换成 `.thinMaterial`。
+登录全部走 WebView 代理，不重写任何加密逻辑。
 
 ---
 
-## 创建工程
+## 认证体系
+
+### 域名拓扑
 
 ```
-Xcode 26 → File → New → Project
-├── iOS → App
-├── Product Name: CCSUT
-├── Interface: SwiftUI
-├── Language: Swift
-└── Minimum Deployment: iOS 26.0
+auth.ccsut.cn   CAS 统一身份认证（Spring Boot + Angular）
+tls.ccsut.cn    教务系统（超星综合教学管理系统 v3）
+ehall.ccsut.cn  智慧校园门户（Pitcher 3.0，只做导航）
 ```
 
-建好后删掉自动生成的 `ContentView.swift`，把 `ios/CCSUT/` 下这 7 个文件拖进工程：
+### CAS 的三个页签
 
-```
-CCSUT/
-├── CCSUTApp.swift       App 入口 + RootView + TabView + 我的页
-├── Session.swift        会话：Keychain / 探测 / TGC 续期
-├── API.swift            网络层 + 课表 HTML 解析
-├── Models.swift         数据模型（按实测 JSON 定义）
-├── LoginView.swift      登录页（原生 UI + 隐藏 WebView）
-├── ScheduleView.swift   课表网格
-└── ElectiveView.swift   选课浏览
-```
+页签 class 是 `.ant-tabs-tab`（Angular + Ant Design）：
 
-拖进去时勾选 **Copy items if needed** + 目标 target。
-
----
-
-## Info.plist
-
-现代 Xcode 用 `GENERATE_INFOPLIST_FILE = YES`，大部分键自动生成。需要手动补的只有：
-
-| 键 | 值 | 原因 |
+| 页签 | 字段 | 说明 |
 |---|---|---|
-| `CFBundleDisplayName` | `长工院教务` | 桌面名称 |
-| `UILaunchScreen` | `{}`（空字典） | 避免黑屏 |
-| `NSAppTransportSecurity` | **不需要** | 全站 HTTPS |
+| 扫码登录 | 二维码 | 不需要验证码，最快 |
+| 密码登录 | 学号 + 密码 + 短信验证码 | 密码是独立的一套 |
+| **验证码登录** | 工号/学号/手机号 + 短信验证码 | **本 App 用这条，不需要密码** |
 
-**不需要** `WKAppBoundDomains`——设了会限制 WebView 只能访问白名单域名，我们的登录链路跨 `auth.ccsut.cn` → `tls.ccsut.cn`，设了反而更麻烦。
+验证码是**短信验证码**（DOM 里没有 captcha 图片，只有「获取验证码」按钮）。
+服务端先校验验证码，空的直接拒，密码根本不检查。
+
+### Cookie 生命周期
+
+| Cookie | 域 | 有效期 | 作用 |
+|---|---|---|---|
+| `TGC` | auth.ccsut.cn | **14 天** | CAS 票据，静默续期的关键 |
+| `jw_uf` | tls.ccsut.cn | 4 小时 | **教务接口唯一必需的凭证** |
+| `username` / `puid` | tls.ccsut.cn | 14 天 | 身份标识 |
+| `JSESSIONID` | tls.ccsut.cn | 会话级 | 可有可无 |
+
+**实测结论**：把 14 条 Cookie 逐个删掉做隔离测试，只有去掉 `jw_uf` 会失败，其余全部能拿到数据。
 
 ---
 
-## 签名（自签）
+## 关键接口
+
+### 课表
 
 ```
-Target → Signing & Capabilities
-├── Team: 你的 Apple ID（Personal Team 即可）
-├── Bundle Identifier: 改成唯一的，如 com.你的名字.ccsut
-└── Automatically manage signing: ✓
+GET  /admin/xsd/pkgl/xskb/queryKbForXsd?xnxq=2026-2027-1   ← 只用来取隐藏字段 xhid
+POST /admin/xsd/pkgl/xskb/sdpkkbList?xnxq=...&xhid=...      ← 真数据
 ```
 
-Personal Team 的限制：
-- **7 天过期**，到期要重新签名安装
-- 最多 3 个 App
-- 无法使用 Push / Background Modes
+`queryKbForXsd` 返回的 HTML 里 `<td>` 全是空的，数据是页面加载后 AJAX 拉的。
+别解析 HTML，直接调 `sdpkkbList`。
 
-**Keychain 在自签下正常工作**，`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` 不需要额外 entitlement。
+字段里都包着 `<a href="javascript:...">`，要剥。`djc` 是 1-8（小节），压缩成 4 大节：`(djc + 1) / 2`。
 
----
-
-## 运行前要改的一处
-
-`Session.swift` 里的 `CookieKey` 用了 v2 后缀，如果你之前跑过 v1 版本，会重新登录一次。这是故意的——v1 存的是旧结构。
-
-首次登录走这里：
+### 成绩
 
 ```
-App 启动
-  → Keychain 有 Cookie？→ 注入 → 探测 /admin/
-      ├── 200 且非 login → 直接进主界面
-      └── 303 到 login  → TGC 还在？→ 静默续期 → 进
-                        → TGC 也没了 → 登录页
-  → Keychain 空 → 登录页
+GET /admin/ydd/inf/getXscjJson?xnxq=111
 ```
 
----
+`xnxq=111` 是服务端约定的「全部学期」，一次拿回所有成绩。
 
-## 各模块状态
+**不要走 `/admin/xsd/xsdzgcjcx/xscjdy`** —— 那是 PC 端的 JSP 报表，学校缺 `.rpx` 模板文件，永远报「报表文件不存在」。`ydd` 这个模块（超星「云督导」）才是移动端用的 JSON 接口。
 
-| 模块 | 代码 | 验证状态 |
-|---|---|---|
-| 登录（CAS 注入填表） | ✅ 完成 | ⚠️ 未在真机跑过，JS 逻辑在浏览器里验证过 |
-| Cookie 持久化 | ✅ 完成 | ⚠️ 待真机验证 Keychain 存取 |
-| TGC 静默续期 | ✅ 完成 | ⚠️ 待第 13 天验证 |
-| 课表网格 | ✅ 完成 | ⚠️ **当前学期无数据**，解析逻辑未跑过真实数据 |
-| 选课浏览 | ✅ 完成 | ✅ JSON 结构已实测（71 KB 真实响应） |
-| 成绩 | ✅ WebView 兜底 | ✅ 接口地址已实测（JSP 报表） |
+### 选课
 
-**课表这块要特别注意**：现在是 2026-2027-1 选课阶段，`queryKbForXsd` 返回的表格是空的。
-`ScheduleParser` 按 `rowspan` 占位算法写得比较保守，等课表生成后第一次跑，可能需要根据实际单元格结构调整 `splitLines` 的切分逻辑。
+```
+POST /admin/xsd/xk/listV2              ← 拿 pcencs（可能有多批）
+POST /admin/xsd/xk/listjxbDataV2       ← 拿具体课程
+```
 
----
+`pcencs` 是 `{pcid: pcenc}`，**可能有多批**（实测 2 批：线上 63 门 + 线下 75 门），必须遍历合并，只取第一个会漏一大半。
 
-## 已知限制
-
-1. **选课是只读的**。写操作（选课、退课）不做——时间窗口短、失败不可逆、出事是学籍问题。
-2. **成绩走 WebView**。`/admin/xsd/xsdzgcjcx/xscjdy` 会 302 到 JSP 报表引擎（`showReportNoWord.jsp`），那套和 Vue 是两代技术，不值得啃。
-3. **没有推送**。自签拿不到 APNs 权限。
-4. **后台不保活**。iOS 自签没有 Background Modes，只能前台续期。好在 TGC 有 14 天，正常使用完全够。
+`status == "1"` 表示已选。
 
 ---
 
-## 调试技巧
+## 踩过的坑
 
-登录卡住时，`LoginView` 底部会露出最近 3 条日志（`logLines`），能看到：
-- `加载认证页…` → WebView 在加载
-- `注入：ok / no-form / no-button` → JS 执行结果
-- `已提交，等待跳转…` → 提交了但没跳成功
+按发现顺序，都是实测踩出来的：
 
-如果一直 `no-form`，说明页面结构变了，去 Safari 里打开 CAS 页对照一下 `input[type=password]` 是否还在。
+**1. WebView 不可见会停止渲染**
+把 `WKWebView` 缩成 1×1 或 `opacity(0.01)`，WebKit 会判定不可见并停止导航，表现为永远卡在「加载认证页」。
+正确做法是全屏渲染 + 用不透明的原生层遮住。
 
-`ProfileView` 能看到当前所有 Cookie 和 TGC 剩余天数，用来判断续期是否正常。
+**2. CAS 登录页的 URL 里含 `tls.ccsut.cn`**
+```swift
+// 错：CAS 页的 service 参数里就含这个域名，会把登录页误判成已登录
+absolute.contains("tls.ccsut.cn")
+// 对：按 host 精确匹配
+url.host == "tls.ccsut.cn"
+```
+
+**3. 响应结构的字段类型和直觉不符**
+```swift
+let kfrlbfb: Int?                            // 实际是字符串 "100"
+let jxms: String?                            // 实际是数组 ["中文教学"]
+```
+任一不符整个结构解码失败，而 `if let env = try? JSONDecoder()...` 会**吞掉错误**，既不报警也不显示失败，只是给你一个空列表。
+用不到就别声明，`Decodable` 会忽略未声明的键。
+
+**4. `httpShouldSetCookies` 会覆盖手写的 Cookie header**
+`URLSessionConfiguration.httpShouldSetCookies = true` 时，`URLSession` 用 `HTTPCookieStorage` 里的 Cookie 替换你手写的 `Cookie` 头。
+
+**5. `adoptCookies` 的轮询结束条件**
+不能以「拿到任意一条 Cookie」为结束 —— 打开 CAS 页瞬间就有 `JSESSIONID`，这时还没登录。要等 `jw_uf` / `puid` / `username` 出现。
+
+**6. Angular 渲染延迟**
+`didFinish` 时 DOM 往往还是空的，`querySelectorAll('.ant-tabs-tab')` 得到空数组。必须轮询等页签出现。
+
+---
+
+## 构建
+
+GitHub Actions + `macos-26` runner，Xcode 26。
+
+```bash
+git push origin main      # 自动构建
+```
+
+产物是**未签名 IPA**，用 SideStore / Sideloadly 自签安装。
+
+部署目标 **iOS 26.0**（用了 `glassEffect`、`tabBarMinimizeBehavior`）。
+
+---
+
+## 目录
+
+```
+ios/CCSUT/
+├── CCSUTApp.swift      入口 / RootView / TabView / 我的页
+├── Session.swift       会话：Keychain / CookieJar / TGC 续期
+├── API.swift           网络层
+├── Models.swift        数据模型
+├── LoginView.swift     登录页（原生 UI + 后台 WebView）
+├── ScheduleView.swift  课表（4 大节 × 7 天 + 周次胶囊）
+├── ScoreView.swift     成绩单（按学期分组 + GPA）
+├── ElectiveView.swift  选课（138 门 + 已选筛选）
+├── WebPanel.swift      WKWebView 容器 + JS 执行
+└── WebLoginSheet.swift 底部弹窗登录（备用）
+```
