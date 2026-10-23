@@ -121,7 +121,7 @@ struct ExamView: View {
     }
 
     private var grouped: [String: [ExamItem]] {
-        Dictionary(grouping: items) { $0.dataXnxq ?? "未知学期" }
+        Dictionary(grouping: items) { $0.term ?? $0.dataXnxq ?? "未知学期" }
     }
 
     private var terms: [String] {
@@ -230,7 +230,10 @@ struct ExamView: View {
 
         for term in Self.terms {
             do {
-                let list = try await APIClient.shared.examList(xnxq: term)
+                var list = try await APIClient.shared.examList(xnxq: term)
+                // 服务端的 dataXnxq 恒为当前学期，不能用来分组。
+                // 每条记录真正属于哪个学期，只有发起请求的人知道。
+                for i in list.indices { list[i].term = term }
                 collected.append(contentsOf: list)
             } catch let e as APIError {
                 if case .notLoggedIn = e {
