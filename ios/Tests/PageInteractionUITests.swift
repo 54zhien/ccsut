@@ -206,6 +206,10 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testAcademicPagesPullToRefreshIncludingEmptyStates() {
+        let previousContinueAfterFailure = continueAfterFailure
+        continueAfterFailure = true
+        defer { continueAfterFailure = previousContinueAfterFailure }
+
         for empty in [false, true] {
             for page in ["scores", "exams", "electives"] {
                 let app = launch(page, refresh: true, empty: empty)
