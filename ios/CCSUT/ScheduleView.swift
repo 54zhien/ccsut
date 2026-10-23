@@ -11,7 +11,7 @@ struct ScheduleView: View {
     @State private var isLoading = false
     @State private var errorText: String?
     @State private var selectedWeek = 1
-    @State private var weekScrollID: String? = "schedule-week-1"
+    @State private var weekScrollID: Int? = 1
     @State private var currentWeek = 1
     @State private var didPickWeek = false
     @State private var referenceDate: Date?
@@ -171,7 +171,7 @@ struct ScheduleView: View {
         didPickWeek = true
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
             selectedWeek = week
-            weekScrollID = "schedule-week-\(week)"
+            weekScrollID = week
         }
     }
 
@@ -197,7 +197,6 @@ struct ScheduleView: View {
                         }
                         .accessibilityLabel(week == currentWeek ? "本周" : "第 \(week) 周")
                         .accessibilityAddTraits(week == selectedWeek ? [.isSelected] : [])
-                        .id("schedule-week-\(week)")
                     }
                 }
                 .scrollTargetLayout()
@@ -370,7 +369,7 @@ struct ScheduleView: View {
             bundle = InterfacePreview.schedule
             currentWeek = 7
             selectedWeek = 7
-            weekScrollID = "schedule-week-7"
+            weekScrollID = 7
             didPickWeek = true
             referenceDate = ISO8601DateFormatter().date(from: "2026-10-23T09:41:00+08:00")
             if InterfacePreview.page == "course" { detail = cells.first?.courses.first }
@@ -391,7 +390,7 @@ struct ScheduleView: View {
                 referenceDate = Date()
                 if !didPickWeek {
                     selectedWeek = week
-                    weekScrollID = "schedule-week-\(week)"
+                    weekScrollID = week
                     didPickWeek = true
                 }
             }

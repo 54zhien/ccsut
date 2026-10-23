@@ -113,3 +113,21 @@ and leave too much unused lower space. Keep the icon and business logic unchange
   changing the full suite or its pass criteria. Both previous center failures are
   retained. The browser live-log fallback was unavailable locally; it made no
   repository or account changes.
+- Independent read-only review of 27263ff confirmed that the semantic week IDs
+  match the binding in initialization and selection, and no legacy week-bar
+  onAppear/onChange command remains to compete with the binding.
+- Production 27263ff7fb506fa3484780254d59d6b18c09c2b4 passed Release
+  39930077678 and regression 39930076368. Downloaded IPA ZIP/bundle/icon checks
+  passed. SHA256:
+  6411da4901b5b0c9f8d07f77af4cde70461370130f78ea13dcfc69b3f8829511.
+- Early evidence from UI 39930076203: ten other checks still pass, while the
+  current chip stays at610pt (zero initial scroll offset). The String semantic
+  binding did not resolve the target despite the view-level String identity.
+  Align the binding with the actual Int identity supplied by ForEach and remove
+  the competing explicit String id. This retains the same native binding/center
+  anchor and unchanged content margins.
+- Split the suite into an early positioning check and the other ten checks in
+  sequence. The full eleven checks remain required for a successful job; the
+  positioning test is not repeated in the second invocation. Publish its log and
+  screenshots immediately, including on failure, before the other ten checks and
+  before the slow compact render. Archive both result bundles.
