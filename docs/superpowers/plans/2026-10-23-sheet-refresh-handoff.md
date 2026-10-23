@@ -93,3 +93,12 @@ Native-chrome commit `6fa3d4ce6a8458b6b3334c52568b69a2f5e32d58` compiled and pac
 - The main TabView uses `.tabBarMinimizeBehavior(.never)` so both tabs remain expanded during scrolling.
 
 Apple API references: [symbol image configuration](https://developer.apple.com/documentation/uikit/configuring-and-displaying-symbol-images-in-your-ui), [Image sizing](https://developer.apple.com/documentation/swiftui/image), [never minimize tab bars](https://developer.apple.com/documentation/swiftui/tabbarminimizebehavior/never).
+
+### Native chrome and final sheet/tab package
+
+- Final production commit: `60db135a2cb79abc6e23dd9ea8fab28af5097047`, including native-chrome commit `6fa3d4c`.
+- Release build, IPA package and artifact upload succeeded: https://github.com/54zhien/ccsut/actions/runs/39976523258.
+- Download: `D:/Codex/CCSUT-deliveries/60db135/CCSUT-60db135-unsigned.ipa`.
+- Size: 4,568,057 bytes; SHA256: `1f2c55c4e04af8ba523862099a904fb4ac6ebf1fcb17b90a9fda61bdc8092591`.
+- ZIP integrity and app executable verified; bundle `com.imzhien.ccsut`; minimum iOS 26.0; primary AppIcon; actual Boolean high-refresh opt-in is true.
+- No application, UI, regression or performance tests ran. Native blur appearance, web-symbol optical alignment and compact-sheet layout still require device acceptance. The IPA is unsigned; PR2 remains draft and main is unchanged.
