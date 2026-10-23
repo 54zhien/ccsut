@@ -30,4 +30,12 @@
 
 The user's no-tests/package-only instruction remains in force. Static source review and whitespace checks precede Release compilation and IPA integrity inspection. No app tests, UI tests, simulator interactions or physical-device acceptance are claimed. Refresh hold behavior, pinned-header collision, corner alignment and blur appearance still require device observation.
 
-Build and delivery evidence will be recorded after the workflow completes.
+## Build and delivery
+
+- Production commit: `d01545b2cb97be3d0ce2fc664b11a705c8330b7b`.
+- Manual Release workflow: https://github.com/54zhien/ccsut/actions/runs/39962135365 — success; compile, package and artifact upload completed. No test step ran.
+- Downloaded artifact: `D:/Codex/CCSUT-deliveries/d01545b/CCSUT-d01545b-unsigned.ipa`.
+- Size: 4,557,415 bytes.
+- SHA256: `812f7c3f7bb77bca6addd5c2d1c6461a2a85ef8f83b87ae5b29ba59a3db1f2a2`.
+- ZIP integrity passed; executable present; bundle `com.imzhien.ccsut`; minimum iOS 26.0; primary `AppIcon`; actual Boolean `CADisableMinimumFrameDurationOnPhone = true`.
+- The previous delivered `6437f5c` and its device feedback remain documented in `2026-10-23-web-fit-week-recovery.md`; it is not presented as device-approved.
