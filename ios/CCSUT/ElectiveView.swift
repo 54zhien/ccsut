@@ -20,10 +20,6 @@ struct ElectiveView: View {
     @State private var isLoading = false
     @State private var errorText: String?
     @State private var detail: TeachingClass?
-    @State private var batchLog: [String] = []
-    @State private var rawSnippet = ""
-    @State private var cookieCount = 0
-    @State private var cookieNames = ""
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "全部"
@@ -192,21 +188,17 @@ struct ElectiveView: View {
             var seen = Set<String>()
             var lastError: Error?
 
-            var log: [String] = []
-            log.append("strategy: \(initData.pcencs?.count ?? 0) 个批次")
 
             if let batches = initData.pcencs, !batches.isEmpty {
                 for (pcid, pcenc) in batches {
                     do {
                         let page = try await APIClient.shared.teachingClasses(batch: (pcid, pcenc))
                         let n = page.initData?.count ?? 0
-                        log.append("\(pcid.prefix(8))… enc\(pcenc.count)字 → \(n) 门")
                         for item in page.initData ?? [] where !seen.contains(item.id) {
                             seen.insert(item.id)
                             merged.append(item)
                         }
                     } catch {
-                        log.append("\(pcid.prefix(8))… → 失败 \(error.localizedDescription.prefix(40))")
                         lastError = error
                     }
                 }
@@ -215,9 +207,6 @@ struct ElectiveView: View {
                 merged = page.initData ?? []
             }
 
-            batchLog = log
-            cookieCount = CookieJar.shared.count
-            cookieNames = CookieJar.names.joined(separator: ",")
 
             if merged.isEmpty, let lastError { throw lastError }
 

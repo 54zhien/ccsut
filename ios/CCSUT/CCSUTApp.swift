@@ -148,27 +148,6 @@ struct ProfileView: View {
                     }
                 }
 
-                Section {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("诊断").font(.caption.weight(.semibold))
-                        Text("CookieJar \(CookieJar.shared.count) 条")
-                            .font(.caption2.monospaced())
-                        Text(CookieJar.names.joined(separator: ","))
-                            .font(.system(size: 9, design: .monospaced))
-                            .lineLimit(3)
-                        Text("HTTPCookieStorage \(HTTPCookieStorage.shared.cookies?.count ?? 0) 条")
-                            .font(.caption2.monospaced())
-                        Divider().padding(.vertical, 2)
-                        Text("jw_uf 指纹")
-                            .font(.caption2.weight(.semibold))
-                        Text("Jar: \(CookieJar.fingerprint("jw_uf"))")
-                            .font(.caption2.monospaced())
-                        Text("Storage: \(storageFingerprint("jw_uf"))")
-                            .font(.caption2.monospaced())
-                        Text("最近请求：\(APIClient.lastTrace.isEmpty ? "无" : APIClient.lastTrace)")
-                            .font(.caption2.monospaced())
-                            .lineLimit(2)
-                    }
                     .foregroundStyle(.secondary)
                 }
             }
@@ -182,13 +161,6 @@ struct ProfileView: View {
                 Text("下次打开需要重新登录。")
             }
         }
-    }
-
-    private func storageFingerprint(_ name: String) -> String {
-        guard let c = HTTPCookieStorage.shared.cookies?.first(where: { $0.name == name }) else { return "缺失" }
-        let v = c.value
-        guard v.count > 8 else { return "\(v.count)字 \(v)" }
-        return "\(v.count)字 \(v.prefix(4))…\(v.suffix(4))"
     }
 
     private var initials: String {

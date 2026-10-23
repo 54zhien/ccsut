@@ -1,15 +1,7 @@
-﻿fix(ios): 选课页空白的真正原因 —— 响应结构解码失败
+﻿chore(ios): 清理诊断代码
 
-TeachingClassPage 声明了两个类型不对的字段：
-  kfrlbfb  服务端给的是字符串 "100"，Swift 声明成 Int
-  condition.jxms 等服务端给的是数组 ["中文教学"]，Swift 声明成 String
+- 移除我的页的诊断区块（Cookie 条数、jw_uf 指纹、最近请求）
+- 移除选课页的批次日志、原始响应、Cookie 统计等状态
+- 删掉配套的 storageFingerprint 辅助方法
 
-任一不符都会让整个 TeachingClassPage 解码失败，
-于是 initData 拿不到、classes 为空、页面显示「当前没有可选课程」，
-而且因为 decode 走的是 try? 分支，连错误提示都不会冒出来。
-
-这两个字段代码里根本没用到，直接从结构体移除。
-Decodable 会自动忽略未声明的键。
-
-诊断佐证：jw_uf 指纹两边一致、最近请求 listjxbDataV2 返回 65553 字节
-且含 initData —— 数据一直都在，卡在解析这一步。
+功能已全部验证：课表 98 条、成绩 61 门、选课 138 门、会话 14 天。
