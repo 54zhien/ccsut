@@ -1,0 +1,42 @@
+name: Native icon verification
+
+on:
+  push:
+    branches: [ui/navigation-timetable]
+    paths:
+      - 'ios/CCSUT/AppIcon.icon/**'
+      - 'ios/CCSUT.xcodeproj/project.pbxproj'
+      - '.github/workflows/icon-preview.yml'
+      - 'tools/verify_app_icon.py'
+  workflow_dispatch:
+
+jobs:
+  icon:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native icon and inspect appearances
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/icon-preview"
+          xcrun actool ios/CCSUT/AppIcon.icon --compile "$RUNNER_TEMP/icon-preview" \
+            --app-icon AppIcon --platform iphoneos --minimum-deployment-target 26.0 \
+            --target-device iphone --target-device ipad --output-format human-readable-text \
+            --notices --warnings --output-partial-info-plist "$RUNNER_TEMP/icon-preview/icon.plist"
+          xcrun assetutil --info "$RUNNER_TEMP/icon-preview/Assets.car" > "$RUNNER_TEMP/icon-preview/catalog.json"
+          python3 tools/verify_app_icon.py "$RUNNER_TEMP/icon-preview/catalog.json" \
+            > "$RUNNER_TEMP/icon-preview/verification.json"
+      - name: Locate native icon renderer
+        run: |
+          find /Applications/Xcode*.app -iname '*ictool*' -type f 2>/dev/null | head -20 > "$RUNNER_TEMP/icon-preview/render-tools.txt"
+          while IFS= read -r renderer; do
+            "$renderer" --help >> "$RUNNER_TEMP/icon-preview/render-help.txt" 2>&1 || true
+          done < "$RUNNER_TEMP/icon-preview/render-tools.txt"
+          find "$RUNNER_TEMP/icon-preview" -maxdepth 2 -type f
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CCSUT-native-icon
+          path: ${{ runner.temp }}/icon-preview/
+          retention-days: 14

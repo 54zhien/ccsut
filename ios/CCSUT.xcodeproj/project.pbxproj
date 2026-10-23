@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A0000000000000000000001E /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001E /* AppIcon.icon */; };
 		A0000000000000000000000A /* CCSUTApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000A /* CCSUTApp.swift */; };
 		A0000000000000000000000B /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000B /* Session.swift */; };
 		A0000000000000000000000C /* API.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000C /* API.swift */; };
@@ -43,6 +44,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B0000000000000000000001E /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		B0000000000000000000000A /* CCSUTApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCSUTApp.swift; sourceTree = "<group>"; };
 		B0000000000000000000000B /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		B0000000000000000000000C /* API.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = API.swift; sourceTree = "<group>"; };
@@ -107,6 +109,7 @@
 				B0000000000000000000001C /* NagiPageChrome.swift */,
                 B0000000000000000000001D /* PageSurface.swift */,
 				B00000000000000000000011 /* Assets.xcassets */,
+				B0000000000000000000001E /* AppIcon.icon */,
 			);
 			path = CCSUT;
 			sourceTree = "<group>";
@@ -181,6 +184,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00000000000000000000011 /* Assets.xcassets in Resources */,
+				A0000000000000000000001E /* AppIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
