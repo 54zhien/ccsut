@@ -28,6 +28,7 @@ jobs:
           python3 tools/verify_app_icon.py "$RUNNER_TEMP/icon-preview/catalog.json" \
             > "$RUNNER_TEMP/icon-preview/verification.json"
       - name: Locate native icon renderer
+        if: always()
         run: |
           find /Applications/Xcode*.app -iname '*ictool*' -type f 2>/dev/null | head -20 > "$RUNNER_TEMP/icon-preview/render-tools.txt"
           while IFS= read -r renderer; do

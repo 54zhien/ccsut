@@ -25,9 +25,12 @@ for appearance, variant in [("UIAppearanceLight", 0), ("UIAppearanceDark", 1)]:
     assert len(stacks) == 1, (appearance, "Missing primary icon stack")
     stack = stacks[0]
     assert stack["CanvasWidth"] == stack["CanvasHeight"] == 1024
-    groups = [a for a in stack["Layers"] if a.get("AssetType") == "IconGroup"]
+    groups = [a for a in catalog if a.get("AssetType") == "IconGroup"
+              and a.get("Name") == "AppIcon/Group" and a.get("Appearance") == appearance]
     assert len(groups) == 1
     group = groups[0]
+    lighting = next(a for a in stack["Layers"] if a.get("AssetType") == "IconGroup"
+                    and a.get("Appearance") == appearance)
     actual = {a["Name"].rsplit("/", 1)[-1]: a for a in group["Layers"]}
     assert len(actual) == 5
     fills = {}
@@ -45,7 +48,7 @@ for appearance, variant in [("UIAppearanceLight", 0), ("UIAppearanceDark", 1)]:
     luminance = sum(sum(c[:3]) / 3 for c in bg) / len(bg)
     assert luminance > 0.8 if variant == 0 else luminance < 0.25, (appearance, bg)
     report[appearance] = {"fills": fills, "background": bg,
-                          "shadowStyle": group.get("LayerShadowStyle"),
-                          "shadowOpacity": group.get("LayerShadowOpacity")}
+                          "shadowStyle": lighting.get("LayerShadowStyle"),
+                          "shadowOpacity": lighting.get("LayerShadowOpacity")}
 assert "shadow" not in source["groups"][0], "Use the system default shadow"
 print(json.dumps({"state": "PASS", "appearances": report}, indent=2))
