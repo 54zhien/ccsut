@@ -279,6 +279,7 @@ struct ExamView: View {
 private struct ExamRow: View {
     let exam: ExamItem
     var showTerm: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .title3) private var dateColumnWidth: CGFloat = 34
 
     var body: some View {
@@ -303,17 +304,32 @@ private struct ExamRow: View {
                     .font(.subheadline.weight(.medium))
                     .lineLimit(2)
 
-                HStack(spacing: 6) {
-                    Text(exam.qssj ?? "—")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    if !exam.location.isEmpty {
-                        Text("·")
-                            .foregroundStyle(.tertiary)
-                        Text(exam.location)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(exam.qssj ?? "—")
+                            .monospacedDigit()
                             .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                        if !exam.location.isEmpty {
+                            Text(exam.location)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                } else {
+                    HStack(spacing: 6) {
+                        Text(exam.qssj ?? "—")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        if !exam.location.isEmpty {
+                            Text("·")
+                                .foregroundStyle(.tertiary)
+                            Text(exam.location)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
                 }
 

@@ -82,3 +82,13 @@ Files: ScheduleView.swift, AcademicView.swift and existing shared presentation/m
 - Remaining two RED tests demonstrate the same refresh failure. The runtime probe found the correct `SwiftUI.HostingScrollView`, but `refreshControlMatches=false` before and after each pull. Content offset reached -311 points on scores and -292.7 on timetable, with zero refresh events. SwiftUI removed the manually installed refresh control after attachment. The repair removes the manual UIKit injection and attaches native SwiftUI refreshable to all five actual page scroll views, retaining always-bounce and await-completion behavior. The red tests are preserved without weakening assertions; final CI is pending.
 
 - Screenshot review of `886049d`: XXXL summary values 3.90/10.5 and expanded scores are intact, and disclosure can be reached and operated. Final coverage also exercises large-text semester menus and captures the ordinary exam date rail after a historical-term jump.
+
+## Native refresh and final visual follow-up
+
+- Production checkpoint `7cb52b0`: regression/build run `40002395547` passed 166 Swift assertions and 6 Node tests; release run `40002404063` produced a verified unsigned IPA, SHA256 `88c8037b6478c3bc1ed103e541a2a035953ea0fbf3a2cfc7ffd7eebda075e005`.
+- UI run `40002398342`: week positioning passed, 12/14 interaction tests passed. Native timetable refresh now fires exactly once. Large-text semester jumps and exam day rail passed and were rendered. Preserve the failed run: academic refresh and search-reset assertions still failed.
+- The academic refresh gesture began inside the new semester Menu: point (321.6,305.9) overlaps AX menu bounds x297...366/y283...327. The corrected test drags the noninteractive body at x=0.2, retaining its vertical distance, duration and exactly-once assertion. This is a test interaction correction, not another production refresh implementation.
+- Additional pixel review found the XXXL exam row time split as 14:2 / 0 beside a truncated location. Accessibility-size rows now stack time and location, keeping time on one line; standard-size rows are unchanged. The focused follow-up includes the existing full large-text scenario to inspect this actual rendering.
+- CI now supports a focused refresh/search/large-text pass for these remaining concerns, with the original full-suite evidence retained. Final focused validation is pending.
+
+- Search reset recording from `40002398342` confirms the action clears the query, restores count 3 and renders course cards. The synchronous assertion ran during the 0.18-second transition while the old empty-state AX node remained. The corrected test waits up to 3 seconds for its disappearance and then requires the course to exist; no production search logic was changed.

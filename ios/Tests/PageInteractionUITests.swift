@@ -215,8 +215,10 @@ final class PageInteractionUITests: XCTestCase {
                 XCTAssertFalse(app.buttons["page-refresh"].exists)
                 XCTAssertFalse(app.buttons["刷新"].exists)
                 logPageRefreshDiagnostic(app, "\(page)-empty-\(empty)-before-pull")
-                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.35))
-                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.85))
+                // Start over the body text; the right side of a term header
+                // contains the interactive semester menu and can consume the drag.
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.35))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.85))
                 start.press(forDuration: 0.1, thenDragTo: end)
                 let refreshed = XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5) == .completed
                 logPageRefreshDiagnostic(app, "\(page)-empty-\(empty)-after-pull")
@@ -291,11 +293,16 @@ final class PageInteractionUITests: XCTestCase {
         let field = app.textFields["课程名 / 教师"]
         field.tap()
         field.typeText("no-matching-course-123")
-        XCTAssertTrue(app.staticTexts["未找到课程"].waitForExistence(timeout: 3))
+        let emptyState = app.staticTexts["未找到课程"]
+        XCTAssertTrue(emptyState.waitForExistence(timeout: 3))
         capture(app, "elective-empty-search")
         app.buttons["重置搜索与筛选"].tap()
-        XCTAssertFalse(app.staticTexts["未找到课程"].exists)
-        XCTAssertTrue(app.staticTexts["工程制图"].exists)
+        let emptyStateDismissed = XCTWaiter.wait(
+            for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: emptyState)],
+            timeout: 3
+        ) == .completed
+        XCTAssertTrue(emptyStateDismissed, "Reset should dismiss the empty state after its animated update")
+        XCTAssertTrue(app.staticTexts["工程制图"].waitForExistence(timeout: 3))
         capture(app, "elective-reset-search")
     }
 
