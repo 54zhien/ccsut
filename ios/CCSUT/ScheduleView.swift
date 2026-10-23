@@ -203,7 +203,6 @@ struct ScheduleView: View {
                 }
                 .scrollIndicators(.hidden)
                 .scrollTargetBehavior(.viewAligned)
-                .environment(\.refresh, nil)
                 .onChange(of: selectedWeek) { _, week in
                     withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) { proxy.scrollTo(week, anchor: .center) }
                 }
@@ -238,7 +237,6 @@ struct ScheduleView: View {
         .padding(.horizontal, 4)
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-        .environment(\.refresh, nil)
     }
 
     private func weekdayHeader(colWidth: CGFloat) -> some View {
