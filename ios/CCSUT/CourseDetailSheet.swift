@@ -17,6 +17,7 @@ import SwiftUI
 
 struct CourseDetailSheet: View {
     let item: TeachingClass
+    var actionBlockReason: String? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -26,6 +27,16 @@ struct CourseDetailSheet: View {
                 VStack(alignment: .leading, spacing: 20) {
                     header
                     Divider()
+                    if let actionBlockReason {
+                        section("操作状态") {
+                            Label(actionBlockReason, systemImage: "info.circle")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel("操作不可用：\(actionBlockReason)")
+                        }
+                    }
                     infoGrid
                     if !item.sksjddText.isEmpty {
                         section("上课时间地点") {

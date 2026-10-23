@@ -15,52 +15,63 @@ import SwiftUI
 
 struct ScoreView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var onLoaded: ([ScoreItem]) -> Void = { _ in }
 
     @State private var items: [ScoreItem] = []
     @State private var isLoading = false
     @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
-    @State private var selectedTerm: String?
     @State private var termHeaderTracker = AcademicTermHeaderTracker()
 
     var body: some View {
-        GeometryReader { viewport in
-            ScrollView {
-                VStack(spacing: 0) {
-                    if isLoading && items.isEmpty {
-                        ProgressView("加载成绩…")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if errorText != nil, items.isEmpty {
-                        ContentUnavailableView {
-                            Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
-                        } description: {
-                            EmptyView()
-                        } actions: {
-                            Button("重试") { Task { await load(force: true) } }
+        ScrollViewReader { proxy in
+            GeometryReader { viewport in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        if isLoading && items.isEmpty {
+                            ProgressView("加载成绩…")
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if errorText != nil, items.isEmpty {
+                            ContentUnavailableView {
+                                Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
+                            } description: {
+                                EmptyView()
+                            } actions: {
+                                Button("重试") { Task { await load(force: true) } }
+                            }
+                        } else if items.isEmpty {
+                            ContentUnavailableView {
+                                Label("暂无成绩", systemImage: "doc.text.magnifyingglass")
+                            } description: {
+                                Text("这学期还没出成绩，或者还没完成评教。")
+                            }
+                        } else {
+                            if let errorText {
+                                PageStatusNotice(message: errorText) { Task { await load(force: true) } }
+                            }
+                            content { term in
+                                if reduceMotion {
+                                    proxy.scrollTo(term, anchor: .top)
+                                } else {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        proxy.scrollTo(term, anchor: .top)
+                                    }
+                                }
+                            }
                         }
-                    } else if items.isEmpty {
-                        ContentUnavailableView {
-                            Label("暂无成绩", systemImage: "doc.text.magnifyingglass")
-                        } description: {
-                            Text("这学期还没出成绩，或者还没完成评教。")
-                        }
-                    } else {
-                        if let errorText {
-                            PageStatusNotice(message: errorText) { Task { await load(force: true) } }
-                        }
-                        content
                     }
+                    .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
+                    .pageRefreshControl(showsRefreshCount: true) { await load(force: true) }
                 }
-                .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
-                .pageRefreshControl(showsRefreshCount: true) { await load(force: true) }
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                .coordinateSpace(name: "academic-scroll")
             }
-            .scrollEdgeEffectStyle(.soft, for: .top)
-            .coordinateSpace(name: "academic-scroll")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemGroupedBackground))
+            .academicDetailChrome(title: "成绩单")
+            .task { if items.isEmpty { await load() } }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground))
-        .academicDetailChrome(title: "成绩单")
-        .task { if items.isEmpty { await load() } }
     }
 
     // MARK: - 内容
@@ -82,7 +93,7 @@ struct ScoreView: View {
         items.reduce(0) { $0 + $1.credit }
     }
 
-    private var content: some View {
+    private func content(onSelectTerm: @escaping (String) -> Void) -> some View {
         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
             summaryCard.padding(.bottom, 12)
 
@@ -101,7 +112,8 @@ struct ScoreView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 16)
                 } header: {
-                    termHeader(term)
+                    termHeader(term, onSelectTerm: onSelectTerm)
+                        .id(term.name)
                 }
             }
         }
@@ -138,27 +150,27 @@ struct ScoreView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func termHeader(_ term: ScoreTerm) -> some View {
-        AcademicTermStrip(term: term.name, tracker: termHeaderTracker) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
+    private func termHeader(_ term: ScoreTerm, onSelectTerm: @escaping (String) -> Void) -> some View {
+        let termNames = terms.map(\.name)
+        return AcademicTermStrip(term: term.name, tracker: termHeaderTracker) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(SchedulePresentation.termTitle(term.name))
                         .font(.subheadline.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
+                    Text("GPA \(String(format: "%.2f", term.gpa)) · \(String(format: "%.1f", term.credits)) 学分 · \(term.items.count) 门课程")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
                     if term.failedCount > 0 {
                         Text("\(term.failedCount) 门未通过")
-                            .font(.caption2.weight(.semibold))
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.red)
                     }
                 }
-                HStack(spacing: 12) {
-                    Text(String(format: "GPA %.2f", term.gpa))
-                    Text("\(String(format: "%.1f", term.credits)) 学分")
-                    Text("\(term.items.count) 门课程")
+                Spacer(minLength: 4)
+                if termNames.count > 1 {
+                    AcademicTermJumpMenu(terms: termNames, onSelect: onSelectTerm)
                 }
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -175,7 +187,9 @@ struct ScoreView: View {
             isLoading = true
             defer { isLoading = false }
             try? await Task.sleep(for: .milliseconds(250))
-            items = InterfacePreview.emptyPage ? [] : InterfacePreview.scores
+            let previewItems = InterfacePreview.emptyPage ? [] : InterfacePreview.scores
+            items = previewItems
+            onLoaded(previewItems)
             return
         }
         #endif
@@ -191,6 +205,7 @@ struct ScoreView: View {
             let list = try await APIClient.shared.scoreList()
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             items = list
+            onLoaded(list)
         } catch let e as APIError {
             guard CookieJar.generation == generation else { return }
             if case .notLoggedIn = e {
@@ -212,47 +227,110 @@ struct ScoreView: View {
 
 private struct ScoreRow: View {
     let item: ScoreItem
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isBreakdownExpanded = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.courseName)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(2)
+        let breakdown = item.breakdown
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Text(item.courseName.isEmpty ? "未命名课程" : item.courseName)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                HStack(spacing: 6) {
-                    Text(String(format: "%.2g 学分", item.credit))
-                    if let kcxz = item.kcxz, !kcxz.isEmpty {
-                        Text("·")
-                        Text(kcxz).lineLimit(1)
-                    }
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(item.scoreText)
+                        .font(.title3.weight(.bold).monospacedDigit())
+                        .foregroundStyle(item.passed ? Color.primary : Color.red)
+                    Text("总评")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-                if !item.breakdown.isEmpty {
-                    Text(item.breakdown.map { "\($0.0):\($0.1)" }.joined(separator: "  "))
-                        .font(.system(size: 9).monospaced())
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("总评 \(item.scoreText)")
             }
 
-            Spacer(minLength: 4)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(creditText) 学分")
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
 
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(item.scoreText)
-                    .font(.title3.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(item.passed ? Color.primary : Color.red)
+                Spacer(minLength: 8)
 
-                Text(String(format: "%.1f", item.point))
-                    .font(.caption2.monospacedDigit())
+                Text("绩点 \(item.jd.map { String(format: "%.2f", $0) } ?? "—")")
+                    .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            .frame(width: 52, alignment: .trailing)
+
+            if let kcxz = item.kcxz, !kcxz.isEmpty {
+                Text(kcxz)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if !breakdown.isEmpty {
+                Button {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                        isBreakdownExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(isBreakdownExpanded ? "收起成绩明细" : "查看成绩明细")
+                        Text("\(breakdown.count) 项")
+                            .foregroundStyle(.tertiary)
+                        Spacer(minLength: 4)
+                        Image(systemName: isBreakdownExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isBreakdownExpanded ? "收起成绩明细" : "查看成绩明细")
+                .accessibilityHint(isBreakdownExpanded ? "收起课程各项成绩构成" : "展开课程各项成绩构成")
+                .accessibilityIdentifier("score-breakdown-\(accessibilityKey)")
+
+                if isBreakdownExpanded {
+                    VStack(spacing: 0) {
+                        ForEach(Array(breakdown.enumerated()), id: \.offset) { entry in
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(entry.element.0)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 8)
+                                Text(entry.element.1)
+                                    .monospacedDigit()
+                            }
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 6)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+                    .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .top)))
+                    .accessibilityIdentifier("score-breakdown-details-\(accessibilityKey)")
+                }
+            }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.vertical, 14)
         .contentShape(.rect)
+        .accessibilityIdentifier("score-row-\(accessibilityKey)")
+    }
+
+    private var accessibilityKey: String {
+        if let id = item.id, !id.isEmpty { return id }
+        if let courseCode = item.kcbh, !courseCode.isEmpty { return courseCode }
+        return "\(item.xnxq ?? "unknown")-\(item.courseName)"
+    }
+
+    private var creditText: String {
+        guard let raw = item.xf?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty, raw != "-", raw != "--" else { return "—" }
+        return Double(raw).map { String(format: "%.1f", $0) } ?? raw
     }
 }

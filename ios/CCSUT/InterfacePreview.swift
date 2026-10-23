@@ -34,14 +34,16 @@ enum InterfacePreview {
 
     static var scores: [ScoreItem] {
         if longList {
-            return (1...18).map { index in
+            let current = (1...18).map { index in
                 ScoreItem(id: "long-\(index)", kcmc: "示例课程 \(index)", kcbh: String(format: "%02d", index),
                           xf: "3", zhcj: "90", jd: 4, cjfxms: nil, kcxz: nil,
                           xnxq: "2026-2027-1", sfjg: "1")
             }
+            return current + [ScoreItem(id: "older", kcmc: "历史学期课程", kcbh: "old", xf: "3", zhcj: "88", jd: 3.8,
+                                        cjfxms: nil, kcxz: nil, xnxq: "2025-2026-2", sfjg: "1")]
         }
         return decode("""
-        [{"id":"1","kcmc":"高等数学","kcbh":"01","xf":"4","zhcj":"92","jd":4.2,"xnxq":"2026-2027-1","sfjg":"1"},
+        [{"id":"1","kcmc":"高等数学","kcbh":"01","xf":"4","zhcj":"92","jd":4.2,"cjfxms":"平时(40%):95,期末(60%):90","xnxq":"2026-2027-1","sfjg":"1"},
          {"id":"2","kcmc":"大学英语","kcbh":"02","xf":"3","zhcj":"86","jd":3.6,"xnxq":"2026-2027-1","sfjg":"1"},
          {"id":"3","kcmc":"机械设计基础","kcbh":"03","xf":"3.5","zhcj":"88","jd":3.8,"xnxq":"2025-2026-2","sfjg":"1"}]
         """)
@@ -92,11 +94,14 @@ enum InterfacePreview {
 
     static var exams: [ExamItem] {
         guard longList else { return [exam] }
-        return (1...18).map { index in
+        let current = (1...18).map { index in
             ExamItem(id: "long-\(index)", kcmc: "示例考试 \(index)", ksrq: exam.ksrq, qssj: exam.qssj,
                      kssj: exam.kssj, jxlmc: exam.jxlmc, jsmc: exam.jsmc, zwh: exam.zwh,
                      ksxs: exam.ksxs, kspcmc: exam.kspcmc, dataXnxq: exam.dataXnxq)
         }
+        return current + [ExamItem(id: "older", kcmc: "历史学期考试", ksrq: "2026-06-20", qssj: "14:20",
+                                  kssj: "2026-06-20 14:20~15:50", jxlmc: "9号栋", jsmc: "9-112", zwh: "18",
+                                  ksxs: "考试", kspcmc: "期末考试", dataXnxq: "2025-2026-2")]
     }
     #endif
 }

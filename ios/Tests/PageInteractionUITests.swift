@@ -4,7 +4,7 @@ final class PageInteractionUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
     private func launch(_ page: String, longList: Bool = false, transition: Bool = false, withoutUpcoming: Bool = false,
-                        refresh: Bool = false, empty: Bool = false) -> XCUIApplication {
+                        refresh: Bool = false, empty: Bool = false, largeText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", page]
         if longList { app.launchArguments.append("--preview-long-list") }
@@ -12,6 +12,7 @@ final class PageInteractionUITests: XCTestCase {
         if withoutUpcoming { app.launchArguments.append("--preview-no-upcoming") }
         if refresh { app.launchArguments.append("--preview-refresh") }
         if empty { app.launchArguments.append("--preview-empty") }
+        if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         app.launch()
         return app
     }
@@ -156,7 +157,7 @@ final class PageInteractionUITests: XCTestCase {
         let before = first.frame
         let account = app.buttons["账号"]
         XCTAssertGreaterThanOrEqual(before.minY - account.frame.maxY, 24)
-        XCTAssertGreaterThanOrEqual(before.height, 128)
+        XCTAssertGreaterThanOrEqual(before.height, 96, "Preserve the existing 96-point entry cards")
         XCTAssertTrue(last.isHittable)
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.35))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.75))
@@ -226,5 +227,64 @@ final class PageInteractionUITests: XCTestCase {
             app.terminate()
         }
         XCTAssertEqual(stripWidths[0], stripWidths[1], accuracy: 2)
+    }
+
+    func testScoreBreakdownExpandsAndHomeReusesLoadedSummary() {
+        let app = launch("scores")
+        let disclosure = app.buttons["score-breakdown-1"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["平时(40%)"].exists)
+        disclosure.tap()
+        XCTAssertTrue(app.staticTexts["平时(40%)"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["期末(60%)"].exists)
+        capture(app, "score-breakdown-expanded")
+        disclosure.tap()
+        XCTAssertFalse(app.staticTexts["平时(40%)"].exists)
+        app.buttons["返回教务"].tap()
+        XCTAssertTrue(app.buttons["academic-scores"].label.contains("已公布 3 门成绩"))
+    }
+
+    func testSemesterMenusReachHistoricalContent() {
+        for (page, course) in [("scores", "历史学期课程"), ("exams", "历史学期考试")] {
+            let app = launch(page, longList: true)
+            let menu = app.buttons.matching(identifier: "academic-term-jump-menu").firstMatch
+            XCTAssertTrue(menu.waitForExistence(timeout: 5))
+            menu.tap()
+            let target = app.buttons["academic-term-jump-2025-2026-2"]
+            XCTAssertTrue(target.waitForExistence(timeout: 3))
+            target.tap()
+            let historical = app.staticTexts[course]
+            XCTAssertTrue(historical.waitForExistence(timeout: 3))
+            XCTAssertTrue(historical.isHittable)
+            XCTAssertTrue(app.buttons["返回教务"].isHittable)
+            capture(app, "semester-jump-\(page)")
+            app.terminate()
+        }
+    }
+
+    func testElectiveEmptySearchCanResetAndDisabledReasonIsVisible() {
+        let app = launch("electives")
+        let reason = app.staticTexts.matching(identifier: "找不到这条课程所属的选课批次，请下拉刷新后重试").firstMatch
+        XCTAssertTrue(reason.waitForExistence(timeout: 5))
+        let field = app.textFields["课程名 / 教师"]
+        field.tap()
+        field.typeText("no-matching-course-123")
+        XCTAssertTrue(app.staticTexts["未找到课程"].waitForExistence(timeout: 3))
+        capture(app, "elective-empty-search")
+        app.buttons["重置搜索与筛选"].tap()
+        XCTAssertFalse(app.staticTexts["未找到课程"].exists)
+        XCTAssertTrue(app.staticTexts["工程制图"].exists)
+        capture(app, "elective-reset-search")
+    }
+
+    func testLargeTextKeepsAcademicControlsAccessible() {
+        for page in ["schedule", "scores", "exams"] {
+            let app = launch(page, largeText: true)
+            let control = page == "schedule" ? app.buttons["本周"] : app.buttons["返回教务"]
+            XCTAssertTrue(control.waitForExistence(timeout: 5))
+            XCTAssertTrue(control.isHittable)
+            capture(app, "large-text-\(page)")
+            app.terminate()
+        }
     }
 }

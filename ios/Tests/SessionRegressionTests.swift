@@ -23,6 +23,22 @@ final class SchoolProtocol: URLProtocol {
         } catch { client?.urlProtocol(self, didFailWithError: error) }
     }
     override func stopLoading() {}
+
+    static func bodyText(_ request: URLRequest) -> String? {
+        if let data = request.httpBody { return String(data: data, encoding: .utf8) }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            guard count >= 0 else { return nil }
+            if count == 0 { break }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+        return String(data: data, encoding: .utf8)
+    }
 }
 
 @main
@@ -432,6 +448,34 @@ struct SessionRegressionTests {
         }
         check(SchoolProtocol.requestCount == 1 && SchoolProtocol.requestPaths == ["/admin/xsd/xk/xsdXkV2"],
               "enrollment quota rejection sends exactly one request")
+
+        // Real API/discovery/snapshot path, with only the HTTP boundary replaced.
+        // The mobile semester controls match the captured official kslist page.
+        CookieJar.shared = [cookie("jw_uf", "exam-fixture")]
+        resetProtocolRequests()
+        let examTerms = ["2026-2027-1", "2025-2026-2", "2025-2026-1", "2024-2025-2", "2024-2025-1"]
+        SchoolProtocol.response = { request in
+            if request.url!.path == "/admin/xsd/kwglXsdKscx/kslist" {
+                let controls = examTerms.map { "<a onclick=\"loadKspc('\($0)');\">\($0)</a>" }.joined()
+                return (200, request.url!, [:], "<html><div id=\"xueqi_pop\">\(controls)</div></html>")
+            }
+            guard request.url!.path == "/admin/xsd/kwglXsdKscx/getXsKsxx",
+                  request.httpMethod == "POST",
+                  let body = SchoolProtocol.bodyText(request),
+                  let term = body.removingPercentEncoding?.split(separator: "=").last.map(String.init),
+                  examTerms.contains(term) else { throw URLError(.badServerResponse) }
+            return (200, request.url!, [:], "{\"ret\":0,\"data\":{\"list\":[{\"id\":\"\(term)\",\"kcmc\":\"fixture\"}]}}")
+        }
+        do {
+            let discovered = try await api.availableExamTerms()
+            check(discovered == examTerms, "mobile exam discovery reads every captured semester control")
+            let snapshot = try await ExamSnapshotLoader.load(terms: discovered) { try await api.examList(xnxq: $0) }
+            check(Set(snapshot.map(\.id)) == Set(examTerms), "mobile exam discovery reaches the production exam endpoint for every term")
+            check(snapshot.allSatisfy { $0.id == $0.term }, "complete exam snapshot retains the requested semester attribution")
+            check(SchoolProtocol.requestCount == 6, "exam recovery performs one discovery and five read requests without retries")
+        } catch {
+            check(false, "mobile exam page loads through real API boundary: \(error)")
+        }
 
         print("Session regression failures: \(failures)")
         exit(failures == 0 ? 0 : 1)

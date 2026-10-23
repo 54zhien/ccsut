@@ -34,6 +34,21 @@ struct AcademicReliabilityTests {
         check(named?.term == "2026-2027-1", "semantic field names work when DOM ids differ")
         let terms = try AcademicCalendarParser.examTerms(#"<option value='2027-2028-1'>new</option><option value='2023-2024-2'>old</option><option value='all'>all</option><a onclick="changeXn('2026-2027-2')">term</a>"#)
         check(terms == ["2027-2028-1","2026-2027-2","2023-2024-2"], "exam terms follow official options across academic years")
+        // Sanitized semester controls from the user's captured kslist HTML (2026-10-22).
+        // This mobile page has no <option> or changeXn controls.
+        let capturedExamPage = #"""
+        <span id="xq">2026-2027-1</span>
+        <div id="xueqi_pop"><div class="censor_top_c">
+          <a onclick="loadKspc('2026-2027-1');" class="cur">2026-2027-1</a>
+          <a onclick="loadKspc('2025-2026-2');">2025-2026-2</a>
+          <a onclick="loadKspc('2025-2026-1');">2025-2026-1</a>
+          <a onclick="loadKspc('2024-2025-2');">2024-2025-2</a>
+          <a onclick="loadKspc('2024-2025-1');">2024-2025-1</a>
+        </div></div>
+        <script>function loadKspc(xnxq) { /* requests batches for the chosen term */ }</script>
+        """#
+        check((try? AcademicCalendarParser.examTerms(capturedExamPage)) == ["2026-2027-1", "2025-2026-2", "2025-2026-1", "2024-2025-2", "2024-2025-1"], "captured mobile exam page exposes all five semesters via loadKspc")
+        check((try? AcademicCalendarParser.examTerms(#"<a onclick="loadKspc('2025-2027-9');">invalid</a><a onclick="loadKsxx('batch-id');">batch</a>"#)) == nil, "exam batches and malformed terms cannot become semester requests")
         check((try? AcademicCalendarParser.timetable("<html>login</html>")) == nil, "missing academic context never invents a semester")
         check((try? AcademicCalendarParser.examTerms("2026-2027-1")) == nil, "arbitrary page text is not an official term option")
         let bad = try JSONDecoder().decode([ScheduleItem].self, from: Data(#"[{"kcmc":"course","xingqi":1,"djc":1,"zc":"garbled"}]"#.utf8))

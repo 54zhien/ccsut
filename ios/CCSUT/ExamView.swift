@@ -15,6 +15,7 @@ import SwiftUI
 struct ExamView: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var items: [ExamItem] = []
     @State private var isLoading = false
@@ -25,6 +26,7 @@ struct ExamView: View {
 
     var body: some View {
         GeometryReader { viewport in
+          ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
                     if isLoading && items.isEmpty {
@@ -34,7 +36,7 @@ struct ExamView: View {
                         ContentUnavailableView {
                             Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
                         } description: {
-                            EmptyView()
+                            Text(errorText ?? AppMessages.loadFailure)
                         } actions: {
                             Button("重试") { Task { await load(force: true) } }
                         }
@@ -42,13 +44,13 @@ struct ExamView: View {
                         ContentUnavailableView {
                             Label("暂无考试安排", systemImage: "calendar.badge.clock")
                         } description: {
-                            Text("这个学期的考试还没排出来。")
+                            Text("教务系统暂未返回考试安排。")
                         }
                     } else {
                         if let errorText {
                             PageStatusNotice(message: errorText) { Task { await load(force: true) } }
                         }
-                        content
+                        content(proxy: proxy)
                     }
                 }
                 .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
@@ -56,6 +58,7 @@ struct ExamView: View {
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
             .coordinateSpace(name: "academic-scroll")
+          }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
@@ -75,7 +78,7 @@ struct ExamView: View {
 
     // MARK: 内容
 
-    private var content: some View {
+    private func content(proxy: ScrollViewProxy) -> some View {
         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
             if let next = upcoming.first {
                 nextCard(next).padding(.bottom, 12)
@@ -98,7 +101,12 @@ struct ExamView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 16)
                     } header: {
-                        termHeader(term, count: list.count)
+                        termHeader(term, count: list.count) { target in
+                            withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
+                                proxy.scrollTo("exam-term-\(target)", anchor: .top)
+                            }
+                        }
+                            .id("exam-term-\(term)")
                     }
                 }
             }
@@ -172,16 +180,21 @@ struct ExamView: View {
         .padding(.horizontal, 16)
     }
 
-    private func termHeader(_ term: String, count: Int) -> some View {
+    private func termHeader(_ term: String, count: Int, onSelectTerm: @escaping (String) -> Void) -> some View {
         AcademicTermStrip(term: term, tracker: termHeaderTracker) {
             HStack {
-                Text(SchedulePresentation.termTitle(term))
-                    .font(.subheadline.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(SchedulePresentation.termTitle(term))
+                        .font(.subheadline.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("\(count) 场")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
-                Text("\(count) 场")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if terms.count > 1 {
+                    AcademicTermJumpMenu(terms: terms, onSelect: onSelectTerm)
+                }
             }
         }
     }
@@ -228,21 +241,34 @@ struct ExamView: View {
         defer { isLoading = false }
 
         let generation = CookieJar.generation
+        var loadingStage = "读取考试学期"
         do {
             let terms = try await APIClient.shared.availableExamTerms()
             let complete = try await ExamSnapshotLoader.load(terms: terms) { term in
                 guard CookieJar.generation == generation else { throw CancellationError() }
+                loadingStage = "读取\(SchedulePresentation.termTitle(term))考试"
                 return try await APIClient.shared.examList(xnxq: term)
             }
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             items = complete
+            referenceDate = Date()
         } catch {
             guard CookieJar.generation == generation, !(error is CancellationError) else { return }
             if let apiError = error as? APIError, case .notLoggedIn = apiError {
                 await session.refresh()
             }
             guard CookieJar.generation == generation else { return }
-            errorText = items.isEmpty ? "考试安排未能完整加载，请重试" : "部分学期未能更新，当前保留上次完整的考试安排"
+            let reason: String
+            if let contextError = error as? AcademicContextError {
+                reason = contextError.localizedDescription
+            } else if let apiError = error as? APIError {
+                reason = apiError.localizedDescription
+            } else if let networkError = error as? URLError, networkError.code == .timedOut {
+                reason = "请求超时，请稍后重试"
+            } else {
+                reason = "连接未完成，请检查网络后重试"
+            }
+            errorText = "\(loadingStage)失败：\(reason)" + (items.isEmpty ? "" : "。已保留上次完整的考试安排")
         }
     }
 }

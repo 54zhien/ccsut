@@ -53,7 +53,7 @@ enum AcademicCalendarParser {
     }
 
     static func examTerms(_ html: String) throws -> [String] {
-        // Only semester-shaped option values and explicit changeXn calls are accepted.
+        // Desktop options and mobile semester controls are both used by the server.
         // Never infer a term from arbitrary page text or a fixed year range.
         var terms = Set<String>()
         for option in matches(#"<option\b([^>]*)>"#, in: html) {
@@ -61,6 +61,14 @@ enum AcademicCalendarParser {
         }
         for call in matches(#"changeXn\s*\(\s*["']([^"']+)["']\s*\)"#, in: html) {
             if isTerm(call[1]) { terms.insert(call[1]) }
+        }
+        // The captured mobile kslist page uses loadKspc(term) to select the term,
+        // then loadKsxx(batchID) to select a batch. Only the former identifies terms.
+        for control in matches(#"<(?:a|button)\b([^>]*)>"#, in: html) {
+            guard let action = attributes(control[1])["onclick"] else { continue }
+            for call in matches(#"\bloadKspc\s*\(\s*["']([^"']+)["']\s*\)"#, in: action) {
+                if isTerm(call[1]) { terms.insert(call[1]) }
+            }
         }
         guard !terms.isEmpty else { throw AcademicContextError.missingExamTerms }
         return terms.sorted(by: >)

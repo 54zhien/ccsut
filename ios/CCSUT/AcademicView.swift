@@ -11,6 +11,9 @@ struct AcademicView: View {
     @State private var path: [Destination] = []
     @State private var didNavigatePreview = false
     @State private var headerScrollOffset: CGFloat = 0
+    @State private var scoreSummary: String?
+    @State private var electiveSummary: String?
+    @State private var summaryGeneration: UInt64?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -19,15 +22,15 @@ struct AcademicView: View {
                 ScrollView {
                     VStack(spacing: 12) {
                         NavigationLink(value: Destination.scores) {
-                            service("成绩查询", subtitle: "课程成绩、学分与绩点", symbol: "chart.bar.doc.horizontal", tint: .accentColor, height: cardHeight)
+                            service("成绩查询", subtitle: scoreSummary ?? "课程成绩、学分与绩点", symbol: "chart.bar.doc.horizontal", tint: .accentColor, height: cardHeight)
                         }
                         .accessibilityIdentifier("academic-scores")
                         NavigationLink(value: Destination.exams) {
-                            service("考试安排", subtitle: "考试时间、考场与座位", symbol: "calendar.badge.clock", tint: .accentColor, height: cardHeight)
+                            service("考试安排", subtitle: examSummary, symbol: "calendar.badge.clock", tint: .accentColor, height: cardHeight)
                         }
                         .accessibilityIdentifier("academic-exams")
                         NavigationLink(value: Destination.electives) {
-                            service("选课", subtitle: "浏览课程与管理已选课程", symbol: "list.bullet.rectangle.portrait", tint: .accentColor, height: cardHeight)
+                            service("选课", subtitle: electiveSummary ?? "浏览课程与管理已选课程", symbol: "list.bullet.rectangle.portrait", tint: .accentColor, height: cardHeight)
                         }
                         .accessibilityIdentifier("academic-electives")
                         if let nextExam {
@@ -59,9 +62,15 @@ struct AcademicView: View {
             .navigationTitle("教务")
             .navigationDestination(for: Destination.self) { destination in
                 switch destination {
-                case .scores: ScoreView()
+                case .scores: ScoreView { items in
+                    resetSummariesIfNeeded()
+                    scoreSummary = items.isEmpty ? "暂无已公布成绩" : "已公布 \(items.count) 门成绩 · 点击查看详情"
+                }
                 case .exams: ExamView()
-                case .electives: ElectiveView()
+                case .electives: ElectiveView { count, term in
+                    resetSummariesIfNeeded()
+                    electiveSummary = "已选 \(count) 门 · \(SchedulePresentation.termTitle(term))"
+                }
                 }
             }
             .task {
@@ -90,6 +99,24 @@ struct AcademicView: View {
                 if phase == .active { Task { await loadUpcomingExam() } }
             }
         }
+    }
+
+    // Reuse successful child-page reads instead of issuing extra home-page requests.
+    private func resetSummariesIfNeeded() {
+        let generation = CookieJar.generation
+        if summaryGeneration != generation {
+            scoreSummary = nil
+            electiveSummary = nil
+            summaryGeneration = generation
+        }
+    }
+
+    private var examSummary: String {
+        guard let date = nextExam?.startDate else { return "考试时间、考场与座位" }
+        let formatted = date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened,
+                                                       locale: Locale(identifier: "zh_CN"),
+                                                       timeZone: TimeZone(identifier: "Asia/Shanghai")!))
+        return "最近一场 · \(formatted)"
     }
 
     private func service(_ title: String, subtitle: String, symbol: String, tint: Color, height: CGFloat) -> some View {
@@ -140,6 +167,7 @@ struct AcademicView: View {
     }
 
     private func fetchUpcomingExam() async {
+        resetSummariesIfNeeded()
         #if DEBUG
         if InterfacePreview.enabled {
             nextExam = ProcessInfo.processInfo.arguments.contains("--preview-no-upcoming") ? nil : InterfacePreview.exam

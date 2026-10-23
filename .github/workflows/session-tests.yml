@@ -18,6 +18,7 @@ jobs:
         run: |
           xcrun swiftc -parse-as-library \
             ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift \
+            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift \
             ios/Tests/SessionRegressionTests.swift \
             -o "$RUNNER_TEMP/session-tests"
       - name: Run Swift session regressions

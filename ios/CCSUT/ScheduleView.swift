@@ -8,6 +8,10 @@ struct ScheduleView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .caption) private var courseFont: CGFloat = 12
+    @ScaledMetric(relativeTo: .caption2) private var timeFont: CGFloat = 11
+    @ScaledMetric(relativeTo: .caption) private var dayFont: CGFloat = 12
+    @ScaledMetric(relativeTo: .subheadline) private var dateFont: CGFloat = 14
+    @ScaledMetric(relativeTo: .headline) private var periodFont: CGFloat = 17
     @State private var bundle: ScheduleBundle?
     @State private var isLoading = false
     @State private var loadGate = PageLoadGate()
@@ -26,8 +30,8 @@ struct ScheduleView: View {
     @State private var pendingDetail: ScheduleSlot?
     @State private var headerScrollOffset: CGFloat = 0
     @State private var previewRefreshCount = 0
-    private let railWidth: CGFloat = 44
-    private let headerHeight: CGFloat = 52
+    private var railWidth: CGFloat { max(48, timeFont * 4.5) }
+    private var headerHeight: CGFloat { max(52, dayFont + dateFont + 24) }
     private let weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
     private let classTimes = [("8:20", "10:00"), ("10:20", "12:00"),
                               ("14:00", "15:40"), ("16:00", "17:40")]
@@ -215,7 +219,7 @@ struct ScheduleView: View {
     private var cells: [ScheduleCell] { SchedulePresentation.cells(bundle?.slots ?? [], week: selectedWeek) }
 
     private func timetable(viewport: CGSize) -> some View {
-        let minColumn: CGFloat = dynamicTypeSize.isAccessibilitySize ? max(94, courseFont * 4) : 42
+        let minColumn: CGFloat = dynamicTypeSize.isAccessibilitySize ? max(94, courseFont * 4) : max(42, dayFont * 3.5)
         let width = max(viewport.width - 32, railWidth + 7 * minColumn)
         let colWidth = (width - railWidth) / 7
         let rowHeight = dynamicTypeSize.isAccessibilitySize ? max(180, courseFont * 10) : max(116, min(136, (viewport.height - 180) / 4))
@@ -244,19 +248,19 @@ struct ScheduleView: View {
         HStack(spacing: 0) {
             VStack(spacing: 5) {
                 if let monday = date(for: 1) {
-                    Text("\(calendar.component(.month, from: monday))月").font(.system(size: 12, weight: .medium))
+                    Text("\(calendar.component(.month, from: monday))月").font(.system(size: dayFont, weight: .medium))
                 }
-                Text("节次").font(.system(size: 10, weight: .medium))
+                Text("节次").font(.system(size: timeFont, weight: .medium))
             }
-                .foregroundStyle(Color.primary.opacity(0.6))
+                .foregroundStyle(.secondary)
                 .frame(width: railWidth, height: headerHeight)
             ForEach(1...7, id: \.self) { day in
                 let today = isToday(day)
                 VStack(spacing: 5) {
-                    Text(weekdays[day - 1]).font(.system(size: 11, weight: .medium))
+                    Text(weekdays[day - 1]).font(.system(size: dayFont, weight: .medium))
                     if let date = date(for: day) {
                         Text("\(calendar.component(.day, from: date))")
-                            .font(.system(size: 14, weight: today ? .bold : .medium).monospacedDigit())
+                            .font(.system(size: dateFont, weight: today ? .bold : .medium).monospacedDigit())
                     }
                 }
                 .foregroundStyle(today ? Color.accentColor : Color.primary.opacity(day > 5 ? 0.65 : 0.8))
@@ -271,20 +275,20 @@ struct ScheduleView: View {
     private func periodLabel(_ section: Int, height: CGFloat) -> some View {
         VStack(spacing: 5) {
             Text(String(format: "%02d", section))
-                .font(.system(size: 17, weight: .semibold, design: .rounded).monospacedDigit())
+                .font(.system(size: periodFont, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle(.secondary)
             Text("\(section * 2 - 1)–\(section * 2)节")
-                .font(.system(size: 10, weight: .medium)).foregroundStyle(Color.primary.opacity(0.6))
+                .font(.system(size: timeFont, weight: .medium)).foregroundStyle(.secondary)
             VStack(spacing: 2) {
                 Text(classTimes[section - 1].0)
                 Text(classTimes[section - 1].1)
             }
-            .font(.system(size: 10).monospacedDigit())
+            .font(.system(size: timeFont).monospacedDigit())
             .foregroundStyle(.secondary)
             .padding(.top, 3)
             if section == 1 || section == 3 {
                 Text(section == 1 ? "上午" : "下午")
-                    .font(.system(size: 9)).foregroundStyle(.tertiary).padding(.top, 2)
+                    .font(.system(size: timeFont)).foregroundStyle(.secondary).padding(.top, 2)
             }
         }
         .padding(.top, 13)
@@ -318,7 +322,7 @@ struct ScheduleView: View {
                     .lineLimit(4).frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 4)
                 if count > 1 {
-                    Text("另\(count - 1)项").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                    Text("另\(count - 1)项").font(.system(size: timeFont, weight: .semibold)).foregroundStyle(.secondary)
                 }
                 if !slot.room.isEmpty {
                     Text(slot.room).font(.system(size: max(10, courseFont - 2), weight: .medium))

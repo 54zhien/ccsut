@@ -14,6 +14,8 @@ struct ElectiveView: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.deviceCornerRadius) private var deviceCornerRadius
 
+    var onLoaded: (_ selectedCount: Int, _ term: String) -> Void = { _, _ in }
+
     @State private var initData: ElectiveInit?
     @State private var electiveState = ElectiveState<TeachingClass>()
     @State private var keyword = ""
@@ -79,7 +81,7 @@ struct ElectiveView: View {
             if classes.isEmpty { await load() }
         }
         .sheet(item: $detail) { item in
-            CourseDetailSheet(item: item)
+            CourseDetailSheet(item: item, actionBlockReason: actionBlockReason(for: item))
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(deviceCornerRadius)
@@ -118,14 +120,30 @@ struct ElectiveView: View {
             .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
 
             ForEach(filtered) { item in
+                let blockReason = actionBlockReason(for: item)
                 ClassCard(
                     item: item,
                     onAction: { pending = PendingAction(courseID: item.id, title: item.kcmc, enrolling: !item.isSelected) },
                     isWorking: workingId == item.id,
-                    canPerformAction: isActionAllowed(for: item)
+                    canPerformAction: blockReason == nil,
+                    actionBlockReason: blockReason
                 )
                 .contentShape(.rect)
                 .onTapGesture { detail = item }
+            }
+
+            if filtered.isEmpty {
+                ContentUnavailableView {
+                    Label("未找到课程", systemImage: "magnifyingglass")
+                } description: {
+                    Text("当前搜索或筛选条件没有匹配的课程。")
+                } actions: {
+                    Button("重置搜索与筛选", action: resetSearchAndFilters)
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityHint("清除搜索文字并切换为全部课程")
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
             }
         }
         .padding(.horizontal, 16)
@@ -303,12 +321,20 @@ struct ElectiveView: View {
         return true
     }
 
-    private func isActionAllowed(for item: TeachingClass) -> Bool {
-        guard !isLoading else { return false }
+    private func actionBlockReason(for item: TeachingClass) -> String? {
+        if isLoading { return "课程刷新仍在完成，请等待刷新后重新确认" }
         let kind: ElectiveActionKind = item.isSelected ? .drop : .enroll
-        if case .allowed = electiveState.actionDecision(for: item.id, kind: kind,
-                                                        generation: CookieJar.generation) { return true }
-        return false
+        let decision = electiveState.actionDecision(for: item.id, kind: kind,
+                                                    generation: CookieJar.generation)
+        guard case .denied = decision else { return nil }
+        return actionBlockMessage(decision)
+    }
+
+    private func resetSearchAndFilters() {
+        withAnimation(.snappy(duration: 0.18)) {
+            keyword = ""
+            selectedFilter = .all
+        }
     }
 
     private func actionBlockMessage(_ decision: ElectiveActionDecision) -> String {
@@ -430,8 +456,12 @@ struct ElectiveView: View {
             let previewClasses = InterfacePreview.emptyPage ? [] : InterfacePreview.classes
             var builder = ElectiveSnapshotBuilder<TeachingClass>()
             builder.append(records(for: previewClasses))
-            electiveState.publish(builder.snapshot, generation: generation)
-            initData = InterfacePreview.electiveInit
+            let snapshot = builder.snapshot
+            let fixtureInit = InterfacePreview.electiveInit
+            electiveState.publish(snapshot, generation: generation)
+            guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
+            initData = fixtureInit
+            onLoaded(snapshot.courses.filter(\.isSelected).count, fixtureInit.xkxnxq ?? "")
             return
         }
         #endif
@@ -487,7 +517,9 @@ struct ElectiveView: View {
             )
             guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
             electiveState.publish(sortedSnapshot, generation: generation)
+            guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
             self.initData = initData
+            onLoaded(sortedSnapshot.courses.filter(\.isSelected).count, initData.xkxnxq ?? "")
         } catch let e as APIError {
             guard !handleCookieGenerationChange(expected: generation) else { return }
             if Task.isCancelled {
@@ -546,6 +578,7 @@ struct ClassCard: View {
     var onAction: (() -> Void)? = nil
     var isWorking: Bool = false
     var canPerformAction: Bool = true
+    var actionBlockReason: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -622,9 +655,17 @@ struct ClassCard: View {
                     .buttonStyle(.plain)
                     .disabled(isWorking || !canPerformAction)
                     .opacity(canPerformAction || isWorking ? 1 : 0.45)
+                    .accessibilityHint(Text(actionBlockReason ?? (item.isSelected ? "点按后确认退课" : "点按后确认选课")))
                 }
             }
             .padding(.top, 2)
+
+            if let actionBlockReason {
+                Label(actionBlockReason, systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

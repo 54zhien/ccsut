@@ -315,6 +315,33 @@ final class AcademicTermHeaderTracker {
     }
 }
 
+/// A compact semester menu; each page owns its ScrollViewReader and scrolling.
+struct AcademicTermJumpMenu: View {
+    let terms: [String]
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(terms, id: \.self) { term in
+                Button(SchedulePresentation.termTitle(term)) { onSelect(term) }
+                    .accessibilityIdentifier("academic-term-jump-\(term)")
+            }
+        } label: {
+            Label("学期", systemImage: "arrow.up.arrow.down")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .frame(minHeight: 44)
+                .background(Color(.tertiarySystemGroupedBackground), in: .capsule)
+                .contentShape(.capsule)
+        }
+        .menuStyle(.borderlessButton)
+        .accessibilityLabel("跳转学期")
+        .accessibilityHint("选择学期后滚动到对应内容")
+        .accessibilityIdentifier("academic-term-jump-menu")
+        .disabled(terms.count < 2)
+    }
+}
+
 /// Both academic lists share the same inset and surface when a section pins.
 struct AcademicTermStrip<Content: View>: View {
     let term: String
@@ -330,10 +357,10 @@ struct AcademicTermStrip<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 if isFloating {
-                    Color.clear.glassEffect(.regular, in: .rect(cornerRadius: 18))
+                    Color.clear.glassEffect(.regular, in: .rect(cornerRadius: 26))
                         .transition(.opacity)
                 } else {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
                         .fill(Color(.secondarySystemGroupedBackground))
                         .transition(.opacity)
                 }
