@@ -22,37 +22,18 @@ import OSLog
 
 struct WebPanel: UIViewRepresentable {
     let webView: WKWebView
-    var onContentHeight: ((CGFloat) -> Void)? = nil
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    var extendsUnderControls = false
 
     func makeUIView(context: Context) -> WKWebView {
         // Refresh is only available from the web sheet's explicit button.
         webView.scrollView.refreshControl = nil
         webView.scrollView.alwaysBounceVertical = false
-        if let onContentHeight {
-            let coordinator = context.coordinator
-            coordinator.onContentHeight = onContentHeight
-            coordinator.observation = webView.scrollView.observe(\.contentSize, options: [.new]) { [weak coordinator] _, change in
-                guard let height = change.newValue?.height, height.isFinite, height > 0 else { return }
-                Task { @MainActor in coordinator?.onContentHeight?(ceil(height)) }
-            }
-        }
+        webView.scrollView.contentInsetAdjustmentBehavior = extendsUnderControls ? .never : .automatic
         return webView
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
-        context.coordinator.onContentHeight = onContentHeight
-    }
-
-    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
-        coordinator.observation?.invalidate()
-        coordinator.onContentHeight = nil
-    }
-
-    final class Coordinator: NSObject {
-        var onContentHeight: ((CGFloat) -> Void)?
-        var observation: NSKeyValueObservation?
+        uiView.scrollView.contentInsetAdjustmentBehavior = extendsUnderControls ? .never : .automatic
     }
 }
 

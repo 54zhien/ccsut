@@ -19,6 +19,7 @@ struct ElectiveView: View {
     @State private var keyword = ""
     @State private var selectedFilter: Filter = .all
     @State private var isLoading = false
+    @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
     @State private var detail: TeachingClass?
     @State private var pending: PendingAction?
@@ -37,33 +38,39 @@ struct ElectiveView: View {
     }
 
     var body: some View {
-        Group {
-            if isLoading && classes.isEmpty {
-                ProgressView("拉取教学班…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if errorText != nil, classes.isEmpty {
-                ContentUnavailableView {
-                    Label(AppMessages.loadFailure, systemImage: "exclamationmark.icloud")
-                } description: {
-                    EmptyView()
-                } actions: {
-                    Button("重试") { Task { await load(force: true) } }
-                        .buttonStyle(.borderedProminent)
+        GeometryReader { viewport in
+            ScrollView {
+                VStack(spacing: 0) {
+                    if isLoading && classes.isEmpty {
+                        ProgressView("拉取教学班…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if errorText != nil, classes.isEmpty {
+                        ContentUnavailableView {
+                            Label(AppMessages.loadFailure, systemImage: "exclamationmark.icloud")
+                        } description: {
+                            EmptyView()
+                        } actions: {
+                            Button("重试") { Task { await load(force: true) } }
+                                .buttonStyle(.borderedProminent)
+                        }
+                    } else if classes.isEmpty {
+                        ContentUnavailableView {
+                            Label("当前没有可选课程", systemImage: "tray")
+                        } description: {
+                            Text(initData.map { "选课学期 \(SchedulePresentation.termTitle($0.xkxnxq ?? "—"))" } ?? "")
+                        }
+                    } else {
+                        list
+                    }
                 }
-            } else if classes.isEmpty {
-                ContentUnavailableView {
-                    Label("当前没有可选课程", systemImage: "tray")
-                } description: {
-                    Text(initData.map { "选课学期 \(SchedulePresentation.termTitle($0.xkxnxq ?? "—"))" } ?? "")
-                }
-            } else {
-                list
+                .frame(maxWidth: .infinity, minHeight: classes.isEmpty ? viewport.size.height : 0)
+                .pageRefreshControl(showsRefreshCount: true) { await load(force: true) }
             }
+            .scrollDismissesKeyboard(.immediately)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
-        .modifier(RefreshablePlaceholder(needed: classes.isEmpty))
-        .academicDetailChrome(title: "选课") { await load(force: true) }
+        .academicDetailChrome(title: "选课")
         .task {
             if classes.isEmpty { await load() }
         }
@@ -97,31 +104,28 @@ struct ElectiveView: View {
     }
 
     private var list: some View {
-        ScrollView {
-            LazyVStack(spacing: 16) {
-                VStack(spacing: 14) {
-                    searchField
-                    filterBar
-                    if let initData { header(initData) }
-                }
-                .padding(16)
-                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
-
-                ForEach(filtered) { item in
-                    ClassCard(
-                        item: item,
-                        onAction: { pending = PendingAction(item: item, enrolling: !item.isSelected) },
-                        isWorking: workingId == item.id
-                    )
-                    .contentShape(.rect)
-                    .onTapGesture { detail = item }
-                }
+        LazyVStack(spacing: 16) {
+            VStack(spacing: 14) {
+                searchField
+                filterBar
+                if let initData { header(initData) }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 24)
+            .padding(16)
+            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+
+            ForEach(filtered) { item in
+                ClassCard(
+                    item: item,
+                    onAction: { pending = PendingAction(item: item, enrolling: !item.isSelected) },
+                    isWorking: workingId == item.id
+                )
+                .contentShape(.rect)
+                .onTapGesture { detail = item }
+            }
         }
-        .scrollDismissesKeyboard(.immediately)
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 24)
         .background(Color(.systemGroupedBackground))
         .confirmationDialog(
             pending.map { $0.enrolling ? "确认选课？" : "确认退课？" } ?? "",
@@ -255,6 +259,10 @@ struct ElectiveView: View {
     // MARK: 加载
 
     private func load(force: Bool = false) async {
+        await loadGate.run { await fetch(force: force) }
+    }
+
+    private func fetch(force: Bool) async {
         #if DEBUG
         if InterfacePreview.enabled {
             isLoading = true

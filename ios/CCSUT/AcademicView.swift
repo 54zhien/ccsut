@@ -4,6 +4,7 @@ import SwiftUI
 struct AcademicView: View {
     private enum Destination: Hashable { case scores, exams, electives }
     @State private var nextExam: ExamItem?
+    @State private var loadGate = PageLoadGate()
     @State private var path: [Destination] = []
     @State private var didNavigatePreview = false
     @State private var headerScrollOffset: CGFloat = 0
@@ -37,6 +38,7 @@ struct AcademicView: View {
                     .padding(.bottom, 28)
                     .frame(maxWidth: 720)
                     .frame(maxWidth: .infinity)
+                    .pageRefreshControl { await loadUpcomingExam() }
                 }
                 .scrollBounceBehavior(.always, axes: .vertical)
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
@@ -114,6 +116,10 @@ struct AcademicView: View {
     }
 
     private func loadUpcomingExam() async {
+        await loadGate.run { await fetchUpcomingExam() }
+    }
+
+    private func fetchUpcomingExam() async {
         #if DEBUG
         if InterfacePreview.enabled {
             nextExam = ProcessInfo.processInfo.arguments.contains("--preview-no-upcoming") ? nil : InterfacePreview.exam

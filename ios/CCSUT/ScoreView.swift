@@ -18,37 +18,44 @@ struct ScoreView: View {
 
     @State private var items: [ScoreItem] = []
     @State private var isLoading = false
+    @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
     @State private var selectedTerm: String?
     @State private var termHeaderTracker = AcademicTermHeaderTracker()
 
     var body: some View {
-        Group {
-            if isLoading && items.isEmpty {
-                ProgressView("加载成绩…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if errorText != nil, items.isEmpty {
-                ContentUnavailableView {
-                    Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
-                } description: {
-                    EmptyView()
-                } actions: {
-                    Button("重试") { Task { await load(force: true) } }
+        GeometryReader { viewport in
+            ScrollView {
+                VStack(spacing: 0) {
+                    if isLoading && items.isEmpty {
+                        ProgressView("加载成绩…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if errorText != nil, items.isEmpty {
+                        ContentUnavailableView {
+                            Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
+                        } description: {
+                            EmptyView()
+                        } actions: {
+                            Button("重试") { Task { await load(force: true) } }
+                        }
+                    } else if items.isEmpty {
+                        ContentUnavailableView {
+                            Label("暂无成绩", systemImage: "doc.text.magnifyingglass")
+                        } description: {
+                            Text("这学期还没出成绩，或者还没完成评教。")
+                        }
+                    } else {
+                        content
+                    }
                 }
-            } else if items.isEmpty {
-                ContentUnavailableView {
-                    Label("暂无成绩", systemImage: "doc.text.magnifyingglass")
-                } description: {
-                    Text("这学期还没出成绩，或者还没完成评教。")
-                }
-            } else {
-                content
+                .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
+                .pageRefreshControl(showsRefreshCount: true) { await load(force: true) }
             }
+            .coordinateSpace(name: "academic-scroll")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
-        .modifier(RefreshablePlaceholder(needed: items.isEmpty))
-        .academicDetailChrome(title: "成绩单") { await load(force: true) }
+        .academicDetailChrome(title: "成绩单")
         .task { if items.isEmpty { await load() } }
     }
 
@@ -72,30 +79,29 @@ struct ScoreView: View {
     }
 
     private var content: some View {
-        ScrollView {
-            LazyVStack(spacing: 18, pinnedViews: [.sectionHeaders]) {
-                summaryCard
+        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+            summaryCard.padding(.bottom, 12)
 
-                ForEach(terms) { term in
-                    Section {
-                        VStack(spacing: 0) {
-                            ForEach(Array(term.items.enumerated()), id: \.element.id) { idx, item in
-                                ScoreRow(item: item)
-                                if idx < term.items.count - 1 {
-                                    Divider().padding(.leading, 16)
-                                }
+            ForEach(terms) { term in
+                Section {
+                    VStack(spacing: 0) {
+                        ForEach(Array(term.items.enumerated()), id: \.element.id) { idx, item in
+                            ScoreRow(item: item)
+                            if idx < term.items.count - 1 {
+                                Divider().padding(.leading, 16)
                             }
                         }
-                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
-                        .padding(.horizontal, 16)
-                    } header: {
-                        termHeader(term)
                     }
+                    .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 16)
+                } header: {
+                    termHeader(term)
                 }
             }
-            .padding(.vertical, 12)
         }
-        .coordinateSpace(name: "academic-scroll")
+        .padding(.vertical, 12)
     }
 
     private var summaryCard: some View {
@@ -156,6 +162,10 @@ struct ScoreView: View {
     // MARK: - 加载
 
     private func load(force: Bool = false) async {
+        await loadGate.run { await fetch(force: force) }
+    }
+
+    private func fetch(force: Bool) async {
         #if DEBUG
         if InterfacePreview.enabled {
             isLoading = true

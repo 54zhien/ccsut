@@ -2,7 +2,7 @@
 //  WebLoginSheet.swift
 //  CCSUT
 //
-//  统一身份认证 · 高度跟随网页内容的系统玻璃 sheet
+//  统一身份认证 · 全高网页与悬浮玻璃控件
 //
 //  CAS 有三个页签：扫码登录 / 密码登录 / 验证码登录
 //  这里只走两条不需要密码的：
@@ -44,6 +44,7 @@ struct WebLoginSheet: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.deviceCornerRadius) private var deviceCornerRadius
 
     private let request: LoginSheetRequest?
     private let ownsNavigation: Bool
@@ -52,9 +53,6 @@ struct WebLoginSheet: View {
     @State private var nav = WebNavigator()
     @State private var status = ""
     @State private var didPrepare = false
-    @State private var contentHeight: CGFloat = 320
-    @State private var topControlsHeight: CGFloat = 64
-    @State private var bottomControlsHeight: CGFloat = 64
 
     /// LoginView passes its already-running web view and navigator. They are moved
     /// into this sheet only after the source WebPanel has left the main view tree.
@@ -74,16 +72,16 @@ struct WebLoginSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            topControls
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topControlsHeight = $0 }
-            WebPanel(webView: webView, onContentHeight: { height in
-                if abs(contentHeight - height) > 1 { contentHeight = height }
-            })
-            bottomControls
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bottomControlsHeight = $0 }
+        GeometryReader { viewport in
+            WebPanel(webView: webView, extendsUnderControls: true)
+                .overlay(alignment: .top) { topControls }
+                .overlay(alignment: .bottom) {
+                    bottomControls
+                        .padding(.bottom, max(SheetLayout.controlInset(deviceCornerRadius), viewport.safeAreaInsets.bottom))
+                }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea(.container)
         .tint(nil)
         .onAppear {
             if ownsNavigation { start() }
@@ -99,28 +97,20 @@ struct WebLoginSheet: View {
         .onChange(of: nav.lastError) { _, err in
             if err != nil { status = AppMessages.loadFailure }
         }
-        .presentationDetents([.height(max(320, contentHeight) + topControlsHeight + bottomControlsHeight)])
+        .presentationDetents([.large])
         .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.visible)
+        .presentationCornerRadius(SheetLayout.cornerRadius(deviceCornerRadius))
     }
 
     private var topControls: some View {
         HStack {
-            Button(role: .close) { dismiss() }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel("关闭网页登录")
+            SheetSymbolButton(symbol: "xmark", label: "关闭网页登录") { dismiss() }
             Spacer()
-            Button("刷新网页", systemImage: "arrow.clockwise", action: refresh)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+            SheetSymbolButton(symbol: "arrow.clockwise", label: "刷新网页", action: refresh)
         }
-        .controlSize(.large)
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
+        .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius))
+        .padding(.top, SheetLayout.controlInset(deviceCornerRadius))
     }
 
     private var bottomControls: some View {
@@ -130,18 +120,13 @@ struct WebLoginSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(12)
+                    .glassEffect(.regular, in: .capsule)
             }
             Spacer(minLength: 0)
-            Button("Safari", systemImage: "safari", action: openCurrentURLInSafari)
-                .buttonStyle(.glass)
-                .buttonBorderShape(.capsule)
-                .controlSize(.large)
-                .foregroundStyle(.primary)
-                .accessibilityLabel("在 Safari 中打开当前网址")
+            SheetSymbolButton(symbol: "safari", label: "在 Safari 中打开当前网址", action: openCurrentURLInSafari)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius))
     }
 
     private var currentURL: URL? {

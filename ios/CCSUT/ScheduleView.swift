@@ -9,6 +9,7 @@ struct ScheduleView: View {
     @ScaledMetric(relativeTo: .caption) private var courseFont: CGFloat = 12
     @State private var bundle: ScheduleBundle?
     @State private var isLoading = false
+    @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
     @State private var selectedWeek = 1
     @State private var currentWeek: Int?
@@ -31,49 +32,51 @@ struct ScheduleView: View {
             GeometryReader { viewport in
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
-                        if let bundle, !bundle.isEmpty {
-                            VStack(spacing: 16) {
-                                weekBar().id("page-top")
-                                VStack(spacing: 8) {
-                                    termSummary
-                                    timetable(viewport: viewport.size)
-                                }
-                                .padding(.top, 12)
-                                .padding(.bottom, 12)
-                                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
-                                .clipShape(.rect(cornerRadius: 28))
-                                .padding(.horizontal, 12)
-                                .id("timetable-panel")
-                                Color.clear.frame(height: 1).id("page-end")
-                            }
-                            .padding(.top, 8)
-                            .padding(.bottom, 20)
-                            .frame(maxWidth: .infinity)
-                        } else {
-                            Group {
-                                if isLoading {
-                                    ProgressView("加载课表…")
-                                } else if errorText != nil {
-                                    ContentUnavailableView {
-                                        Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
-                                    } description: { EmptyView() } actions: {
-                                        Button("重试") { Task { await load(force: true) } }
+                        VStack(spacing: 0) {
+                            if let bundle, !bundle.isEmpty {
+                                VStack(spacing: 16) {
+                                    weekBar().id("page-top")
+                                    VStack(spacing: 8) {
+                                        termSummary
+                                        timetable(viewport: viewport.size)
                                     }
-                                } else {
-                                    ContentUnavailableView {
-                                        Label("暂无课表", systemImage: "calendar.badge.exclamationmark")
-                                    } description: { Text("当前学期还没有排课数据。") } actions: {
-                                        Button("重新加载") { Task { await load(force: true) } }
+                                    .padding(.top, 12)
+                                    .padding(.bottom, 12)
+                                    .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+                                    .clipShape(.rect(cornerRadius: 28))
+                                    .padding(.horizontal, 12)
+                                    .id("timetable-panel")
+                                    Color.clear.frame(height: 1).id("page-end")
+                                }
+                                .padding(.top, 8)
+                                .padding(.bottom, 20)
+                                .frame(maxWidth: .infinity)
+                            } else {
+                                Group {
+                                    if isLoading {
+                                        ProgressView("加载课表…")
+                                    } else if errorText != nil {
+                                        ContentUnavailableView {
+                                            Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
+                                        } description: { EmptyView() } actions: {
+                                            Button("重试") { Task { await load(force: true) } }
+                                        }
+                                    } else {
+                                        ContentUnavailableView {
+                                            Label("暂无课表", systemImage: "calendar.badge.exclamationmark")
+                                        } description: { Text("当前学期还没有排课数据。") } actions: {
+                                            Button("重新加载") { Task { await load(force: true) } }
+                                        }
                                     }
                                 }
+                                .frame(maxWidth: .infinity, minHeight: viewport.size.height)
                             }
-                            .frame(maxWidth: .infinity, minHeight: viewport.size.height)
                         }
+                        .pageRefreshControl { await load(force: true) }
                     }
                     .accessibilityIdentifier("schedule-scroll")
                     .scrollIndicators(.hidden)
                     .scrollBounceBehavior(.always, axes: .vertical)
-                    .refreshable { await load(force: true) }
                     .onScrollGeometryChange(for: CGFloat.self) { geometry in
                         max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
                     } action: { _, offset in headerScrollOffset = offset }
@@ -113,7 +116,7 @@ struct ScheduleView: View {
                     .presentationDetents([.medium])
                     .presentationContentInteraction(.scrolls)
                     .presentationDragIndicator(.visible)
-                    .presentationCornerRadius(deviceCornerRadius)
+                    .presentationCornerRadius(SheetLayout.cornerRadius(deviceCornerRadius))
             }
             .sheet(item: $choosing, onDismiss: {
                 detail = pendingDetail
@@ -339,6 +342,10 @@ struct ScheduleView: View {
     }
 
     private func load(force: Bool = false) async {
+        await loadGate.run { await fetch(force: force) }
+    }
+
+    private func fetch(force: Bool) async {
         #if DEBUG
         if InterfacePreview.enabled {
             if InterfacePreview.page == "loading" {

@@ -169,22 +169,14 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
 /// title/buttons independently of the moving page. UIKit still owns the gesture.
 private struct AcademicDetailChrome: ViewModifier {
     let title: String
-    let refresh: () async -> Void
     #if DEBUG
     @State private var transitionDrift: CGFloat = 0
     @State private var transitionSamples = 0
-    @State private var refreshCount = 0
     #endif
 
     func body(content: Content) -> some View {
         content
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .refreshable {
-                    await refresh()
-                    #if DEBUG
-                    refreshCount += 1
-                    #endif
-                }
                 .scrollBounceBehavior(.always, axes: .vertical)
                 .nagiTopBar {
                     HStack {
@@ -230,33 +222,74 @@ private struct AcademicDetailChrome: ViewModifier {
                     }
                     .font(.caption2).allowsHitTesting(false)
                 }
-                if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh") {
-                    Text("\(refreshCount)").font(.caption2)
-                        .accessibilityIdentifier("academic-refresh-count")
-                        .allowsHitTesting(false)
-                }
                 #endif
             }
     }
 }
 
 extension View {
-    /// Root and detail pages share the native bar and soft scroll-edge effect.
-    /// Do not put an opaque bar background over the system's progressive blur.
+    /// Root and detail pages share Nagi Search's continuously mounted masked blur.
+    /// Its lifetime/opacity is independent of the header labels fading out.
     fileprivate func nagiTopBar<Bar: View>(@ViewBuilder content: () -> Bar) -> some View {
         toolbar(.hidden, for: .navigationBar)
-            .scrollEdgeEffectStyle(.soft, for: .top)
-            .safeAreaBar(edge: .top, spacing: 0) {
+            .scrollEdgeEffectHidden(true, for: .top)
+            .safeAreaInset(edge: .top, spacing: 0) {
                 content()
                     .frame(maxWidth: .infinity)
+                    .background {
+                        NagiPersistentHeaderBlur()
+                            .padding(.bottom, -12)
+                            .ignoresSafeArea(.container, edges: .top)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
             }
     }
 
-    func academicDetailChrome(title: String, refresh: @escaping () async -> Void) -> some View {
-        modifier(AcademicDetailChrome(title: title, refresh: refresh))
+    func academicDetailChrome(title: String) -> some View {
+        modifier(AcademicDetailChrome(title: title))
     }
 
     func nagiPageChrome<Actions: View>(title: String, scrollOffset: CGFloat, showsBackButton: Bool = false, @ViewBuilder actions: @escaping () -> Actions) -> some View {
         modifier(NagiPageChrome(title: title, scrollOffset: scrollOffset, showsBackButton: showsBackButton, actions: actions))
+    }
+}
+
+/// Adapted from Nagi SearchView's GradientMaskedBlurView (9f5cd1a).
+/// A semantic UIKit material follows light/dark appearance without a color overlay.
+private struct NagiPersistentHeaderBlur: UIViewRepresentable {
+    func makeUIView(context: Context) -> BlurView { BlurView() }
+    func updateUIView(_ view: BlurView, context: Context) {}
+
+    final class BlurView: UIView {
+        private let effectView = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
+        private let gradient = CAGradientLayer()
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            backgroundColor = .clear
+            addSubview(effectView)
+            effectView.layer.mask = gradient
+            gradient.colors = [UIColor.black.cgColor, UIColor.black.cgColor,
+                               UIColor.black.withAlphaComponent(0.42).cgColor, UIColor.clear.cgColor]
+            gradient.startPoint = CGPoint(x: 0.5, y: 0)
+            gradient.endPoint = CGPoint(x: 0.5, y: 1)
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            // Geometry changes must not implicitly animate or recreate the blur.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            effectView.frame = bounds
+            gradient.frame = bounds
+            let statusEnd = min(max((window?.safeAreaInsets.top ?? 0) / max(bounds.height, 1), 0), 0.72)
+            gradient.locations = [0, NSNumber(value: Double(statusEnd)),
+                                  NSNumber(value: Double(statusEnd + (1 - statusEnd) * 0.58)), 1]
+            CATransaction.commit()
+        }
     }
 }

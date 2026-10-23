@@ -17,6 +17,7 @@ struct ExamView: View {
 
     @State private var items: [ExamItem] = []
     @State private var isLoading = false
+    @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
     @State private var loadedTerms: Set<String> = []
     @State private var termHeaderTracker = AcademicTermHeaderTracker()
@@ -31,67 +32,72 @@ struct ExamView: View {
     ]
 
     var body: some View {
-        Group {
-            if isLoading && items.isEmpty {
-                ProgressView("加载考试安排…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if errorText != nil, items.isEmpty {
-                ContentUnavailableView {
-                    Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
-                } description: {
-                    EmptyView()
-                } actions: {
-                    Button("重试") { Task { await load(force: true) } }
+        GeometryReader { viewport in
+            ScrollView {
+                VStack(spacing: 0) {
+                    if isLoading && items.isEmpty {
+                        ProgressView("加载考试安排…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if errorText != nil, items.isEmpty {
+                        ContentUnavailableView {
+                            Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
+                        } description: {
+                            EmptyView()
+                        } actions: {
+                            Button("重试") { Task { await load(force: true) } }
+                        }
+                    } else if items.isEmpty {
+                        ContentUnavailableView {
+                            Label("暂无考试安排", systemImage: "calendar.badge.clock")
+                        } description: {
+                            Text("这个学期的考试还没排出来。")
+                        }
+                    } else {
+                        content
+                    }
                 }
-            } else if items.isEmpty {
-                ContentUnavailableView {
-                    Label("暂无考试安排", systemImage: "calendar.badge.clock")
-                } description: {
-                    Text("这个学期的考试还没排出来。")
-                }
-            } else {
-                content
+                .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
+                .pageRefreshControl(showsRefreshCount: true) { await load(force: true) }
             }
+            .coordinateSpace(name: "academic-scroll")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
-        .modifier(RefreshablePlaceholder(needed: items.isEmpty))
-        .academicDetailChrome(title: "考试") { await load(force: true) }
+        .academicDetailChrome(title: "考试")
         .task { if items.isEmpty { await load() } }
     }
 
     // MARK: 内容
 
     private var content: some View {
-        ScrollView {
-            LazyVStack(spacing: 18, pinnedViews: [.sectionHeaders]) {
-                if let next = upcoming.first {
-                    nextCard(next)
-                }
+        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+            if let next = upcoming.first {
+                nextCard(next).padding(.bottom, 12)
+            }
 
-                ForEach(terms, id: \.self) { term in
-                    let list = grouped[term] ?? []
-                    if !list.isEmpty {
-                        Section {
-                            VStack(spacing: 0) {
-                                ForEach(Array(list.enumerated()), id: \.element.id) { idx, exam in
-                                    ExamRow(exam: exam, showTerm: false)
-                                    if idx < list.count - 1 {
-                                        Divider().padding(.leading, 16)
-                                    }
+            ForEach(terms, id: \.self) { term in
+                let list = grouped[term] ?? []
+                if !list.isEmpty {
+                    Section {
+                        VStack(spacing: 0) {
+                            ForEach(Array(list.enumerated()), id: \.element.id) { idx, exam in
+                                ExamRow(exam: exam, showTerm: false)
+                                if idx < list.count - 1 {
+                                    Divider().padding(.leading, 16)
                                 }
                             }
-                            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
-                            .padding(.horizontal, 16)
-                        } header: {
-                            termHeader(term, count: list.count)
                         }
+                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 16)
+                    } header: {
+                        termHeader(term, count: list.count)
                     }
                 }
             }
-            .padding(.vertical, 12)
         }
-        .coordinateSpace(name: "academic-scroll")
+        .padding(.vertical, 12)
     }
 
     /// 即将开始的那场（未来 60 天内最近的一场）
@@ -197,6 +203,10 @@ struct ExamView: View {
     // MARK: 加载
 
     private func load(force: Bool = false) async {
+        await loadGate.run { await fetch(force: force) }
+    }
+
+    private func fetch(force: Bool) async {
         #if DEBUG
         if InterfacePreview.enabled {
             isLoading = true

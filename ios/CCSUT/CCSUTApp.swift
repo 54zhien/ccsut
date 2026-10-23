@@ -177,7 +177,7 @@ struct AccountButton: View {
 
     var body: some View {
         Button { isPresented = true } label: {
-            StudentAvatar(size: 28)
+            StudentAvatar(size: 34)
                 .frame(width: 48, height: 48)
                 .contentShape(Circle())
         }
@@ -188,7 +188,7 @@ struct AccountButton: View {
             ProfileView()
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
-                .presentationCornerRadius(deviceCornerRadius)
+                .presentationCornerRadius(SheetLayout.cornerRadius(deviceCornerRadius))
         }
         .onAppear {
             if InterfacePreview.page == "account" { isPresented = true }
@@ -199,50 +199,51 @@ struct AccountButton: View {
 struct ProfileView: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.deviceCornerRadius) private var deviceCornerRadius
     @State private var showLogoutAlert = false
-    @State private var identityHeight: CGFloat = 150
 
     var body: some View {
         GeometryReader { viewport in
+            let edgeInset = max(20, SheetLayout.cornerRadius(deviceCornerRadius) - 25)
+            let reservedHeight = max(96, SheetLayout.cornerRadius(deviceCornerRadius) + 30)
             ScrollView {
-                VStack(spacing: 0) {
-                    VStack(spacing: 14) {
-                        StudentAvatar(size: 76)
+                VStack(spacing: 14) {
+                    StudentAvatar(size: 76)
 
-                        VStack(spacing: 6) {
-                            Text(session.studentName ?? (InterfacePreview.enabled ? "预览同学" : "已登录"))
-                                .font(.title3.weight(.semibold))
-                                .multilineTextAlignment(.center)
-                            Text(session.studentId ?? (InterfacePreview.enabled ? "示例账号" : "—"))
-                                .font(.subheadline.monospaced())
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .center)
+                    VStack(spacing: 6) {
+                        Text(session.studentName ?? (InterfacePreview.enabled ? "预览同学" : "已登录"))
+                            .font(.title3.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                        Text(session.studentId ?? (InterfacePreview.enabled ? "示例账号" : "—"))
+                            .font(.subheadline.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { identityHeight = $0 }
-                    .padding(.bottom, 24)
-
-                    Button(role: .destructive) { showLogoutAlert = true } label: {
-                        Text("退出登录")
-                            .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 16)
-                            .frame(minHeight: 44)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.capsule)
-                    .tint(.red)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .padding(.horizontal, 24)
-                .padding(.top, max(72, (viewport.size.height - identityHeight) / 2))
-                .padding(.bottom, 24)
-                .frame(maxWidth: .infinity)
+                .padding(.vertical, reservedHeight)
+                .frame(maxWidth: .infinity, minHeight: viewport.size.height)
             }
             .scrollBounceBehavior(.basedOnSize)
             .overlay(alignment: .top) {
                 SheetHeader(title: "账号") { dismiss() }
             }
+            .overlay(alignment: .bottom) {
+                Button(role: .destructive) { showLogoutAlert = true } label: {
+                    Text("退出登录")
+                        .font(.body.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.capsule)
+                .controlSize(.large)
+                .tint(.red)
+                .padding(.horizontal, edgeInset)
+                .padding(.bottom, max(edgeInset, viewport.safeAreaInsets.bottom))
+            }
         }
+        .ignoresSafeArea(.container)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .alert("退出登录", isPresented: $showLogoutAlert) {
             Button("取消", role: .cancel) {}
