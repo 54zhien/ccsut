@@ -120,8 +120,12 @@ struct AccountButton: View {
     var body: some View {
         Button { isPresented = true } label: {
             Image(systemName: "person.crop.circle")
-                .font(.system(size: 21, weight: .regular))
+                .font(.system(size: 20, weight: .medium))
+                .frame(width: 48, height: 48)
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
         .accessibilityLabel("账号")
         .sheet(isPresented: $isPresented) {
             ProfileView()

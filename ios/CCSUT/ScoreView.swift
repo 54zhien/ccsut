@@ -44,6 +44,7 @@ struct ScoreView: View {
                 content
             }
         }
+        .toolbar(.visible, for: .navigationBar)
         .navigationTitle("成绩单")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

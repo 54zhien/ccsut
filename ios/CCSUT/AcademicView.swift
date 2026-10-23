@@ -4,6 +4,7 @@ import SwiftUI
 struct AcademicView: View {
     private enum Destination: Hashable { case scores, exams, electives }
     @State private var nextExam: ExamItem?
+    @State private var headerScrollOffset: CGFloat = 0
 
     var body: some View {
         NavigationStack {
@@ -52,9 +53,13 @@ struct AcademicView: View {
                     Section { Text("界面预览 · 示例数据").font(.footnote).foregroundStyle(.secondary) }
                 }
             }
-            .navigationTitle("教务")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { AccountButton() }
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
+            } action: { _, offset in
+                headerScrollOffset = offset
+            }
+            .nagiPageChrome(title: "教务", scrollOffset: headerScrollOffset) {
+                AccountButton()
             }
             .navigationDestination(for: Destination.self) { destination in
                 switch destination {

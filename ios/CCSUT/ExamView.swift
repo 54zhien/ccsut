@@ -54,6 +54,7 @@ struct ExamView: View {
                 content
             }
         }
+        .toolbar(.visible, for: .navigationBar)
         .navigationTitle("考试")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

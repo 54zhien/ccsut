@@ -30,6 +30,14 @@ capture academic light
 capture account light
 capture course light
 capture conflict light
+capture header-hidden light
+xcrun simctl launch --terminate-running-process "$DEVICE" com.imzhien.ccsut --preview-ui --preview-page header-motion
+xcrun simctl io "$DEVICE" recordVideo --codec=h264 "$OUT/header-motion.mp4" &
+VIDEO_PID=$!
+sleep 7
+kill -INT "$VIDEO_PID"
+wait "$VIDEO_PID" || true
+xcrun simctl io "$DEVICE" screenshot "$OUT/header-revealed-light.png"
 xcrun simctl terminate "$DEVICE" com.imzhien.ccsut
 
 # Exercise the minimum-width timetable on a small native phone if available.

@@ -24,6 +24,7 @@
 		A00000000000000000000019 /* AcademicView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000019 /* AcademicView.swift */; };
 		A0000000000000000000001A /* InterfacePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001A /* InterfacePreview.swift */; };
 		A0000000000000000000001B /* SchedulePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001B /* SchedulePresentation.swift */; };
+		A0000000000000000000001C /* NagiPageChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001C /* NagiPageChrome.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -45,6 +46,7 @@
 		B00000000000000000000019 /* AcademicView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcademicView.swift; sourceTree = "<group>"; };
 		B0000000000000000000001A /* InterfacePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterfacePreview.swift; sourceTree = "<group>"; };
 		B0000000000000000000001B /* SchedulePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulePresentation.swift; sourceTree = "<group>"; };
+		B0000000000000000000001C /* NagiPageChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NagiPageChrome.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -85,6 +87,7 @@
 				B0000000000000000000001B /* SchedulePresentation.swift */,
 				B0000000000000000000001A /* InterfacePreview.swift */,
 				B00000000000000000000019 /* AcademicView.swift */,
+				B0000000000000000000001C /* NagiPageChrome.swift */,
 				B00000000000000000000011 /* Assets.xcassets */,
 			);
 			path = CCSUT;
@@ -184,6 +187,7 @@
 				A0000000000000000000001B /* SchedulePresentation.swift in Sources */,
 				A0000000000000000000001A /* InterfacePreview.swift in Sources */,
 				A00000000000000000000019 /* AcademicView.swift in Sources */,
+				A0000000000000000000001C /* NagiPageChrome.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

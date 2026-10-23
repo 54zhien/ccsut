@@ -61,6 +61,7 @@ struct ElectiveView: View {
                 list
             }
         }
+        .toolbar(.visible, for: .navigationBar)
         .navigationTitle("选课")
         .searchable(text: $keyword, prompt: "课程名 / 教师")
         .refreshable { await load(force: true) }

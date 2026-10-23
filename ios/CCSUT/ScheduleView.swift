@@ -16,6 +16,7 @@ struct ScheduleView: View {
     @State private var detail: ScheduleSlot?
     @State private var choosing: ScheduleCell?
     @State private var pendingDetail: ScheduleSlot?
+    @State private var headerScrollOffset: CGFloat = 0
     private let railWidth: CGFloat = 44
     private let headerHeight: CGFloat = 52
     private let weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -45,13 +46,18 @@ struct ScheduleView: View {
                 }
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("课表")
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
+            .nagiPageChrome(title: "课表", scrollOffset: headerScrollOffset) {
+                HStack(spacing: 8) {
                     Button { Task { await load(force: true) } } label: {
-                        if isLoading { ProgressView().controlSize(.small) }
-                        else { Image(systemName: "arrow.clockwise") }
+                        Group {
+                            if isLoading { ProgressView().controlSize(.small) }
+                            else { Image(systemName: "arrow.clockwise").font(.system(size: 20, weight: .medium)) }
+                        }
+                        .frame(width: 48, height: 48)
+                        .contentShape(Circle())
                     }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Circle())
                     .accessibilityLabel("刷新课表")
                     .disabled(isLoading)
                     AccountButton()
@@ -191,8 +197,25 @@ struct ScheduleView: View {
                         .padding(.bottom, 88)
                       }
                       .scrollIndicators(.hidden)
+                      .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                          max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
+                      } action: { _, offset in
+                          headerScrollOffset = offset
+                      }
                       .onAppear {
-                          if InterfacePreview.page == "bottom" { verticalProxy.scrollTo(4, anchor: .bottom) }
+                          if InterfacePreview.page == "bottom" || InterfacePreview.page == "header-hidden" {
+                              verticalProxy.scrollTo(4, anchor: .bottom)
+                          }
+                      }
+                      .task {
+                          #if DEBUG
+                          if InterfacePreview.page == "header-motion" {
+                              try? await Task.sleep(for: .seconds(2))
+                              withAnimation(.easeInOut(duration: 0.5)) { verticalProxy.scrollTo(4, anchor: .bottom) }
+                              try? await Task.sleep(for: .seconds(2))
+                              withAnimation(.easeInOut(duration: 0.5)) { verticalProxy.scrollTo(1, anchor: .top) }
+                          }
+                          #endif
                       }
                     }
                 }
