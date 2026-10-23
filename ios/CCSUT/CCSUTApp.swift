@@ -25,6 +25,7 @@ struct CCSUTApp: App {
                 } else { RootView() }
             }
                 .environment(session)
+                .tint(.accentColor)
                 .environment(\.deviceCornerRadius, deviceCornerRadius)
                 .background {
                     ScreenCornerReader { deviceCornerRadius = $0 }
@@ -68,7 +69,7 @@ struct LaunchView: View {
             Color(.systemBackground).ignoresSafeArea()
             VStack(spacing: 20) {
                 SchoolEmblemView(size: 116, rotatingRing: true)
-                Text("加载中...")
+                Text("登陆中")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -81,17 +82,23 @@ struct LaunchView: View {
 struct SchoolEmblemView: View {
     let size: CGFloat
     var rotatingRing = false
+    var monochrome = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var spinning = false
 
     var body: some View {
         ZStack {
-            Image("SchoolEmblemCore").resizable().scaledToFit()
-            Image("SchoolEmblemRing").resizable().scaledToFit()
+            Image("SchoolEmblemCore")
+                .renderingMode(monochrome ? .template : .original)
+                .resizable().scaledToFit()
+            Image("SchoolEmblemRing")
+                .renderingMode(monochrome ? .template : .original)
+                .resizable().scaledToFit()
                 .rotationEffect(.degrees(spinning ? 360 : 0))
                 .animation(rotatingRing && !reduceMotion ? .linear(duration: 8).repeatForever(autoreverses: false) : nil,
                            value: spinning)
         }
+        .foregroundStyle(.primary)
         .frame(width: size, height: size)
         .accessibilityLabel("长沙工业学院校徽")
         .onAppear { spinning = rotatingRing && !reduceMotion }
@@ -179,61 +186,62 @@ struct AccountButton: View {
 struct ProfileView: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.dismiss) private var dismiss
-
     @State private var showLogoutAlert = false
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    HStack(spacing: 14) {
-                        ZStack {
-                            Circle()
-                                .fill(.tint.opacity(0.15))
-                                .frame(width: 54, height: 54)
-                            Text(initials)
-                                .font(.title3.weight(.semibold))
-                                .foregroundStyle(.tint)
-                        }
+        VStack(spacing: 0) {
+            SheetHeader(title: "账号") { dismiss() }
+            ScrollView {
+                VStack(spacing: 24) {
+                    VStack(spacing: 14) {
+                        Text(initials)
+                            .font(.system(size: 30, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 76, height: 76)
+                            .background(Color.accentColor.opacity(0.12), in: .circle)
+                            .accessibilityHidden(true)
 
-                        VStack(alignment: .leading, spacing: 3) {
+                        VStack(spacing: 6) {
                             Text(session.studentName ?? (InterfacePreview.enabled ? "预览同学" : "已登录"))
-                                .font(.headline)
+                                .font(.title3.weight(.semibold))
+                                .multilineTextAlignment(.center)
                             Text(session.studentId ?? (InterfacePreview.enabled ? "示例账号" : "—"))
                                 .font(.subheadline.monospaced())
                                 .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
                         }
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
-                    .padding(.vertical, 4)
-                }
+                    .padding(.top, 12)
 
-                Section {
-                    Button("退出登录", role: .destructive) {
-                        showLogoutAlert = true
+                    Button(role: .destructive) { showLogoutAlert = true } label: {
+                        Text("退出登录")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .center)
+                            .foregroundStyle(.red)
+                            .background(Color.red.opacity(0.09), in: .capsule)
+                            .contentShape(.capsule)
                     }
+                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
             }
-            .navigationTitle("账号")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
-                }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .modifier(GlassSheetSurface())
+        .alert("退出登录", isPresented: $showLogoutAlert) {
+            Button("取消", role: .cancel) {}
+            Button("退出", role: .destructive) {
+                Task { await session.logout(); dismiss() }
             }
-            .alert("退出登录", isPresented: $showLogoutAlert) {
-                Button("取消", role: .cancel) {}
-                Button("退出", role: .destructive) {
-                    Task { await session.logout(); dismiss() }
-                }
-            } message: {
-                Text("下次打开需要重新登录。")
-            }
+        } message: {
+            Text("下次打开需要重新登录。")
         }
     }
 
     private var initials: String {
         let name = session.studentName ?? (InterfacePreview.enabled ? "预览同学" : "")
-        guard let first = name.first else { return "?" }
-        return String(first)
+        return name.first.map(String.init) ?? "?"
     }
 }

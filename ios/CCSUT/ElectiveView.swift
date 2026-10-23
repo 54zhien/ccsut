@@ -41,11 +41,11 @@ struct ElectiveView: View {
             if isLoading && classes.isEmpty {
                 ProgressView("拉取教学班…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let errorText, classes.isEmpty {
+            } else if errorText != nil, classes.isEmpty {
                 ContentUnavailableView {
-                    Label("加载失败", systemImage: "exclamationmark.icloud")
+                    Label(AppMessages.loadFailure, systemImage: "exclamationmark.icloud")
                 } description: {
-                    Text(errorText)
+                    EmptyView()
                 } actions: {
                     Button("重试") { Task { await load(force: true) } }
                         .buttonStyle(.borderedProminent)
@@ -142,7 +142,7 @@ struct ElectiveView: View {
         )) {
             Button("好", role: .cancel) { actionMessage = nil }
         } message: {
-            Text(actionMessage ?? "")
+            Text(AppMessages.readable(actionMessage ?? ""))
         }
     }
 
@@ -213,7 +213,8 @@ struct ElectiveView: View {
                                     .font(.caption2.weight(.bold).monospacedDigit())
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 1)
-                                    .background(.white.opacity(on ? 0.25 : 0.15), in: .capsule)
+                                    .background((on ? Color("AccentForeground") : Color.accentColor)
+                                        .opacity(0.15), in: .capsule)
                             }
                         }
                         .padding(.horizontal, 12)
@@ -223,7 +224,7 @@ struct ElectiveView: View {
                                : AnyShapeStyle(Color(.secondarySystemGroupedBackground)),
                             in: .capsule
                         )
-                        .foregroundStyle(on ? .white : .primary)
+                        .foregroundStyle(on ? Color("AccentForeground") : Color.primary)
                     }
                     .buttonStyle(.plain)
                 }

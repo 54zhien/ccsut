@@ -20,17 +20,18 @@ struct ScoreView: View {
     @State private var isLoading = false
     @State private var errorText: String?
     @State private var selectedTerm: String?
+    @State private var termHeaderTracker = AcademicTermHeaderTracker()
 
     var body: some View {
         Group {
             if isLoading && items.isEmpty {
                 ProgressView("加载成绩…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let errorText, items.isEmpty {
+            } else if errorText != nil, items.isEmpty {
                 ContentUnavailableView {
-                    Label("加载失败", systemImage: "wifi.exclamationmark")
+                    Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
                 } description: {
-                    Text(errorText)
+                    EmptyView()
                 } actions: {
                     Button("重试") { Task { await load(force: true) } }
                 }
@@ -95,6 +96,7 @@ struct ScoreView: View {
             .padding(.vertical, 12)
         }
         .coordinateSpace(name: "academic-scroll")
+        .trackAcademicTermHeaders(termHeaderTracker)
     }
 
     private var summaryCard: some View {
@@ -103,11 +105,11 @@ struct ScoreView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
             HStack(spacing: 0) {
-                statBlock(value: String(format: "%.2f", overallGPA), label: "加权绩点", tint: .blue)
+                statBlock(value: String(format: "%.2f", overallGPA), label: "加权绩点", tint: .accentColor)
                 Divider().frame(height: 34)
-                statBlock(value: String(format: "%.1f", overallCredits), label: "总学分", tint: .green)
+                statBlock(value: String(format: "%.1f", overallCredits), label: "总学分", tint: .accentColor)
                 Divider().frame(height: 34)
-                statBlock(value: "\(items.count)", label: "门课程", tint: .orange)
+                statBlock(value: "\(items.count)", label: "门课程", tint: .accentColor)
             }
         }
         .padding(20)
@@ -128,7 +130,7 @@ struct ScoreView: View {
     }
 
     private func termHeader(_ term: ScoreTerm) -> some View {
-        AcademicTermStrip(term: term.name) {
+        AcademicTermStrip(term: term.name, tracker: termHeaderTracker) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(SchedulePresentation.termTitle(term.name))

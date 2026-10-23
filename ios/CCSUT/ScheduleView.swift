@@ -1,7 +1,4 @@
 import SwiftUI
-import QuartzCore
-import Observation
-import UIKit
 
 struct ScheduleView: View {
     @Environment(SessionStore.self) private var session
@@ -55,10 +52,10 @@ struct ScheduleView: View {
                             Group {
                                 if isLoading {
                                     ProgressView("加载课表…")
-                                } else if let errorText {
+                                } else if errorText != nil {
                                     ContentUnavailableView {
-                                        Label("加载失败", systemImage: "wifi.exclamationmark")
-                                    } description: { Text(errorText) } actions: {
+                                        Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
+                                    } description: { EmptyView() } actions: {
                                         Button("重试") { Task { await load(force: true) } }
                                     }
                                 } else {
@@ -233,7 +230,7 @@ struct ScheduleView: View {
                             .font(.system(size: 14, weight: today ? .bold : .medium).monospacedDigit())
                     }
                 }
-                .foregroundStyle(today ? (colorScheme == .dark ? Color(red: 0.42, green: 0.64, blue: 1) : Color.accentColor) : Color.primary.opacity(day > 5 ? 0.65 : 0.8))
+                .foregroundStyle(today ? Color.accentColor : Color.primary.opacity(day > 5 ? 0.65 : 0.8))
                 .frame(width: colWidth - 4, height: headerHeight - 6)
                 .background(today ? Color.accentColor.opacity(0.09) : .clear, in: .rect(cornerRadius: 12))
                 .frame(width: colWidth, height: headerHeight)
@@ -381,16 +378,8 @@ struct ScheduleView: View {
         } catch { errorText = error.localizedDescription }
     }
 
-    private static let palette: [Color] = [
-        Color(red: 0.20, green: 0.33, blue: 0.62),
-        Color(red: 0.16, green: 0.46, blue: 0.42),
-        Color(red: 0.54, green: 0.34, blue: 0.24),
-        Color(red: 0.45, green: 0.33, blue: 0.56),
-        Color(red: 0.56, green: 0.37, blue: 0.17),
-    ]
-    private static func tint(for name: String) -> Color {
-        palette[name.unicodeScalars.reduce(0) { $0 &+ Int($1.value) } % palette.count]
-    }
+    private static func tint(for _: String) -> Color { .accentColor }
+
 }
 
 private struct WeekSelector: View {
@@ -399,17 +388,13 @@ private struct WeekSelector: View {
     let currentWeek: Int
     let maxWeek: Int
     let onSelectWeek: (Int) -> Void
-    @State private var trail = WeekCapsuleTrail()
 
     var body: some View {
-        let trailFrame = trail.frame(reducedMotion: reduceMotion)
-        let anchorWeek = selectedWeek
-        return ScrollViewReader { proxy in
+        ScrollViewReader { proxy in
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
                     ForEach(1...maxWeek, id: \.self) { week in
                         Button {
-                            trail.reset()
                             onSelectWeek(week)
                         } label: {
                             Text(week == currentWeek ? "本周" : "第 \(week) 周")
@@ -428,9 +413,6 @@ private struct WeekSelector: View {
                         }
                         .accessibilityLabel(week == currentWeek ? "本周" : "第 \(week) 周")
                         .accessibilityAddTraits(week == selectedWeek ? [.isSelected] : [])
-                        .visualEffect { content, _ in
-                            content.offset(x: trailFrame.displacement(week: week, selectedWeek: anchorWeek))
-                        }
                         .id(week)
                     }
                 }
@@ -439,141 +421,13 @@ private struct WeekSelector: View {
             }
             .scrollIndicators(.hidden)
             .contentMargins(.horizontal, 16, for: .scrollContent)
-            .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                geometry.contentOffset.x
-            } action: { _, offset in
-                trail.record(offset)
-            }
-            .onScrollPhaseChange { _, phase in
-                guard !reduceMotion else { trail.reset(); return }
-                switch phase {
-                case .interacting: trail.begin()
-                case .idle: trail.finish()
-                case .animating: trail.reset()
-                default: break
-                }
-            }
-            .onDisappear { trail.reset() }
-            .onChange(of: reduceMotion) { _, reduced in
-                if reduced { trail.reset() }
-            }
             // Automatic view-aligned settling overrides the requested center on iOS 26.
             .onAppear { proxy.scrollTo(selectedWeek, anchor: .center) }
             .onChange(of: selectedWeek) { _, week in
-                trail.reset()
                 withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
                     proxy.scrollTo(week, anchor: .center)
                 }
             }
         }
-    }
-}
-
-/// A short history of the native scroll position gives each following capsule
-/// a later sample. Visual offsets never change the row's layout or scroll targets.
-@MainActor @Observable
-private final class WeekCapsuleTrail {
-    private(set) var time: CFTimeInterval = 0
-    @ObservationIgnored private var samples: [WeekTrailSample] = []
-    @ObservationIgnored private var offset: CGFloat = 0
-    @ObservationIgnored private var direction: CGFloat = 0
-    @ObservationIgnored private var isInteracting = false
-    @ObservationIgnored private var settlingUntil: CFTimeInterval = 0
-    @ObservationIgnored private var displayLink: CADisplayLink?
-    @ObservationIgnored private var clockTarget: ClockTarget?
-
-    func record(_ value: CGFloat) {
-        let delta = value - offset
-        offset = value
-        guard displayLink != nil else { return }
-        if abs(delta) > 0.25 { direction = delta > 0 ? 1 : -1 }
-        let now = CACurrentMediaTime()
-        samples.append(WeekTrailSample(time: now, offset: value))
-        samples.removeAll { $0.time < now - 0.5 }
-    }
-
-    func begin() {
-        let now = CACurrentMediaTime()
-        isInteracting = true
-        direction = 0
-        samples = [WeekTrailSample(time: now - 0.5, offset: offset), WeekTrailSample(time: now, offset: offset)]
-        time = now
-        guard displayLink == nil else { return }
-        let target = ClockTarget(owner: self)
-        let link = CADisplayLink(target: target, selector: #selector(ClockTarget.tick(_:)))
-        let maximumFrameRate = Float(UIScreen.main.maximumFramesPerSecond)
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: maximumFrameRate, preferred: maximumFrameRate)
-        clockTarget = target
-        displayLink = link
-        link.add(to: .main, forMode: .common)
-    }
-
-    func finish() {
-        guard displayLink != nil else { return }
-        isInteracting = false
-        settlingUntil = CACurrentMediaTime() + 0.4
-        record(offset)
-    }
-
-    func reset() {
-        displayLink?.invalidate()
-        displayLink = nil
-        clockTarget = nil
-        isInteracting = false
-        direction = 0
-        samples.removeAll(keepingCapacity: true)
-        time = CACurrentMediaTime()
-    }
-
-    func frame(reducedMotion: Bool) -> WeekTrailFrame {
-        WeekTrailFrame(time: time, offset: offset, direction: direction,
-                       samples: !reducedMotion && displayLink != nil ? samples : [])
-    }
-
-    private func tick() {
-        let now = CACurrentMediaTime()
-        if !isInteracting, now >= settlingUntil { reset() }
-        else { time = now }
-    }
-
-    @MainActor private final class ClockTarget: NSObject {
-        weak var owner: WeekCapsuleTrail?
-        init(owner: WeekCapsuleTrail) { self.owner = owner }
-        @objc func tick(_ link: CADisplayLink) {
-            if let owner { owner.tick() }
-            else { link.invalidate() }
-        }
-    }
-}
-private struct WeekTrailSample: Sendable {
-    let time: CFTimeInterval
-    let offset: CGFloat
-}
-
-private struct WeekTrailFrame: Sendable {
-    let time: CFTimeInterval
-    let offset: CGFloat
-    let direction: CGFloat
-    let samples: [WeekTrailSample]
-
-    func displacement(week: Int, selectedWeek: Int) -> CGFloat {
-        let weekDelta = week - selectedWeek
-        guard !samples.isEmpty, weekDelta != 0 else { return 0 }
-        guard (direction < 0 && weekDelta < 0) || (direction > 0 && weekDelta > 0) else { return 0 }
-
-        let rank = abs(weekDelta)
-        let delay = min(0.070 + Double(rank - 1) * 0.045, 0.300)
-        let lag = offset - historicalOffset(at: time - delay)
-        return min(max(lag, -40), 40)
-    }
-
-    private func historicalOffset(at target: CFTimeInterval) -> CGFloat {
-        guard let first = samples.first, let last = samples.last else { return offset }
-        if target <= first.time { return first.offset }
-        for (start, end) in zip(samples, samples.dropFirst()) where target <= end.time {
-            let fraction = CGFloat((target - start.time) / max(end.time - start.time, 0.0001))
-            return start.offset + (end.offset - start.offset) * fraction
-        }
-        return last.offset
     }
 }

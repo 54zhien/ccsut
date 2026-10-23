@@ -15,15 +15,15 @@ struct AcademicView: View {
                 ScrollView {
                     VStack(spacing: 12) {
                         NavigationLink(value: Destination.scores) {
-                            service("成绩查询", subtitle: "课程成绩、学分与绩点", symbol: "chart.bar.doc.horizontal", tint: .blue, height: cardHeight)
+                            service("成绩查询", subtitle: "课程成绩、学分与绩点", symbol: "chart.bar.doc.horizontal", tint: .accentColor, height: cardHeight)
                         }
                         .accessibilityIdentifier("academic-scores")
                         NavigationLink(value: Destination.exams) {
-                            service("考试安排", subtitle: "考试时间、考场与座位", symbol: "calendar.badge.clock", tint: .teal, height: cardHeight)
+                            service("考试安排", subtitle: "考试时间、考场与座位", symbol: "calendar.badge.clock", tint: .accentColor, height: cardHeight)
                         }
                         .accessibilityIdentifier("academic-exams")
                         NavigationLink(value: Destination.electives) {
-                            service("选课", subtitle: "浏览课程与管理已选课程", symbol: "list.bullet.rectangle.portrait", tint: .indigo, height: cardHeight)
+                            service("选课", subtitle: "浏览课程与管理已选课程", symbol: "list.bullet.rectangle.portrait", tint: .accentColor, height: cardHeight)
                         }
                         .accessibilityIdentifier("academic-electives")
                         if let nextExam {
@@ -88,15 +88,15 @@ struct AcademicView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20))
-        .contentShape(.rect(cornerRadius: 20))
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+        .contentShape(.rect(cornerRadius: 28))
         .accessibilityElement(children: .combine)
     }
 
     private func upcomingCard(_ exam: ExamItem) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("近期考试", systemImage: "calendar.badge.clock")
-                .font(.caption.weight(.medium)).foregroundStyle(.teal)
+                .font(.caption.weight(.medium)).foregroundStyle(Color.accentColor)
             Text(exam.kcmc ?? "考试安排").font(.headline).foregroundStyle(.primary)
             if let date = exam.startDate {
                 Text(date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened,
@@ -110,7 +110,7 @@ struct AcademicView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
     }
 
     private func loadUpcomingExam() async {

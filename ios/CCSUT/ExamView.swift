@@ -19,6 +19,7 @@ struct ExamView: View {
     @State private var isLoading = false
     @State private var errorText: String?
     @State private var loadedTerms: Set<String> = []
+    @State private var termHeaderTracker = AcademicTermHeaderTracker()
 
     /// 从新到旧的学期列表
     private static let terms = [
@@ -34,11 +35,11 @@ struct ExamView: View {
             if isLoading && items.isEmpty {
                 ProgressView("加载考试安排…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let errorText, items.isEmpty {
+            } else if errorText != nil, items.isEmpty {
                 ContentUnavailableView {
-                    Label("加载失败", systemImage: "wifi.exclamationmark")
+                    Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
                 } description: {
-                    Text(errorText)
+                    EmptyView()
                 } actions: {
                     Button("重试") { Task { await load(force: true) } }
                 }
@@ -91,6 +92,7 @@ struct ExamView: View {
             .padding(.vertical, 12)
         }
         .coordinateSpace(name: "academic-scroll")
+        .trackAcademicTermHeaders(termHeaderTracker)
     }
 
     /// 即将开始的那场（未来 60 天内最近的一场）
@@ -123,19 +125,19 @@ struct ExamView: View {
             HStack {
                 Label("即将开始", systemImage: "alarm.fill")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(Color("AccentForeground").opacity(0.9))
                 Spacer()
                 if let d = exam.startDate {
                     Text(d, format: .relative(presentation: .named))
                         .environment(\.locale, Locale(identifier: "zh_CN"))
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(Color("AccentForeground").opacity(0.85))
                 }
             }
 
             Text(exam.kcmc ?? "—")
                 .font(.title3.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color("AccentForeground"))
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -145,33 +147,25 @@ struct ExamView: View {
                 }
             }
             .font(.caption)
-            .foregroundStyle(.white.opacity(0.92))
+            .foregroundStyle(Color("AccentForeground").opacity(0.92))
 
             if let seat = exam.zwh, !seat.isEmpty, seat != "0" {
                 Text("座位 \(seat)")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 9)
                     .padding(.vertical, 3)
-                    .background(.white.opacity(0.22), in: .capsule)
-                    .foregroundStyle(.white)
+                    .background(Color("AccentForeground").opacity(0.12), in: .capsule)
+                    .foregroundStyle(Color("AccentForeground"))
             }
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [Color(red: 0.16, green: 0.42, blue: 0.92),
-                         Color(red: 0.36, green: 0.62, blue: 0.98)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: .rect(cornerRadius: 24)
-        )
+        .background(Color.accentColor, in: .rect(cornerRadius: 24))
         .padding(.horizontal, 16)
     }
 
     private func termHeader(_ term: String, count: Int) -> some View {
-        AcademicTermStrip(term: term) {
+        AcademicTermStrip(term: term, tracker: termHeaderTracker) {
             HStack {
                 Text(SchedulePresentation.termTitle(term))
                     .font(.subheadline.weight(.semibold))
@@ -308,8 +302,8 @@ private struct ExamRow: View {
                             .font(.caption2.weight(.medium))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(.blue.opacity(0.12), in: .capsule)
-                            .foregroundStyle(.blue)
+                            .background(Color.accentColor.opacity(0.12), in: .capsule)
+                            .foregroundStyle(Color.accentColor)
                     }
                     if exam.isMakeup {
                         Text("补缓考")

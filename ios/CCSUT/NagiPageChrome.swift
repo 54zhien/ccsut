@@ -1,4 +1,4 @@
-// Adapted from Nagi 9f5cd1a: LibraryView page header and SearchView masked material.
+// Ported from Nagi 9f5cd1a: LibraryView native safeAreaBar and page header.
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -123,78 +123,6 @@ struct NagiPageHeader: View {
     }
 }
 
-private struct NagiHeaderGaussianBlur: UIViewRepresentable {
-    @Environment(\.colorScheme) private var colorScheme
-    let statusBarFraction: CGFloat
-
-    func makeUIView(context: Context) -> NagiGradientMaskedBlurView {
-        NagiGradientMaskedBlurView()
-    }
-
-    func updateUIView(_ uiView: NagiGradientMaskedBlurView, context: Context) {
-        uiView.setColorScheme(colorScheme)
-        uiView.statusBarFraction = statusBarFraction
-    }
-}
-
-private final class NagiGradientMaskedBlurView: UIView {
-    private let blurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
-    private let gradientMask = CAGradientLayer()
-    private var appliedStyle: UIUserInterfaceStyle = .unspecified
-
-    func setColorScheme(_ scheme: ColorScheme) {
-        let style: UIUserInterfaceStyle = scheme == .dark ? .dark : .light
-        guard appliedStyle != style else { return }
-        appliedStyle = style
-        overrideUserInterfaceStyle = style
-        blurView.overrideUserInterfaceStyle = style
-        blurView.effect = UIBlurEffect(style: scheme == .dark ? .systemMaterialDark : .systemMaterialLight)
-    }
-
-    var statusBarFraction: CGFloat = 0.35 {
-        didSet {
-            updateGradient()
-        }
-    }
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false
-        addSubview(blurView)
-        blurView.layer.mask = gradientMask
-        updateGradient()
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        blurView.frame = bounds
-        gradientMask.frame = blurView.bounds
-    }
-
-    private func updateGradient() {
-        let statusEnd = min(max(statusBarFraction, 0), 0.72)
-        gradientMask.colors = [
-            UIColor.black.cgColor,
-            UIColor.black.cgColor,
-            UIColor.black.withAlphaComponent(0.42).cgColor,
-            UIColor.clear.cgColor
-        ]
-        gradientMask.locations = [
-            0,
-            NSNumber(value: Double(statusEnd)),
-            NSNumber(value: Double(statusEnd + (1 - statusEnd) * 0.58)),
-            1
-        ]
-        gradientMask.startPoint = CGPoint(x: 0.5, y: 0)
-        gradientMask.endPoint = CGPoint(x: 0.5, y: 1)
-    }
-}
-
-
 private struct NagiPageChrome<Actions: View>: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHeaderHidden = false
@@ -205,13 +133,12 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
     @ViewBuilder let actions: () -> Actions
 
     func body(content: Content) -> some View {
-        GeometryReader { geometry in
+        GeometryReader { _ in
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .toolbar(.hidden, for: .navigationBar)
-                .scrollEdgeEffectHidden(true, for: .top)
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    let height = geometry.safeAreaInsets.top + NagiPageHeaderMetrics.contentHeight + 12
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                .safeAreaBar(edge: .top, spacing: 0) {
                     NagiPageHeader(
                         title: title,
                         transitionProgress: transitionProgress,
@@ -219,15 +146,9 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
                         secondaryAction: AnyView(actions()),
                         leadingAction: showsBackButton ? AnyView(NagiBackButton()) : nil
                     )
-                    .background(alignment: .top) {
-                        NagiHeaderGaussianBlur(statusBarFraction: height > 0 ? geometry.safeAreaInsets.top / height : 0)
-                            .frame(height: height)
-                            .offset(y: -geometry.safeAreaInsets.top)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
                 }
         }
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .onChange(of: scrollOffset) { _, offset in
             updateVisibility(offset)
         }
@@ -260,11 +181,11 @@ private struct AcademicDetailChrome: ViewModifier {
     #endif
 
     func body(content: Content) -> some View {
-        GeometryReader { geometry in
+        GeometryReader { _ in
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .toolbar(.hidden, for: .navigationBar)
-                .scrollEdgeEffectHidden(true, for: .top)
+                .scrollEdgeEffectStyle(.soft, for: .top)
                 .refreshable {
                     await refresh()
                     #if DEBUG
@@ -272,7 +193,7 @@ private struct AcademicDetailChrome: ViewModifier {
                     #endif
                 }
                 .scrollBounceBehavior(.always, axes: .vertical)
-                .safeAreaInset(edge: .top, spacing: 0) {
+                .safeAreaBar(edge: .top, spacing: 0) {
                     HStack {
                         NagiBackButton()
                         Spacer(minLength: 12)
@@ -292,16 +213,9 @@ private struct AcademicDetailChrome: ViewModifier {
                     }
                     .frame(height: 48)
                     .padding(.horizontal, 16)
-                    .background(alignment: .top) {
-                        let height = geometry.safeAreaInsets.top + 60
-                        NagiHeaderGaussianBlur(statusBarFraction: max(geometry.safeAreaInsets.top, 0) / height)
-                            .frame(height: height)
-                            .offset(y: -geometry.safeAreaInsets.top)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
                 }
         }
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle(title)
             .background { AcademicPopSupport() }
             .background {

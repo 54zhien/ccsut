@@ -108,7 +108,7 @@ struct WebLoginSheet: View {
     private var bottomControls: some View {
         HStack(spacing: 12) {
             if !status.isEmpty {
-                Text(status)
+                Text(AppMessages.readable(status))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -120,8 +120,8 @@ struct WebLoginSheet: View {
             Button(action: openCurrentURLInSafari) {
                 Label("Safari", systemImage: "safari")
                     .font(.footnote.weight(.semibold))
-                    .frame(minWidth: 96, minHeight: 42)
-                    .foregroundStyle(.white)
+                    .frame(minWidth: 96, minHeight: 44)
+                    .foregroundStyle(Color("AccentForeground"))
                     .background(Color.accentColor, in: .capsule)
             }
             .buttonStyle(.plain)
@@ -138,7 +138,7 @@ struct WebLoginSheet: View {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.primary)
-                .frame(width: 42, height: 42)
+                .frame(width: 44, height: 44)
                 .background(.thinMaterial, in: Circle())
                 .overlay { Circle().strokeBorder(Color(uiColor: .separator).opacity(0.28), lineWidth: 0.5) }
         }

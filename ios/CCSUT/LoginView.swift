@@ -116,10 +116,11 @@ struct LoginView: View {
             ScrollView {
                 VStack(spacing: 30) {
                     brand
+                        .padding(.bottom, 18)
                     credentialsForm
                     actions
                     if !hint.isEmpty {
-                        Text(hint)
+                        Text(AppMessages.readable(hint))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -140,7 +141,7 @@ struct LoginView: View {
 
     private var brand: some View {
         VStack(spacing: 18) {
-            SchoolEmblemView(size: 92)
+            SchoolEmblemView(size: 92, monochrome: true)
             SchoolWordmarkView()
                 .frame(maxWidth: 270)
         }
@@ -188,7 +189,7 @@ struct LoginView: View {
                                 .monospacedDigit()
                         }
                     }
-                    .frame(minWidth: 78, minHeight: 40)
+                    .frame(minWidth: 78, minHeight: 44)
                     .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
                 }
                 .buttonStyle(.plain)
@@ -198,12 +199,12 @@ struct LoginView: View {
             .padding(.trailing, 9)
             .frame(height: 56)
         }
-        .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: 17))
+        .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: 28))
         .overlay {
-            RoundedRectangle(cornerRadius: 17)
+            RoundedRectangle(cornerRadius: 28)
                 .strokeBorder(Color(uiColor: .separator).opacity(0.25), lineWidth: 0.5)
         }
-        .clipShape(.rect(cornerRadius: 17))
+        .clipShape(.rect(cornerRadius: 28))
         .frame(maxWidth: .infinity)
     }
 
@@ -212,17 +213,15 @@ struct LoginView: View {
             Button(action: submit) {
                 HStack(spacing: 10) {
                     if busy == .logging {
-                        ProgressView().controlSize(.small).tint(.white)
-                    } else {
-                        Image(systemName: "arrow.right")
+                        ProgressView().controlSize(.small).tint(Color("AccentForeground"))
                     }
                     Text("登录").font(.headline)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
-                .background(canLogin ? Color.accentColor : Color.accentColor.opacity(0.42),
-                            in: .rect(cornerRadius: 15))
-                .foregroundStyle(.white)
+                .background(canLogin || busy == .logging ? Color.accentColor : Color(.tertiarySystemFill),
+                            in: .capsule)
+                .foregroundStyle(canLogin || busy == .logging ? Color("AccentForeground") : Color.secondary)
             }
             .buttonStyle(.plain)
             .disabled(!canLogin)
@@ -237,11 +236,7 @@ struct LoginView: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 48)
                 .foregroundStyle(Color.accentColor)
-                .background(Color(uiColor: .systemBackground), in: .rect(cornerRadius: 15))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 15)
-                        .strokeBorder(Color.accentColor.opacity(0.36), lineWidth: 1)
-                }
+                .background(Color(uiColor: .secondarySystemBackground), in: .capsule)
             }
             .buttonStyle(.plain)
         }
