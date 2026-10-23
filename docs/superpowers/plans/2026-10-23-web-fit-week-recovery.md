@@ -30,5 +30,22 @@ Liquid Glass sheet adaptivity and nativeglass button style. No custom full-sheet
 glass overlay. User's no-app-tests instruction persists; only source review,
 Release compilation and artifact inspection. Keep draftPR2 unmerged.
 
-- [ ] Implementation and source review.
-- [ ] Release compilation/package and IPA integrity/metadata/hash inspection.
+- [x] Implementation and source review.
+- [x] Release compilation/package and IPA integrity/metadata/hash inspection.
+
+Production commit:6437f5ce55e29bf3d018d8796f3f0389cc5006fd.
+Release run39957428693 succeeded:
+https://github.com/54zhien/ccsut/actions/runs/39957428693
+
+Delivered filename:CCSUT-6437f5c-unsigned.ipa (renamed locally to distinguish this
+build from preceding downloads; archive bytes unchanged). Size4537851bytes.
+SHA256:8bd287410c8d9334a4746083bb91f662501005781710ab0b4449c5adc4ec5178.
+ZIP integrity, executable, bundlecom.imzhien.ccsut, AppIcon, minimumiOS26.0 and
+the actual Boolean high-refresh opt-in were inspected successfully.
+
+No app, regression, UI or performance tests were run. Device acceptance of
+dynamic web height, system glass appearance and form/profile placement remains
+separate from compilation. Actual authenticated teaching-week response was not
+available here; the nil/malformed-to1 fallback was removed, not replaced by a
+hard-coded week7. Later documentation commits leaveios/.github identical to the
+production commit. PR2 remains draft and main is unchanged.
