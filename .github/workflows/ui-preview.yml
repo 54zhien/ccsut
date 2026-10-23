@@ -26,8 +26,8 @@ jobs:
           xcodebuild build -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/UIPreview" \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-build.log"
-      - name: Render preview screens
-        run: bash ios/Tests/render-preview.sh
+      - name: Prepare native simulator
+        run: bash ios/Tests/render-preview.sh --boot-only
       - name: Verify native page interactions
         run: |
           set -o pipefail
@@ -41,6 +41,8 @@ jobs:
           if [ -d "$RUNNER_TEMP/ui-tests.xcresult" ]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-tests.xcresult" --output-path "$RUNNER_TEMP/ui-test-attachments"
           fi
+      - name: Render preview screens
+        run: bash ios/Tests/render-preview.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:

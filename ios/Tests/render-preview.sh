@@ -17,6 +17,7 @@ xcrun simctl boot "$DEVICE" || true
 xcrun simctl bootstatus "$DEVICE" -b
 xcrun simctl status_bar "$DEVICE" override --time '9:41' --batteryState charged --batteryLevel 100
 xcrun simctl install "$DEVICE" "$APP"
+if [ "${1:-}" = "--boot-only" ]; then exit 0; fi
 
 capture() {
   xcrun simctl ui "$DEVICE" appearance "$2"

@@ -3,10 +3,11 @@ import XCTest
 final class PageInteractionUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
-    private func launch(_ page: String, longList: Bool = false) -> XCUIApplication {
+    private func launch(_ page: String, longList: Bool = false, transition: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", page]
         if longList { app.launchArguments.append("--preview-long-list") }
+        if transition { app.launchArguments.append("--preview-transition") }
         app.launch()
         return app
     }
@@ -100,6 +101,27 @@ final class PageInteractionUITests: XCTestCase {
                           "Each academic detail must support interactive edge swipe back")
             XCTAssertTrue(app.buttons["账号"].isHittable)
             XCTAssertFalse(app.navigationBars.firstMatch.exists)
+        }
+    }
+
+    func testAcademicCancelledSwipeKeepsHeaderAttachedToPage() {
+        for page in ["scores", "exams", "electives"] {
+            let app = launch(page, transition: true)
+            let refresh = app.buttons["page-refresh"]
+            XCTAssertTrue(refresh.waitForExistence(timeout: 5))
+            let before = refresh.frame
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.45))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.45))
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 1.5)
+            capture(app, "cancelled-pop-\(page)")
+            let sampleCount = Int(app.staticTexts["transition-samples"].label) ?? 0
+            let drift = Double(app.staticTexts["transition-drift"].label) ?? 999
+            add(XCTAttachment(string: "\(page): \(sampleCount) interactive samples, maximum local title drift \(drift)pt"))
+            XCTAssertGreaterThan(sampleCount, 3, "Must measure actual in-flight interactive frames")
+            XCTAssertLessThanOrEqual(drift, 2, "Title must travel with the detail page during a cancelled swipe")
+            XCTAssertTrue(refresh.isHittable)
+            XCTAssertEqual(refresh.frame.midX, before.midX, accuracy: 2)
+            app.terminate()
         }
     }
 

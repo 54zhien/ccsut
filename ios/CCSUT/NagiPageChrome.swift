@@ -241,6 +241,10 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
 private struct AcademicDetailChrome<Actions: View>: ViewModifier {
     let title: String
     @ViewBuilder let actions: () -> Actions
+    #if DEBUG
+    @State private var transitionDrift: CGFloat = 0
+    @State private var transitionSamples = 0
+    #endif
 
     func body(content: Content) -> some View {
         content
@@ -249,6 +253,27 @@ private struct AcademicDetailChrome<Actions: View>: ViewModifier {
             .toolbar(.visible, for: .navigationBar)
             .toolbarBackground(.hidden, for: .navigationBar)
             .scrollEdgeEffectHidden(true, for: .top)
+            .background {
+                #if DEBUG
+                if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-transition") {
+                    AcademicTransitionProbe(title: title) { drift, samples in
+                        transitionDrift = drift
+                        transitionSamples = samples
+                    }
+                }
+                #endif
+            }
+            .overlay(alignment: .bottomTrailing) {
+                #if DEBUG
+                if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-transition") {
+                    VStack {
+                        Text(String(format: "%.3f", transitionDrift)).accessibilityIdentifier("transition-drift")
+                        Text("\(transitionSamples)").accessibilityIdentifier("transition-samples")
+                    }
+                    .font(.caption2).allowsHitTesting(false)
+                }
+                #endif
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { actions() }
                     .sharedBackgroundVisibility(.hidden)

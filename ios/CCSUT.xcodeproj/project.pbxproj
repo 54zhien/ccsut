@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A0000000000000000000001F /* AcademicNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001F; };
 		A0000000000000000000001E /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001E /* AppIcon.icon */; };
 		A0000000000000000000000A /* CCSUTApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000A /* CCSUTApp.swift */; };
 		A0000000000000000000000B /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000B /* Session.swift */; };
@@ -44,6 +45,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B0000000000000000000001F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcademicNavigation.swift; sourceTree = "<group>"; };
 		B0000000000000000000001E /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		B0000000000000000000000A /* CCSUTApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCSUTApp.swift; sourceTree = "<group>"; };
 		B0000000000000000000000B /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
@@ -110,6 +112,7 @@
                 B0000000000000000000001D /* PageSurface.swift */,
 				B00000000000000000000011 /* Assets.xcassets */,
 				B0000000000000000000001E /* AppIcon.icon */,
+				B0000000000000000000001F /* AcademicNavigation.swift */,
 			);
 			path = CCSUT;
 			sourceTree = "<group>";
@@ -195,6 +198,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A0000000000000000000001F /* AcademicNavigation.swift in Sources */,
 				A0000000000000000000000A /* CCSUTApp.swift in Sources */,
 				A0000000000000000000000B /* Session.swift in Sources */,
 				A0000000000000000000000C /* API.swift in Sources */,
