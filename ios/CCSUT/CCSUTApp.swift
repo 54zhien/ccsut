@@ -147,9 +147,6 @@ struct ProfileView: View {
                         showLogoutAlert = true
                     }
                 }
-
-                    .foregroundStyle(.secondary)
-                }
             }
             .navigationTitle("我的")
             .alert("退出登录", isPresented: $showLogoutAlert) {
