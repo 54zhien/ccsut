@@ -51,6 +51,21 @@ task. Do not force a second glass layer to make a large sheet more transparent.
 
 ## Delivery
 
-- [ ] Source changes and diff review.
-- [ ] Release compilation/package; no application tests.
-- [ ] Downloaded IPA integrity, metadata and hash inspection.
+- [x] Source changes and diff review.
+- [x] Release compilation/package; no application tests.
+- [x] Downloaded IPA integrity, metadata and hash inspection.
+
+Production commit:06c79d4b05f4ad0eb37477b751ffc7090b9d5a41.
+Release run39954097389 succeeded:
+https://github.com/54zhien/ccsut/actions/runs/39954097389
+
+Downloaded IPA:4520988bytes. ZIP integrity, executable, bundlecom.imzhien.ccsut,
+minimumiOS26.0, AppIcon and actual Boolean high-refresh opt-in were inspected.
+SHA256:b0710585018340750360d9a6d95a0559a68404d046f8e8490ca717e488414ba1.
+
+No app, UI, regression or performance tests were run. This compilation does not
+establish device appearance/gesture acceptance or successful authenticated login.
+The public CAS HTML and main script could be downloaded without authentication;
+that does not establish that the school's authenticated service callback works.
+Earlier package6fc0a6c remains recorded as the device-rejected UI baseline.
+Later documentation commits must leaveios/.github identical to06c79d4.
