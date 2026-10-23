@@ -211,7 +211,7 @@ final class PageInteractionUITests: XCTestCase {
         for empty in [false, true] {
             for page in ["scores", "exams", "electives"] {
                 let app = launch(page, refresh: true, empty: empty)
-                let counter = app.staticTexts["academic-publication-count"]
+                let counter = app.descendants(matching: .any).matching(identifier: "academic-publication-count").firstMatch
                 XCTAssertTrue(counter.waitForExistence(timeout: 5))
                 XCTAssertTrue(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5) == .completed,
                               "Wait for the initial snapshot before testing a separate pull refresh")
