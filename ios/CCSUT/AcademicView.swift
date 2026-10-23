@@ -19,9 +19,9 @@ struct AcademicView: View {
                                     .font(.headline)
                                     .foregroundStyle(.primary)
                                 if let date = nextExam.startDate {
-                                    Text(date, format: Date.FormatStyle(date: .abbreviated, time: .shortened,
-                                                                       locale: Locale(identifier: "zh_CN"),
-                                                                       timeZone: TimeZone(identifier: "Asia/Shanghai")!))
+                                    Text(date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened,
+                                                                        locale: Locale(identifier: "zh_CN"),
+                                                                        timeZone: TimeZone(identifier: "Asia/Shanghai")!)))
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
                                 }

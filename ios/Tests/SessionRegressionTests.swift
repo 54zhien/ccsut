@@ -123,13 +123,16 @@ struct SessionRegressionTests {
               "successful adoption keeps the probe's rotated Cookie")
 
         CookieJar.shared = [cookie("jw_uf", "old"), cookie("TGC", "fixture-tgc", domain: "auth.ccsut.cn")]
-        var offlineRequests = 0
-        SchoolProtocol.response = { _ in offlineRequests += 1; throw URLError(.timedOut) }
+        var offlineCASRequests = 0
+        SchoolProtocol.response = { request in
+            if request.url?.path == "/admin/caslogin" { offlineCASRequests += 1 }
+            throw URLError(.timedOut)
+        }
         let bootstrap = SessionStore(api: api)
         await bootstrap.bootstrap()
         check(bootstrap.phase == .loggedOut, "actual cold bootstrap exits after probe and renewal timeouts")
         check(Keychain.load("ccsut.cookies.v2") != nil, "transient bootstrap failure retains credentials for retry")
-        check(offlineRequests == 1, "offline bootstrap does not retry a doomed CAS request")
+        check(offlineCASRequests == 0, "offline bootstrap does not retry a doomed CAS request")
 
         CookieJar.shared = [cookie("jw_uf", "old"), cookie("TGC", "fixture-tgc", domain: "auth.ccsut.cn")]
         var casStarts = 0

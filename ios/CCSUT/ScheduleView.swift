@@ -68,7 +68,7 @@ struct ScheduleView: View {
                 get: { choosing != nil }, set: { if !$0 { choosing = nil } }
             ), presenting: choosing) { cell in
                 ForEach(cell.courses) { slot in
-                    Button("\(slot.course) · \(slot.room)") { detail = slot; choosing = nil }
+                    Button(choiceLabel(slot)) { detail = slot; choosing = nil }
                 }
                 Button("取消", role: .cancel) { choosing = nil }
             } message: { _ in Text("此时段有多条安排，请选择查看。") }
@@ -140,6 +140,12 @@ struct ScheduleView: View {
 
     private var cells: [ScheduleCell] { SchedulePresentation.cells(bundle?.slots ?? [], week: selectedWeek) }
 
+    private func choiceLabel(_ slot: ScheduleSlot) -> String {
+        let weeks = slot.weeks.isEmpty ? "周次未标注" : "第 \(WeekParser.compress(slot.weeks.sorted())) 周"
+        let info = [slot.teacher, slot.room, weeks].filter { !$0.isEmpty }.joined(separator: " · ")
+        return "\(slot.course) · 第 \(slot.startPeriod)–\(slot.endPeriod) 节\n\(info)"
+    }
+
     private var timetable: some View {
         GeometryReader { geo in
             let minColumn: CGFloat = dynamicTypeSize.isAccessibilitySize ? max(94, courseFont * 4) : 42
@@ -149,7 +155,8 @@ struct ScheduleView: View {
             ScrollView(.horizontal) {
                 VStack(spacing: 0) {
                     weekdayHeader(colWidth: colWidth)
-                    ScrollView(.vertical) {
+                    ScrollViewReader { verticalProxy in
+                      ScrollView(.vertical) {
                         VStack(spacing: 0) {
                             ForEach(1...4, id: \.self) { section in
                                 HStack(alignment: .top, spacing: 0) {
@@ -159,11 +166,16 @@ struct ScheduleView: View {
                                     }
                                 }
                                 .frame(height: rowHeight)
+                                .id(section)
                             }
                         }
-                        .padding(.bottom, 16)
+                        .padding(.bottom, 88)
+                      }
+                      .scrollIndicators(.hidden)
+                      .onAppear {
+                          if InterfacePreview.page == "bottom" { verticalProxy.scrollTo(4, anchor: .bottom) }
+                      }
                     }
-                    .scrollIndicators(.hidden)
                 }
                 .frame(width: width, height: geo.size.height)
             }
@@ -180,7 +192,7 @@ struct ScheduleView: View {
                 }
                 Text("节次").font(.system(size: 10, weight: .medium))
             }
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Color.primary.opacity(0.6))
                 .frame(width: railWidth, height: headerHeight)
             ForEach(1...7, id: \.self) { day in
                 let today = isToday(day)
@@ -191,7 +203,7 @@ struct ScheduleView: View {
                             .font(.system(size: 14, weight: today ? .bold : .medium).monospacedDigit())
                     }
                 }
-                .foregroundStyle(today ? Color.accentColor : Color.primary.opacity(day > 5 ? 0.5 : 0.8))
+                .foregroundStyle(today ? (colorScheme == .dark ? Color(red: 0.42, green: 0.64, blue: 1) : Color.accentColor) : Color.primary.opacity(day > 5 ? 0.65 : 0.8))
                 .frame(width: colWidth - 4, height: headerHeight - 6)
                 .background(today ? Color.accentColor.opacity(0.09) : .clear, in: .rect(cornerRadius: 12))
                 .frame(width: colWidth, height: headerHeight)
@@ -206,7 +218,7 @@ struct ScheduleView: View {
                 .font(.system(size: 17, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle(.secondary)
             Text("\(section * 2 - 1)–\(section * 2)节")
-                .font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary)
+                .font(.system(size: 10, weight: .medium)).foregroundStyle(Color.primary.opacity(0.6))
             if section == 1 || section == 3 {
                 Text(section == 1 ? "上午" : "下午")
                     .font(.system(size: 9)).foregroundStyle(.tertiary).padding(.top, 2)
@@ -234,21 +246,23 @@ struct ScheduleView: View {
     private func courseCard(_ slot: ScheduleSlot, count: Int, action: @escaping () -> Void) -> some View {
         let tint = Self.tint(for: slot.course)
         return Button(action: action) {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(slot.course).font(.system(size: courseFont, weight: .semibold))
                     .foregroundStyle(colorScheme == .dark ? Color.primary : tint)
                     .lineLimit(4).frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 4)
                 if count > 1 {
-                    Text("另\(count - 1)门").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                    Text("另\(count - 1)项").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
                 }
                 if !slot.room.isEmpty {
                     Text(slot.room).font(.system(size: max(10, courseFont - 2), weight: .medium))
-                        .foregroundStyle(colorScheme == .dark ? Color.secondary : tint.opacity(0.8))
-                        .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                        .foregroundStyle(colorScheme == .dark ? Color.secondary : tint.opacity(0.9))
+                        .lineLimit(slot.room.unicodeScalars.allSatisfy { $0.isASCII } ? 1 : 3)
+                        .minimumScaleFactor(0.82)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding(.horizontal, 6).padding(.vertical, 10)
+            .padding(.horizontal, 6).padding(.vertical, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(tint.opacity(colorScheme == .dark ? 0.23 : 0.10), in: .rect(cornerRadius: 12))
             .overlay(alignment: .leading) {
@@ -257,7 +271,7 @@ struct ScheduleView: View {
             .contentShape(.rect(cornerRadius: 12))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(slot.course)，\(slot.room)，\(slot.teacher)\(count > 1 ? "，此时段共\(count)门课程" : "")")
+        .accessibilityLabel("\(slot.course)，\(slot.room)，\(slot.teacher)\(count > 1 ? "，此时段共\(count)条安排" : "")")
         .accessibilityHint(count > 1 ? "选择此时段的课程" : "查看课程详情")
     }
 
@@ -289,6 +303,7 @@ struct ScheduleView: View {
             didPickWeek = true
             referenceDate = ISO8601DateFormatter().date(from: "2026-10-23T09:41:00+08:00")
             if InterfacePreview.page == "course" { detail = cells.first?.courses.first }
+            if InterfacePreview.page == "conflict" { choosing = cells.first(where: { $0.courses.count > 1 }) }
             return
         }
         #endif

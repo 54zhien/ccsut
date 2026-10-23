@@ -23,7 +23,7 @@ enum InterfacePreview {
             ScheduleSlot(course: name, teacher: teacher, room: room, weekday: day,
                          startPeriod: section * 2 - 1, endPeriod: section * 2, weeks: Array(1...16))
         }
-        return ScheduleBundle(title: "2026–2027 学年 · 第一学期", slots: [
+        var bundle = ScheduleBundle(title: "2026–2027 学年 · 第一学期", slots: [
             course("高等数学", "示例教师", "9-112", 1, 1),
             course("大学英语", "示例教师", "6-208", 2, 1),
             course("工程制图", "示例教师", "9-205", 4, 1),
@@ -36,6 +36,11 @@ enum InterfacePreview {
             course("大学物理实验", "示例教师", "实验楼 302", 3, 4),
             course("大学英语", "示例教师", "6-208", 5, 4),
         ], periods: [1, 2, 3, 4])
+        if page == "conflict" {
+            bundle.slots.append(ScheduleSlot(course: "高等数学", teacher: "另一位教师", room: "9-112", weekday: 1,
+                                             startPeriod: 1, endPeriod: 2, weeks: [7]))
+        }
+        return bundle
     }
 
     static var exam: ExamItem {

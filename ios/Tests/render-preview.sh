@@ -29,6 +29,7 @@ capture schedule dark
 capture academic light
 capture account light
 capture course light
+capture conflict light
 xcrun simctl terminate "$DEVICE" com.imzhien.ccsut
 
 # Exercise the minimum-width timetable on a small native phone if available.
@@ -44,4 +45,7 @@ if [ -n "$TYPE" ]; then
   xcrun simctl launch "$SMALL" com.imzhien.ccsut --preview-ui --preview-page schedule
   sleep 3
   xcrun simctl io "$SMALL" screenshot "$OUT/schedule-compact.png"
+  xcrun simctl launch --terminate-running-process "$SMALL" com.imzhien.ccsut --preview-ui --preview-page bottom
+  sleep 3
+  xcrun simctl io "$SMALL" screenshot "$OUT/schedule-compact-bottom.png"
 fi

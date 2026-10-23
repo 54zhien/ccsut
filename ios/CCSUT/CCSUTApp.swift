@@ -191,7 +191,8 @@ struct ProfileView: View {
     }
 
     private var initials: String {
-        guard let name = session.studentName, let first = name.first else { return "?" }
+        let name = session.studentName ?? (InterfacePreview.enabled ? "预览同学" : "")
+        guard let first = name.first else { return "?" }
         return String(first)
     }
 }
