@@ -100,7 +100,7 @@ struct SessionRegressionTests {
 
         CookieJar.shared = [cookie("jw_uf", "previous")]
         let webCookies = WebStore.dataStore.httpCookieStore
-        for c in (try? await webCookies.allCookies()) ?? [] { try? await webCookies.remove(c) }
+        for c in (try? await webCookies.cookieSnapshot()) ?? [] { try? await webCookies.remove(c) }
         try? await webCookies.set(cookie("jw_uf", "unverified"))
         SchoolProtocol.response = { (503, $0.url!, [:], "unavailable") }
         let failedAdoption = SessionStore(api: api)

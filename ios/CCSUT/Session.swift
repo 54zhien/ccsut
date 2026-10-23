@@ -123,7 +123,7 @@ final class CookieCallback<Value>: @unchecked Sendable {
     }
 
     static func wait(timeout: Duration = .seconds(5),
-                     start: (@escaping (Value) -> Void) -> Void) async throws -> Value {
+                     start: (@escaping @Sendable (Value) -> Void) -> Void) async throws -> Value {
         let callback = CookieCallback<Value>()
         let deadline = Task {
             do { try await Task.sleep(for: timeout) } catch { return }
@@ -143,7 +143,7 @@ final class CookieCallback<Value>: @unchecked Sendable {
 }
 
 extension WKHTTPCookieStore {
-    func allCookies() async throws -> [HTTPCookie] {
+    func cookieSnapshot() async throws -> [HTTPCookie] {
         try await CookieCallback.wait { completion in getAllCookies(completion) }
     }
 
@@ -378,7 +378,7 @@ final class SessionStore {
         var authenticated = false
         for attempt in 0..<24 {
             do {
-                cookies = try await WebStore.dataStore.httpCookieStore.allCookies()
+                cookies = try await WebStore.dataStore.httpCookieStore.cookieSnapshot()
                     .filter { CookieJar.isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
             } catch {
                 if !Task.isCancelled { lastError = "读取登录凭证失败，请重试" }
@@ -501,7 +501,7 @@ final class SessionStore {
         // 也只能写旧实例；Keychain 是跨启动保存凭证的唯一位置。
         WebStore.dataStore = .nonPersistent()
         do {
-            for c in try await store.allCookies() where CookieJar.isSchoolCookie(c) {
+            for c in try await store.cookieSnapshot() where CookieJar.isSchoolCookie(c) {
                 try await store.remove(c)
             }
         } catch {
