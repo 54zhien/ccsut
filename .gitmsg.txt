@@ -1,10 +1,11 @@
-﻿revert+diag: 恢复自动 Cookie 保可用，并显示两套 Cookie 的真实数量
+﻿diag: 显示 jw_uf 指纹与最近请求结果
 
-连续几版「会话过期」都源于关闭 httpShouldSetCookies，
-现在先退回 v0.4.1 的可用状态（能登录、能看课表成绩），
-选课空白的问题单独排查。
+实验证明服务端只校验 jw_uf 一个 Cookie，
+其余 13 条全删也能拿到 75 门。
+而 App 的诊断显示 jw_uf 存在，却拿不到数据，
+说明值不是同一个。
 
-同时在我的页底部加诊断：
-- CookieJar 条数与名字
-- HTTPCookieStorage 条数与名字
-这两组数字能直接说明是哪一层丢了 Cookie。
+我的页诊断新增：
+- CookieJar 里 jw_uf 的长度与首尾各 4 位
+- HTTPCookieStorage 里同名 Cookie 的指纹
+- 最近一次 listV2 / listjxbDataV2 的响应字节数与有无 initData

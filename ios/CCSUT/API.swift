@@ -34,6 +34,9 @@ enum APIError: LocalizedError {
 final class APIClient {
     static let shared = APIClient()
 
+    /// 诊断用：最近一次请求的路径 + 响应片段
+    nonisolated(unsafe) static var lastTrace = ""
+
     private let base = URL(string: "https://tls.ccsut.cn")!
     private let session: URLSession
 
@@ -95,6 +98,12 @@ final class APIClient {
             throw APIError.notLoggedIn
         }
         guard (200..<300).contains(http.statusCode) else { throw APIError.http(http.statusCode) }
+
+        if let path = req.url?.path, path.contains("listjxbDataV2") || path.contains("listV2") {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            let hasInit = body.contains("initData")
+            Self.lastTrace = "\(path.components(separatedBy: "/").last ?? "") \(data.count)b initData=\(hasInit ? "有" : "无")"
+        }
         return (data, http)
     }
 

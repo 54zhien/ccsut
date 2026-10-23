@@ -488,6 +488,14 @@ enum CookieJar {
 
     static var names: [String] { shared.map(\.name).sorted() }
 
+    /// 脱敏指纹：只露长度和首尾，用于对比是不是同一个值
+    static func fingerprint(_ name: String) -> String {
+        guard let c = shared.first(where: { $0.name == name }) else { return "缺失" }
+        let v = c.value
+        guard v.count > 8 else { return "\(v.count)字 \(v)" }
+        return "\(v.count)字 \(v.prefix(4))…\(v.suffix(4))"
+    }
+
     /// 按 (name, domain, path) 覆盖或追加。
     /// 服务端每次响应都可能轮换 jw_uf，不更新的话会一直用登录那一刻的旧值。
     static func upsert(_ cookie: HTTPCookie) {
