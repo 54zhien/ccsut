@@ -228,8 +228,8 @@ private struct AcademicDetailChrome: ViewModifier {
 }
 
 extension View {
-    /// Root and detail pages share Nagi Search's continuously mounted masked blur.
-    /// Its lifetime/opacity is independent of the header labels fading out.
+    /// Nagi Library/Home/Settings use a native bar with a soft scroll edge.
+    /// Keep the bar mounted; only the header's labels and controls fade out.
     fileprivate func nagiTopBar<Bar: View>(@ViewBuilder content: () -> Bar) -> some View {
         modifier(NagiTopBar(bar: content()))
     }
@@ -245,81 +245,12 @@ extension View {
 
 private struct NagiTopBar<Bar: View>: ViewModifier {
     let bar: Bar
-    @State private var barHeight = NagiPageHeaderMetrics.contentHeight
 
     func body(content: Content) -> some View {
-        GeometryReader { viewport in
-            let topInset = max(viewport.safeAreaInsets.top, 0)
-            let blurHeight = topInset + barHeight + 12
-            content
-                .toolbar(.hidden, for: .navigationBar)
-                .scrollEdgeEffectHidden(true, for: .top)
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    bar
-                        .frame(maxWidth: .infinity)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                            guard height > 0, abs(barHeight - height) > 0.5 else { return }
-                            withTransaction(Transaction(animation: nil)) { barHeight = height }
-                        }
-                        .background(alignment: .top) {
-                            // Nagi Search explicitly spans the status bar, header
-                            // and fade tail. Do not infer coverage from the default
-                            // background size or a window-wide safe area.
-                            NagiPersistentHeaderBlur(statusBarFraction: topInset / blurHeight)
-                                .frame(height: blurHeight)
-                                .offset(y: -topInset)
-                                .allowsHitTesting(false)
-                                .accessibilityHidden(true)
-                        }
-                }
-        }
-    }
-}
-
-/// Adapted from Nagi SearchView's GradientMaskedBlurView (9f5cd1a).
-/// A semantic UIKit material follows light/dark appearance without a color overlay.
-private struct NagiPersistentHeaderBlur: UIViewRepresentable {
-    let statusBarFraction: CGFloat
-
-    func makeUIView(context: Context) -> BlurView { BlurView() }
-    func updateUIView(_ view: BlurView, context: Context) {
-        view.statusBarFraction = statusBarFraction
-    }
-
-    final class BlurView: UIView {
-        private let effectView = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
-        private let gradient = CAGradientLayer()
-        var statusBarFraction: CGFloat = 0.35 {
-            didSet {
-                if oldValue != statusBarFraction { setNeedsLayout() }
+        content
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaBar(edge: .top, spacing: 0) {
+                bar
             }
-        }
-
-        override init(frame: CGRect) {
-            super.init(frame: frame)
-            isUserInteractionEnabled = false
-            backgroundColor = .clear
-            addSubview(effectView)
-            effectView.layer.mask = gradient
-            gradient.colors = [UIColor.black.cgColor, UIColor.black.cgColor,
-                               UIColor.black.withAlphaComponent(0.42).cgColor, UIColor.clear.cgColor]
-            gradient.startPoint = CGPoint(x: 0.5, y: 0)
-            gradient.endPoint = CGPoint(x: 0.5, y: 1)
-        }
-
-        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            // Geometry changes must not implicitly animate or recreate the blur.
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            effectView.frame = bounds
-            gradient.frame = bounds
-            let statusEnd = min(max(statusBarFraction, 0), 0.72)
-            gradient.locations = [0, NSNumber(value: Double(statusEnd)),
-                                  NSNumber(value: Double(statusEnd + (1 - statusEnd) * 0.58)), 1]
-            CATransaction.commit()
-        }
     }
 }

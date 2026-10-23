@@ -76,6 +76,7 @@ struct ScheduleView: View {
                     }
                     .accessibilityIdentifier("schedule-scroll")
                     .scrollIndicators(.hidden)
+                    .scrollEdgeEffectStyle(.soft, for: .top)
                     .scrollBounceBehavior(.always, axes: .vertical)
                     .onScrollGeometryChange(for: CGFloat.self) { geometry in
                         max(geometry.contentOffset.y + geometry.contentInsets.top, 0)

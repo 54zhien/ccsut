@@ -40,6 +40,7 @@ struct AcademicView: View {
                     .frame(maxWidth: .infinity)
                     .pageRefreshControl { await loadUpcomingExam() }
                 }
+                .scrollEdgeEffectStyle(.soft, for: .top)
                 .scrollBounceBehavior(.always, axes: .vertical)
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
                     max(geometry.contentOffset.y + geometry.contentInsets.top, 0)

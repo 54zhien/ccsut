@@ -66,3 +66,18 @@ Intermediate blur-only commit `cc9975b04bc56e411e15a0358488937e53801d85` compile
 - Size: 4,564,725 bytes; SHA256: `9f71690e587c98d2a816da82c134229d1d68feda8857f805beb336ea45adfee5`.
 - ZIP integrity, executable, bundle `com.imzhien.ccsut`, minimum iOS 26.0, AppIcon and actual high-refresh Boolean verified.
 - No app/UI/performance tests run; no claim of rendered blur or native button-size acceptance on the physical device.
+
+## Reference correction: Nagi Library / Home / Settings
+
+The user rejected f0412c8's blur appearance and explicitly identified Nagi's Library, Home and Settings as the reference. The Search implementation chosen in d01545b/cc9975b was the wrong reference. Its compile success and explicit gradient geometry do not establish visual equivalence with these pages.
+
+Verified local Nagi source at `9f5cd1a6b2cfa638044a90b5713ad682c8f4b9dc`:
+
+- `Nagi/Views/Library/LibraryView.swift:230-241` uses `.scrollEdgeEffectStyle(.soft, for: .top)` on the ScrollView and an unconditional `.safeAreaBar(edge: .top, spacing: 0)` around the page header.
+- `Nagi/Views/Home/HomeView.swift:53-68` uses the same structure.
+- `Nagi/Views/Settings/SettingsView.swift:33-46` applies it to the List.
+- These pages have no separate UIKit material view or custom gradient mask. Their title/action transitions change header content opacity and blur, not the bar's presence.
+
+CCSUT now uses that native bar structure for both roots and all three academic detail pages. The soft edge modifier is attached directly to each vertical ScrollView, rather than an outer geometry wrapper as in 6437f5c. The Search-derived masked material, explicit safe-area height/offset calculations, extra GeometryReader and system-edge suppression are removed. Native edge rendering owns the adaptive blur/gradient; the bar is never conditionally removed or faded with its controls. No solid material background is added.
+
+The existing native large sheet controls, static detail titles/interactive return support, content sizing, refresh lifecycle and pinned semester handoff are unchanged. The source differences establish which Nagi implementation is used; they do not prove that all reported device flashing has been resolved. As requested, validation remains source review, Release compilation and artifact integrity only, with no application tests or device acceptance claim.

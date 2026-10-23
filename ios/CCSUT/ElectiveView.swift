@@ -66,6 +66,7 @@ struct ElectiveView: View {
                 .frame(maxWidth: .infinity, minHeight: classes.isEmpty ? viewport.size.height : 0)
                 .pageRefreshControl(showsRefreshCount: true) { await load(force: true) }
             }
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .scrollDismissesKeyboard(.immediately)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
