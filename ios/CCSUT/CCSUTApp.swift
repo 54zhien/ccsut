@@ -83,7 +83,7 @@ struct MainTabs: View {
     @Environment(SessionStore.self) private var session
 
     enum AppTab: Hashable {
-        case schedule, score, elective, me
+        case schedule, score, exam, elective, me
     }
 
     @State private var selection: AppTab = .schedule
@@ -96,6 +96,10 @@ struct MainTabs: View {
 
             Tab("成绩", systemImage: "chart.bar.doc.horizontal", value: AppTab.score) {
                 ScoreView()
+            }
+
+            Tab("考试", systemImage: "calendar.badge.clock", value: AppTab.exam) {
+                ExamView()
             }
 
             Tab("选课", systemImage: "list.bullet.rectangle.portrait", value: AppTab.elective) {

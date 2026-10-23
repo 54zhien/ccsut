@@ -284,6 +284,18 @@ extension APIClient {
         return r.msg ?? "退课成功"
     }
 
+    /// 考试安排
+    ///
+    /// POST /admin/xsd/kwglXsdKscx/getXsKsxx  { xnxq }
+    /// 实测 2025-2026-2 有 8 场，含考场、座位号、考试批次
+    func examList(xnxq: String) async throws -> [ExamItem] {
+        let page: ExamPage = try await post(
+            "/admin/xsd/kwglXsdKscx/getXsKsxx",
+            form: ["xnxq": xnxq]
+        )
+        return page.list ?? []
+    }
+
     /// 当前教学周（校历接口，实测返回 {"xlzc":"7"}）
     func currentTeachingWeek() async throws -> Int {
         struct WeekInfo: Decodable { let xlzc: String? }

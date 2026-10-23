@@ -20,6 +20,7 @@
 		A00000000000000000000014 /* WebLoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* WebLoginSheet.swift */; };
 		A00000000000000000000015 /* CourseDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* CourseDetailSheet.swift */; };
 		A00000000000000000000016 /* ScheduleDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000017 /* ScheduleDetailSheet.swift */; };
+		A00000000000000000000017 /* ExamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000018 /* ExamView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +38,7 @@
 		B00000000000000000000015 /* WebLoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebLoginSheet.swift; sourceTree = "<group>"; };
 		B00000000000000000000016 /* CourseDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourseDetailSheet.swift; sourceTree = "<group>"; };
 		B00000000000000000000017 /* ScheduleDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleDetailSheet.swift; sourceTree = "<group>"; };
+		B00000000000000000000018 /* ExamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExamView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -73,6 +75,7 @@
 				B00000000000000000000015 /* WebLoginSheet.swift */,
 				B00000000000000000000016 /* CourseDetailSheet.swift */,
 				B00000000000000000000017 /* ScheduleDetailSheet.swift */,
+				B00000000000000000000018 /* ExamView.swift */,
 				B00000000000000000000011 /* Assets.xcassets */,
 			);
 			path = CCSUT;
@@ -168,6 +171,7 @@
 				A00000000000000000000014 /* WebLoginSheet.swift in Sources */,
 				A00000000000000000000015 /* CourseDetailSheet.swift in Sources */,
 				A00000000000000000000016 /* ScheduleDetailSheet.swift in Sources */,
+				A00000000000000000000017 /* ExamView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

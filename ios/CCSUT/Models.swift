@@ -360,3 +360,49 @@ struct ScoreTerm: Identifiable {
 
     var failedCount: Int { items.filter { !$0.passed }.count }
 }
+
+
+// MARK: - 考试安排
+
+/// POST /admin/xsd/kwglXsdKscx/getXsKsxx  { xnxq }
+struct ExamItem: Decodable, Identifiable, Hashable {
+    let id: String
+    let kcmc: String?      // 课程名
+    let ksrq: String?      // 考试日期 2026-09-15
+    let qssj: String?      // 开始时间 14:20
+    let kssj: String?      // 完整时间 2026-09-15 14:20~15:50
+    let jxlmc: String?     // 教学楼 9号栋
+    let jsmc: String?      // 教室 9-112
+    let zwh: String?       // 座位号
+    let ksxs: String?      // 考试 / 考查
+    let kspcmc: String?    // 考试批次 期末考试 / 开学补（缓）考
+    let dataXnxq: String?  // 学期
+
+    /// 完整的考场，如「9号栋 9-112」
+    var location: String {
+        let a = (jxlmc ?? "").trimmingCharacters(in: .whitespaces)
+        let b = (jsmc ?? "").trimmingCharacters(in: .whitespaces)
+        if a.isEmpty { return b }
+        if b.isEmpty { return a }
+        return a.hasSuffix(b) ? a : "\(a) \(b)"
+    }
+
+    /// 是否补考/缓考
+    var isMakeup: Bool {
+        (kspcmc ?? "").contains("补") || (kspcmc ?? "").contains("缓")
+    }
+
+    /// 考试开始的 Date（用于排序和倒计时）
+    var startDate: Date? {
+        guard let d = ksrq, let t = qssj else { return nil }
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        f.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        return f.date(from: "\(d) \(t)")
+    }
+}
+
+struct ExamPage: Decodable {
+    let sfxs: String?
+    let list: [ExamItem]?
+}
