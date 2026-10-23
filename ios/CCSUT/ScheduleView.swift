@@ -197,11 +197,11 @@ struct ScheduleView: View {
                             .id(week)
                         }
                     }
-                    .padding(.horizontal, 16).padding(.vertical, 8)
                     .scrollTargetLayout()
+                    .padding(.horizontal, 16).padding(.vertical, 8)
                 }
                 .scrollIndicators(.hidden)
-                .scrollTargetBehavior(.viewAligned)
+                .scrollTargetBehavior(.viewAligned(anchor: .center))
                 .onChange(of: selectedWeek) { _, week in
                     withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) { proxy.scrollTo(week, anchor: .center) }
                 }

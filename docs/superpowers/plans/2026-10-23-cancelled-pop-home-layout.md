@@ -51,7 +51,7 @@ and leave too much unused lower space. Keep the icon and business logic unchange
 
 - Label the existing four paired-period rails with the supplied time ranges:
   1–2:8:20–10:00; 3–4:10:20–12:00; 5–6:14:00–15:40; 7–8:16:00–17:40.
-  Put start/end times on two lines within the existing44pt rail.
+  Put start/end times on two lines within the existing 44pt rail.
 - Current week's chip reads “本周”; other chips retain their week numbers. Keep
   initial scroll-to-selection with center anchor, and do not add edge blank space
   (explicit user correction).
@@ -60,7 +60,7 @@ and leave too much unused lower space. Keep the icon and business logic unchange
   scroll surfaces. Web login uses WKWebView's native UIRefreshControl, ends it on
   load completion/failure through KVO, and keeps the existing reload semantics.
   The inline captcha reload is not a top-bar control and remains available.
-- UI 39919624951 and39920380984 passed all ordinary navigation, edge/content pop,
+- UI 39919624951 and 39920380984 passed all ordinary navigation, edge/content pop,
   vertical scrolling, home pull settlement and previous checks. Both failed the
   DEBUG cancelled-pop sampler with zero observations; video shows a real partial
   pop and attached header. This is a failed instrumentation check, not passing
@@ -69,3 +69,23 @@ and leave too much unused lower space. Keep the icon and business logic unchange
   home entry before the cancellation test. Preserve both failed runs.
 - Add real pull-refresh invocation checks for all three details with and without
   data, plus native geometry/text checks for week centering and the supplied times.
+
+## Additional verification
+
+- Pixel check of the native cancellation recording from UI 39919624951: at 590px
+  normalized width, resting frame22 versus held frames24–27 gives content shift
+  116px and title shift116.5px, or0.5px relative error throughout the hold. This
+  independently verifies the score header motion despite the old probe failure.
+- Independent review of cecd9b0..e9d08ee found no confirmed refresh, lifecycle,
+  time-label or week-selection defects. WKWebView refresh was inspected in source;
+  no live school login or new authenticated network operation was performed.
+- Production e9d08eeb1afebda33bfdf490b41af664f778eef9 passed Release
+  39923025817 and regression39923023769. The IPA ZIP is intact; bundle and primary
+  icon remaincom.imzhien.ccsut / AppIcon. Downloaded IPA SHA256:
+  c4eb6b17eb9237972997671b22170ede9a93c6572ceecc1e0ded7ee500bce979.
+- UI 39923023789 passed ten of eleven tests, including the corrected process
+  sampler on all three details and populated/empty pull refresh. It found a real
+  initial week-centering failure: chip midpoint217pt versus viewport201pt.
+  Keep this RED result. Configure native view-aligned settling with an explicit
+  center anchor, and register the unpadded HStack as the target layout. Keep the
+  existing16pt edge inset; do not introduce added edge blank space.
