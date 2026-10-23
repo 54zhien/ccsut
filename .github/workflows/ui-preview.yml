@@ -27,7 +27,7 @@ jobs:
             -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/UIPreview" \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-build.log"
       - name: Prepare native simulator
-        timeout-minutes: 6
+        timeout-minutes: 10
         run: bash ios/Tests/render-preview.sh --boot-only
       - name: Preserve simulator boot state
         if: failure()

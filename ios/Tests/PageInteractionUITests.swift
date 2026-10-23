@@ -146,6 +146,24 @@ final class PageInteractionUITests: XCTestCase {
         capture(app, "academic-home-no-reminder-pulled")
     }
 
+    func testAcademicDetailSupportsContentSwipeBack() {
+        let app = launch("scores", longList: true)
+        XCTAssertTrue(app.buttons["page-refresh"].waitForExistence(timeout: 5))
+        let header = app.descendants(matching: .any).matching(identifier: "term-header-2026-2027-1").firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 5))
+        app.swipeUp()
+        XCTAssertTrue(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value == 'floating'"), evaluatedWith: header)], timeout: 5) == .completed,
+                      "Native content-pop recognition must not steal a vertical scroll")
+        XCTAssertTrue(app.buttons["page-refresh"].isHittable)
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: 0.45))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.45))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertTrue(app.buttons["账号"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["账号"].isHittable)
+        XCTAssertFalse(app.buttons["page-refresh"].exists)
+        capture(app, "content-swipe-back")
+    }
+
     func testAcademicTitlesAndTermStripsRemainStableWhenPinned() {
         var stripWidths: [CGFloat] = []
         for (page, title) in [("scores", "成绩单"), ("exams", "考试")] {
