@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Reuse the existing academic-reliability worktree; preserve unrelated original checkout changes.
-- Keep existing glass/navigation/week animations and pinned semester headers.
+- Keep existing glass/navigation/week animations and pinned semester headers at standard text sizes; accessibility text sizes use flowing headers to preserve content access.
 - No real enrollment, drop, or SMS requests in validation.
 - Do not represent static fixtures or compilation as real-device/server acceptance.
 - Keep complete snapshots, safe account generations, and mutation gates.
@@ -32,14 +32,14 @@ Files: ScoreView.swift, PageSurface.swift; UI fixture tests as appropriate.
 - [x] Replace crowded inline breakdown with accessible tap-to-expand detail, with grade point labels.
 - [x] Add reusable AcademicTermJumpMenu(terms: [String], onSelect: (String) -> Void) for ScrollViewReader anchors.
 - [x] Add score semester quick jump and increase semester strip corner radius to 26 points, preserving pinned transitions.
-- [ ] Verify actual macOS build and rendered screenshots / interaction tests.
+- [x] Verify actual macOS build and rendered screenshots / interaction tests.
 
 ### Task 2: Elective feedback
 
 Files: ElectiveView.swift, CourseDetailSheet.swift; related policy tests only if behavior changes.
 - [x] Display existing safe action block reason on course cards/details and accessibility hints.
 - [x] Show an empty-filter/search message and reset action without weakening eligibility or action gates.
-- [ ] Verify disabled reasons, reset, and existing regression suite.
+- [x] Verify disabled reasons, reset, and existing regression suite.
 
 ### Task 3: Exam recovery
 
@@ -55,13 +55,13 @@ Files: AcademicCalendar.swift, AcademicAPI.swift, ExamView.swift, AcademicReliab
 Files: ScheduleView.swift, AcademicView.swift and existing shared presentation/model helpers if required.
 - [x] Scale period/time/day labels and improve auxiliary contrast while preserving grid geometry and animation.
 - [x] Add truthful available summary data to existing home cards; avoid repeated requests and invented zero counts.
-- [ ] Verify large text layouts and existing fixture navigation.
+- [x] Verify large text layouts and existing fixture navigation.
 
 ### Task 5: Integration
 
 - [x] Review shared changes for layout, privacy, cancellation, and account lifecycle regressions.
-- [ ] Run Swift/Node runners and macOS build/UI validation at the final commit.
-- [ ] Record exact commit, successful/failed run provenance, and physical-device acceptance still required.
+- [x] Run Swift/Node runners and macOS build/UI validation at the final application/test commits.
+- [x] Record exact commit, successful/failed run provenance, and physical-device acceptance still required.
 
 ## Evidence checkpoint
 
@@ -102,3 +102,13 @@ Files: ScheduleView.swift, AcademicView.swift and existing shared presentation/m
 
 - Final application source `6926342c63f7677fb3d8e3363981a9c605ee6dd5`: regression/build `40011066924` passed 166 Swift assertions and 6 Node tests; release `40011074860` succeeded. Verified unsigned IPA SHA256 `97785fd6238304871a72d6c461cd0d9cd52413c31e3acd51a7a788a9e4b58890`. Large runtime instrumentation and all callback-state mutations were removed; snapshot-publication instrumentation is DEBUG-only.
 - UI `40011069453` retained a test-selector failure: actual AX snapshots show `academic-publication-count` as an `Other` node, with labels 1 before and 2 after score refresh; the test wrongly queried `StaticText`. Elective reset, large text, and timetable refresh passed. The follow-up changes only the selector to a type-independent exact identifier match; its required publication counts and content assertions are unchanged. Application sources and the existing IPA remain identical.
+- UI `40012330316` on selector fix `e4bd41f` did not exercise academic refresh: the first three tests failed in `app.launch()` with `Timed out while acquiring background assertion`; no publication diagnostic was emitted. The fourth timetable refresh test passed. This launch-stage infrastructure failure is retained, and a fresh runner is requested at the same commit to obtain the missing six-scenario evidence; no application or test assertion is changed for the retry.
+
+## Final validation and delivery
+
+- Final application source: `6926342c63f7677fb3d8e3363981a9c605ee6dd5`. Final UI test source: `e4bd41f4cd4fb9911f6d311270a7841a41692e31`. The application and Xcode project have no changes between these commits; the latter changes the accessibility selector and this evidence record only.
+- Regression/build runs `40011066924` and `40012328876` succeeded: 166 Swift PASS assertions, 6 Node tests, and the Debug simulator build.
+- Same-source UI retry `40014163351` succeeded: 4 focused tests, zero failures. Scores, exams, and electives each published exactly once after refresh in both populated and empty states (initial count 1, refreshed count 2), with expected content/empty-state assertions. Elective search reset and disabled feedback, large-text controls, and whole-page timetable refresh also passed.
+- Independently inspected final screenshots: the standard score semester strip has matching 26-point rounded corners, and the accessibility-size historical exam row displays `14:20` and the complete room `9号栋9-112`. Existing navigation/week coverage is recorded in the earlier full-suite runs above; the final run is the four-test focused suite, not a new full-suite run.
+- Release run `40011074860` succeeded. Delivered `dist/ui-exam-6926342/CCSUT-unsigned.ipa`; ZIP integrity and app executable verified. SHA256 `97785fd6238304871a72d6c461cd0d9cd52413c31e3acd51a7a788a9e4b58890`, 4,703,316 bytes, bundle `com.imzhien.ccsut`, version 0.1.0/build 1, minimum iOS 26.0. The package is unsigned and requires the user's existing signing/install process.
+- Implementation and CI verification are complete. Live school-server exam loading and physical-device visual acceptance remain for the user to test; no new authenticated school session or enrollment/drop/SMS action was used during this work.
