@@ -253,9 +253,9 @@ private struct AcademicDetailChrome<Actions: View>: ViewModifier {
                 ToolbarItem(placement: .topBarTrailing) { actions() }
                     .sharedBackgroundVisibility(.hidden)
             }
-            .background(alignment: .top) {
+            .overlay(alignment: .top) {
                 GeometryReader { geometry in
-                    // A background can already be inside the navigation safe area.
+                    // Content can already be inside the navigation safe area.
                     // Its window position still gives the full distance to the top.
                     let top = max(geometry.safeAreaInsets.top, geometry.frame(in: .global).minY, 0)
                     let height = top + 12
