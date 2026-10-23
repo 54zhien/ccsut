@@ -333,8 +333,8 @@ private struct PageRefreshAttachment: UIViewRepresentable {
             let message = [
                 "event=\(event)",
                 "target=\(NSStringFromClass(type(of: scrollView)))",
-                "frame=\(NSStringFromCGRect(scrollView.frame))",
-                "contentSize=\(NSStringFromCGSize(scrollView.contentSize))",
+                "frame=\(scrollView.frame)",
+                "contentSize=\(scrollView.contentSize)",
                 "alwaysBounceVertical=\(scrollView.alwaysBounceVertical)",
                 "refreshControlMatches=\(scrollView.refreshControl === control)",
                 "contentOffsetY=\(String(format: "%.1f", Double(scrollView.contentOffset.y)))",
