@@ -35,6 +35,12 @@ jobs:
             -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
+      - name: Export interaction screenshots
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/ui-tests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-tests.xcresult" --output-path "$RUNNER_TEMP/ui-test-attachments"
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -44,5 +50,6 @@ jobs:
             ${{ runner.temp }}/ui-build.log
             ${{ runner.temp }}/ui-test.log
             ${{ runner.temp }}/ui-tests.xcresult/
+            ${{ runner.temp }}/ui-test-attachments/
           if-no-files-found: error
           retention-days: 14

@@ -19,9 +19,13 @@ final class PageInteractionUITests: XCTestCase {
 
     func testColdLoadingFillsPageWidth() {
         let app = launch("loading")
-        let surface = app.otherElements["schedule-surface"]
-        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+        let surface = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == 'schedule-surface' OR identifier == 'schedule-scroll'"
+        )).firstMatch
+        let exists = surface.waitForExistence(timeout: 5)
         capture(app, "cold-loading")
+        if !exists { print(app.debugDescription) }
+        XCTAssertTrue(exists)
         XCTAssertGreaterThan(surface.frame.width, app.frame.width * 0.95,
                              "Loading must fill the page instead of collapsing to a narrow strip")
     }

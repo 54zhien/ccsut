@@ -55,7 +55,7 @@ struct ElectiveView: View {
                 ContentUnavailableView {
                     Label("当前没有可选课程", systemImage: "tray")
                 } description: {
-                    Text(initData.map { "选课学期 \($0.xkxnxq ?? "—")" } ?? "")
+                    Text(initData.map { "选课学期 \(SchedulePresentation.termTitle($0.xkxnxq ?? "—"))" } ?? "")
                 } actions: {
                     Button("刷新") { Task { await load(force: true) } }
                 }

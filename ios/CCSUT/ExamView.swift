@@ -132,6 +132,7 @@ struct ExamView: View {
                 Spacer()
                 if let d = exam.startDate {
                     Text(d, format: .relative(presentation: .named))
+                        .environment(\.locale, Locale(identifier: "zh_CN"))
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.white.opacity(0.85))
                 }
