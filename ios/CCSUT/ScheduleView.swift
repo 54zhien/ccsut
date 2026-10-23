@@ -20,6 +20,8 @@ struct ScheduleView: View {
     @State private var pendingDetail: ScheduleSlot?
     @State private var headerScrollOffset: CGFloat = 0
     @State private var previewRefreshCount = 0
+    @State private var diagnosticWeekOffset: CGFloat = 0
+    @State private var diagnosticVisibleWeeks = ""
     private let railWidth: CGFloat = 44
     private let headerHeight: CGFloat = 52
     private let weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -104,6 +106,11 @@ struct ScheduleView: View {
                     VStack {
                         Text("\(previewRefreshCount)").accessibilityIdentifier("refresh-count")
                         Text("\(deviceCornerRadius)").accessibilityIdentifier("device-corner-radius")
+                        if !weekDiagnosticMode.isEmpty {
+                            Text("mode=\(weekDiagnosticMode) offset=\(diagnosticWeekOffset) id=\(weekScrollID ?? -1) visible=\(diagnosticVisibleWeeks)")
+                                .font(.caption2)
+                                .accessibilityIdentifier("week-diagnostics")
+                        }
                     }
                     .padding(.bottom, 100)
                 }
@@ -175,11 +182,80 @@ struct ScheduleView: View {
         }
     }
 
-    private var weekBar: some View {
-        GlassEffectContainer(spacing: 8) {
+    private var weekDiagnosticMode: String {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if InterfacePreview.enabled, let index = args.firstIndex(of: "--diagnose-week"), args.indices.contains(index + 1) {
+            return args[index + 1]
+        }
+        #endif
+        return ""
+    }
+
+    @ViewBuilder private var weekBar: some View {
+        if weekDiagnosticMode == "without-container" {
+            weekScroller
+        } else {
+            GlassEffectContainer(spacing: 8) { weekScroller }
+        }
+    }
+
+    @ViewBuilder private var weekScroller: some View {
+        if weekDiagnosticMode == "proxy-unsnapped" {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) { weekRow }
+                    .scrollIndicators(.hidden)
+                    .contentMargins(.horizontal, 16, for: .scrollContent)
+                    .onAppear { proxy.scrollTo(selectedWeek, anchor: .center) }
+                    .onChange(of: selectedWeek) { _, week in proxy.scrollTo(week, anchor: .center) }
+            }
+        } else {
             ScrollView(.horizontal) {
-                HStack(spacing: 8) {
+                weekRow
+            }
+            .scrollIndicators(.hidden)
+            .scrollTargetBehavior(.viewAligned(anchor: .center))
+            .contentMargins(.horizontal, 16, for: .scrollContent)
+            .scrollPosition(id: $weekScrollID, anchor: .center)
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, offset in
+                if !weekDiagnosticMode.isEmpty { diagnosticWeekOffset = offset }
+            }
+            .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { ids in
+                if !weekDiagnosticMode.isEmpty { diagnosticVisibleWeeks = ids.sorted().map(String.init).joined(separator: ",") }
+            }
+            .task {
+                if weekDiagnosticMode == "deferred" {
+                    weekScrollID = nil
+                    try? await Task.sleep(for: .milliseconds(250))
+                    weekScrollID = selectedWeek
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var weekRow: some View {
+        if weekDiagnosticMode == "lazy" {
+            LazyHStack(spacing: 8) { weekButtons }
+                .scrollTargetLayout()
+                .padding(.vertical, 8)
+        } else {
+            HStack(spacing: 8) { weekButtons }
+                .scrollTargetLayout()
+                .padding(.vertical, 8)
+        }
+    }
+
+    private var weekButtons: some View {
                     ForEach(1...maxWeek, id: \.self) { week in
+                        if weekDiagnosticMode == "explicit-id" || weekDiagnosticMode == "proxy-unsnapped" {
+                            weekButton(week).id(week)
+                        } else {
+                            weekButton(week)
+                        }
+                    }
+    }
+
+    private func weekButton(_ week: Int) -> some View {
                         Button { selectWeek(week) } label: {
                             Text(week == currentWeek ? "本周" : "第 \(week) 周")
                                 .font(.subheadline.weight(week == selectedWeek ? .semibold : .medium))
@@ -197,16 +273,6 @@ struct ScheduleView: View {
                         }
                         .accessibilityLabel(week == currentWeek ? "本周" : "第 \(week) 周")
                         .accessibilityAddTraits(week == selectedWeek ? [.isSelected] : [])
-                    }
-                }
-                .scrollTargetLayout()
-                .padding(.vertical, 8)
-            }
-            .scrollIndicators(.hidden)
-            .scrollTargetBehavior(.viewAligned(anchor: .center))
-            .contentMargins(.horizontal, 16, for: .scrollContent)
-            .scrollPosition(id: $weekScrollID, anchor: .center)
-        }
     }
 
     private var cells: [ScheduleCell] { SchedulePresentation.cells(bundle?.slots ?? [], week: selectedWeek) }

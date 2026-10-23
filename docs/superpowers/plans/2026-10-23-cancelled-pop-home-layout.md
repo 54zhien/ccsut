@@ -131,3 +131,17 @@ and leave too much unused lower space. Keep the icon and business logic unchange
   positioning test is not repeated in the second invocation. Publish its log and
   screenshots immediately, including on failure, before the other ten checks and
   before the slow compact render. Archive both result bundles.
+- Production 58265440dfb39031ebc63c27112a9c347f7b99a1 passed Release
+  39932816696 and regression39932813330. Its intact IPA retains bundle/icon;
+  SHA256:f865d9eecbb9a09b67ba4194c621da1e794a64125b85d261780a994b78b44ad7.
+  Early UI39932813287 still fails initial center at610pt versus201pt; the other
+  ten checks were not run in that invocation because the positioning step failed.
+  Keep this candidate rejected and do not present its IPA as completed work.
+- Stop speculative anchor/ID changes. Apple documents support HStack targets;
+  no documented GlassEffectContainer target-discovery restriction was found.
+  Add a temporary DEBUG-only runtime matrix on the real week strip: baseline,
+  explicit Int view IDs, one deferred position write after mounting, LazyHStack,
+  removal of the outer glass container, and unsnapped ScrollViewReader positioning.
+  Record chip geometry plus native offset/visible targets where available. These
+  diagnostics are observations, not acceptance; the unchanged strict center test
+  must still pass on the final production structure. Do not add edge spacers.
