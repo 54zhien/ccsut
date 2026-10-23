@@ -15,6 +15,7 @@ struct ScheduleView: View {
     @State private var referenceDate: Date?
     @State private var detail: ScheduleSlot?
     @State private var choosing: ScheduleCell?
+    @State private var pendingDetail: ScheduleSlot?
     private let railWidth: CGFloat = 44
     private let headerHeight: CGFloat = 52
     private let weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -64,14 +65,38 @@ struct ScheduleView: View {
                     .presentationDragIndicator(.visible)
                     .presentationCornerRadius(26)
             }
-            .confirmationDialog("此时段的课程", isPresented: Binding(
-                get: { choosing != nil }, set: { if !$0 { choosing = nil } }
-            ), presenting: choosing) { cell in
-                ForEach(cell.courses) { slot in
-                    Button(choiceLabel(slot)) { detail = slot; choosing = nil }
+            .sheet(item: $choosing, onDismiss: {
+                detail = pendingDetail
+                pendingDetail = nil
+            }) { cell in
+                NavigationStack {
+                    List(cell.courses) { slot in
+                        Button {
+                            pendingDetail = slot
+                            choosing = nil
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(slot.course).font(.headline).foregroundStyle(.primary)
+                                Text([slot.teacher, slot.room].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                                Text("第 \(slot.startPeriod)–\(slot.endPeriod) 节 · \(slot.weeks.isEmpty ? "周次未标注" : "第 \(WeekParser.compress(slot.weeks.sorted())) 周")")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .navigationTitle("此时段的课程")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { choosing = nil }
+                        }
+                    }
                 }
-                Button("取消", role: .cancel) { choosing = nil }
-            } message: { _ in Text("此时段有多条安排，请选择查看。") }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
         }
     }
 
@@ -139,12 +164,6 @@ struct ScheduleView: View {
     }
 
     private var cells: [ScheduleCell] { SchedulePresentation.cells(bundle?.slots ?? [], week: selectedWeek) }
-
-    private func choiceLabel(_ slot: ScheduleSlot) -> String {
-        let weeks = slot.weeks.isEmpty ? "周次未标注" : "第 \(WeekParser.compress(slot.weeks.sorted())) 周"
-        let title = slot.teacher.isEmpty ? slot.course : "\(slot.course)（\(slot.teacher)）"
-        return "\(title) · \(slot.room) · 第 \(slot.startPeriod)–\(slot.endPeriod) 节 · \(weeks)"
-    }
 
     private var timetable: some View {
         GeometryReader { geo in
