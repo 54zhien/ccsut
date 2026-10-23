@@ -39,3 +39,13 @@ The user's no-tests/package-only instruction remains in force. Static source rev
 - SHA256: `812f7c3f7bb77bca6addd5c2d1c6461a2a85ef8f83b87ae5b29ba59a3db1f2a2`.
 - ZIP integrity passed; executable present; bundle `com.imzhien.ccsut`; minimum iOS 26.0; primary `AppIcon`; actual Boolean `CADisableMinimumFrameDurationOnPhone = true`.
 - The previous delivered `6437f5c` and its device feedback remain documented in `2026-10-23-web-fit-week-recovery.md`; it is not presented as device-approved.
+
+## Follow-up: gradient coverage after d01545b
+
+The user reported that the blur now looked like only a system layer. Current-source inspection confirms `NagiPersistentHeaderBlur` is still mounted, includes a gradient mask, and explicitly disables the system's automatic top scroll edge. It does not prove that the gradient is correctly visible on the device.
+
+Comparison with the verified local Nagi checkout `9f5cd1a` identifies a porting difference: Nagi Search explicitly gives the blur a height of safe-area top + header + 12-point tail and offsets it by the negative top inset. d01545b instead used an inferred SwiftUI background size, negative bottom padding and ignoresSafeArea, while deriving the mask fraction from the window's safe area. Those two geometry sources are not guaranteed to describe the same container.
+
+The follow-up restores Nagi's explicit frame and upward offset, using the local container's safe area and the measured header height for both coverage and mask stops. The blur remains mounted outside label/control opacity. The material itself remains the same adaptive UIKit systemMaterial used by Nagi; this is a gradient alpha mask over that material, not a separately implemented variable-radius Gaussian filter.
+
+This is a correction of the identified source-level layout deviation. Whether it explains the entire reported device appearance remains unverified. No application tests are authorized for this follow-up.

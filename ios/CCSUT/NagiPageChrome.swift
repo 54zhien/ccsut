@@ -231,19 +231,7 @@ extension View {
     /// Root and detail pages share Nagi Search's continuously mounted masked blur.
     /// Its lifetime/opacity is independent of the header labels fading out.
     fileprivate func nagiTopBar<Bar: View>(@ViewBuilder content: () -> Bar) -> some View {
-        toolbar(.hidden, for: .navigationBar)
-            .scrollEdgeEffectHidden(true, for: .top)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                content()
-                    .frame(maxWidth: .infinity)
-                    .background {
-                        NagiPersistentHeaderBlur()
-                            .padding(.bottom, -12)
-                            .ignoresSafeArea(.container, edges: .top)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
-            }
+        modifier(NagiTopBar(bar: content()))
     }
 
     func academicDetailChrome(title: String) -> some View {
@@ -255,15 +243,57 @@ extension View {
     }
 }
 
+private struct NagiTopBar<Bar: View>: ViewModifier {
+    let bar: Bar
+    @State private var barHeight = NagiPageHeaderMetrics.contentHeight
+
+    func body(content: Content) -> some View {
+        GeometryReader { viewport in
+            let topInset = max(viewport.safeAreaInsets.top, 0)
+            let blurHeight = topInset + barHeight + 12
+            content
+                .toolbar(.hidden, for: .navigationBar)
+                .scrollEdgeEffectHidden(true, for: .top)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    bar
+                        .frame(maxWidth: .infinity)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            guard height > 0, abs(barHeight - height) > 0.5 else { return }
+                            withTransaction(Transaction(animation: nil)) { barHeight = height }
+                        }
+                        .background(alignment: .top) {
+                            // Nagi Search explicitly spans the status bar, header
+                            // and fade tail. Do not infer coverage from the default
+                            // background size or a window-wide safe area.
+                            NagiPersistentHeaderBlur(statusBarFraction: topInset / blurHeight)
+                                .frame(height: blurHeight)
+                                .offset(y: -topInset)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                }
+        }
+    }
+}
+
 /// Adapted from Nagi SearchView's GradientMaskedBlurView (9f5cd1a).
 /// A semantic UIKit material follows light/dark appearance without a color overlay.
 private struct NagiPersistentHeaderBlur: UIViewRepresentable {
+    let statusBarFraction: CGFloat
+
     func makeUIView(context: Context) -> BlurView { BlurView() }
-    func updateUIView(_ view: BlurView, context: Context) {}
+    func updateUIView(_ view: BlurView, context: Context) {
+        view.statusBarFraction = statusBarFraction
+    }
 
     final class BlurView: UIView {
         private let effectView = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
         private let gradient = CAGradientLayer()
+        var statusBarFraction: CGFloat = 0.35 {
+            didSet {
+                if oldValue != statusBarFraction { setNeedsLayout() }
+            }
+        }
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -286,7 +316,7 @@ private struct NagiPersistentHeaderBlur: UIViewRepresentable {
             CATransaction.setDisableActions(true)
             effectView.frame = bounds
             gradient.frame = bounds
-            let statusEnd = min(max((window?.safeAreaInsets.top ?? 0) / max(bounds.height, 1), 0), 0.72)
+            let statusEnd = min(max(statusBarFraction, 0), 0.72)
             gradient.locations = [0, NSNumber(value: Double(statusEnd)),
                                   NSNumber(value: Double(statusEnd + (1 - statusEnd) * 0.58)), 1]
             CATransaction.commit()
