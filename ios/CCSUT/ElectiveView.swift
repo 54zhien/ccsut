@@ -74,6 +74,7 @@ struct ElectiveView: View {
                     .presentationDragIndicator(.visible)
                     .presentationCornerRadius(26)
             }
+        }
     }
 
     // MARK: 列表
