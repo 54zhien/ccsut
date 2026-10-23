@@ -43,65 +43,127 @@ struct LoginSheetRequest: Identifiable {
 struct WebLoginSheet: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
-    let request: LoginSheetRequest
+    private let request: LoginSheetRequest?
+    private let ownsNavigation: Bool
 
     @State private var webView: WKWebView
     @State private var nav = WebNavigator()
     @State private var status = ""
     @State private var didPrepare = false
 
+    /// LoginView passes its already-running web view and navigator. They are moved
+    /// into this sheet only after the source WebPanel has left the main view tree.
+    init(webView: WKWebView, navigator: WebNavigator) {
+        request = nil
+        ownsNavigation = false
+        _webView = State(initialValue: webView)
+        _nav = State(initialValue: navigator)
+    }
+
+    /// Standalone entry retained for callers that need a dedicated web login flow.
     init(request: LoginSheetRequest) {
         self.request = request
+        ownsNavigation = true
         _webView = State(initialValue: WebFactory.make())
+        _nav = State(initialValue: WebNavigator())
     }
 
     var body: some View {
-        NavigationStack {
-            WebPanel(webView: webView, onRefresh: {
-                status = "加载认证页…"
-                webView.reload()
-            })
-                .ignoresSafeArea(edges: .bottom)
-                .overlay(alignment: .top) {
-                    if !status.isEmpty { statusBar }
-                }
-                .navigationTitle(request.title)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("取消") { dismiss() }
-                    }
-                }
-                .onAppear(perform: start)
-                .onChange(of: nav.currentURL) { _, url in
-                    guard let url else { return }
-                    handle(url)
-                }
-                .onChange(of: nav.lastError) { _, err in
-                    if let err { status = "⚠️ \(err)" }
-                }
+        ZStack {
+            Color(uiColor: .systemBackground).ignoresSafeArea()
+            WebPanel(webView: webView, onRefresh: refresh)
+                .ignoresSafeArea()
         }
+        .overlay(alignment: .top) { topControls }
+        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
+            bottomControls
+        }
+        .onAppear {
+            if ownsNavigation { start() }
+        }
+        .onChange(of: nav.currentURL) { _, url in
+            guard let url else { return }
+            if !ownsNavigation, !webView.isLoading { status = "" }
+            handle(url)
+        }
+        .onChange(of: nav.lastError) { _, err in
+            if let err { status = "⚠️ \(err)" }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 
-    private var statusBar: some View {
-        HStack(spacing: 8) {
-            if webView.isLoading {
-                ProgressView().controlSize(.mini)
-            } else {
-                Image(systemName: "info.circle").font(.caption)
-            }
-            Text(status).font(.caption).lineLimit(3)
-            Spacer(minLength: 0)
+    private var topControls: some View {
+        HStack {
+            chromeButton("xmark", label: "关闭网页登录") { dismiss() }
+            Spacer()
+            chromeButton("arrow.clockwise", label: "刷新网页") { refresh() }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .background(.thinMaterial)
+        .padding(.horizontal, 18)
+        .padding(.top, 8)
+    }
+
+    private var bottomControls: some View {
+        HStack(spacing: 12) {
+            if !status.isEmpty {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Spacer(minLength: 0)
+            }
+
+            Button(action: openCurrentURLInSafari) {
+                Label("Safari", systemImage: "safari")
+                    .font(.footnote.weight(.semibold))
+                    .frame(minWidth: 96, minHeight: 42)
+                    .foregroundStyle(.white)
+                    .background(Color.accentColor, in: .capsule)
+            }
+            .buttonStyle(.plain)
+            .disabled(currentURL == nil)
+            .accessibilityLabel("在 Safari 中打开当前网址")
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    private func chromeButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 42, height: 42)
+                .background(.thinMaterial, in: Circle())
+                .overlay { Circle().strokeBorder(Color(uiColor: .separator).opacity(0.28), lineWidth: 0.5) }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private var currentURL: URL? {
+        webView.url ?? nav.currentURL
+    }
+
+    private func refresh() {
+        status = "加载认证页…"
+        webView.reload()
+    }
+
+    private func openCurrentURLInSafari() {
+        guard let url = currentURL else { return }
+        openURL(url)
     }
 
     // MARK: 流程
 
     private func start() {
+        guard let request else { return }
         webView.navigationDelegate = nav
         nav.onNavigate = { url in handle(url) }
         status = "加载认证页…"
@@ -109,6 +171,7 @@ struct WebLoginSheet: View {
     }
 
     private func handle(_ url: URL) {
+        guard let request else { return }
         let absolute = url.absoluteString
 
         // 到教务系统 → 接管
@@ -130,6 +193,7 @@ struct WebLoginSheet: View {
     }
 
     private func prepareSMS() async {
+        guard let request else { return }
         status = "切到验证码登录…"
         do {
             let raw = try await webView.callAsync(Self.smsScript, arguments: [
@@ -163,6 +227,7 @@ struct WebLoginSheet: View {
     }
 
     private func finish() async {
+        guard ownsNavigation else { return }
         status = "接管会话…"
         let ok = await session.adoptCookies()
         if ok {

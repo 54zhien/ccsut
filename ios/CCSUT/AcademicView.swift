@@ -11,9 +11,9 @@ struct AcademicView: View {
     var body: some View {
         NavigationStack(path: $path) {
             GeometryReader { viewport in
-                let cardHeight = max(128, min(156, (viewport.size.height - 96) / 3))
+                let cardHeight: CGFloat = 96
                 ScrollView {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 12) {
                         NavigationLink(value: Destination.scores) {
                             service("成绩查询", subtitle: "课程成绩、学分与绩点", symbol: "chart.bar.doc.horizontal", tint: .blue, height: cardHeight)
                         }
@@ -38,7 +38,7 @@ struct AcademicView: View {
                     .frame(maxWidth: 720)
                     .frame(maxWidth: .infinity)
                 }
-                .scrollBounceBehavior(.basedOnSize)
+                .scrollBounceBehavior(.always, axes: .vertical)
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
                     max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
                 } action: { _, offset in headerScrollOffset = offset }
@@ -75,10 +75,10 @@ struct AcademicView: View {
             Image(systemName: symbol)
                 .font(.system(size: 20, weight: .medium))
                 .foregroundStyle(tint)
-                .frame(width: 52, height: 52)
-                .background(tint.opacity(0.09), in: .rect(cornerRadius: 16))
-            VStack(alignment: .leading, spacing: 8) {
-                Text(title).font(.title3.weight(.semibold)).foregroundStyle(.primary)
+                .frame(width: 46, height: 46)
+                .background(tint.opacity(0.09), in: .rect(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.headline).foregroundStyle(.primary)
                 Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -86,10 +86,10 @@ struct AcademicView: View {
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
         }
-        .padding(20)
+        .padding(16)
         .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
-        .contentShape(.rect(cornerRadius: 24))
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20))
+        .contentShape(.rect(cornerRadius: 20))
         .accessibilityElement(children: .combine)
     }
 

@@ -16,7 +16,13 @@ struct CCSUTApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if InterfacePreview.enabled { MainTabs() } else { RootView() }
+                if InterfacePreview.enabled {
+                    switch InterfacePreview.page {
+                    case "login": LoginView()
+                    case "launch": LaunchView()
+                    default: MainTabs()
+                    }
+                } else { RootView() }
             }
                 .environment(session)
                 .environment(\.deviceCornerRadius, deviceCornerRadius)
@@ -57,36 +63,58 @@ struct RootView: View {
 // MARK: - 启动页
 
 struct LaunchView: View {
-    @State private var spin = false
+    var body: some View {
+        ZStack {
+            Color(.systemBackground).ignoresSafeArea()
+            VStack(spacing: 20) {
+                SchoolEmblemView(size: 116, rotatingRing: true)
+                Text("加载中...")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .combine)
+        }
+    }
+}
+
+struct SchoolEmblemView: View {
+    let size: CGFloat
+    var rotatingRing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var spinning = false
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.06, green: 0.20, blue: 0.62),
-                    Color(red: 0.22, green: 0.47, blue: 0.95),
-                ],
-                startPoint: .top, endPoint: .bottom
-            )
-            .ignoresSafeArea()
-
-            VStack(spacing: 18) {
-                Image(systemName: "graduationcap.fill")
-                    .font(.system(size: 52, weight: .medium))
-                    .foregroundStyle(.white)
-                    .scaleEffect(spin ? 1.06 : 0.94)
-                    .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: spin)
-
-                ProgressView()
-                    .controlSize(.regular)
-                    .tint(.white)
-
-                Text("正在恢复会话…")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.8))
-            }
+            Image("SchoolEmblemCore").resizable().scaledToFit()
+            Image("SchoolEmblemRing").resizable().scaledToFit()
+                .rotationEffect(.degrees(spinning ? 360 : 0))
+                .animation(rotatingRing && !reduceMotion ? .linear(duration: 8).repeatForever(autoreverses: false) : nil,
+                           value: spinning)
         }
-        .onAppear { spin = true }
+        .frame(width: size, height: size)
+        .accessibilityLabel("长沙工业学院校徽")
+        .onAppear { spinning = rotatingRing && !reduceMotion }
+        .onChange(of: reduceMotion) { _, reduced in spinning = rotatingRing && !reduced }
+        .onDisappear { spinning = false }
+    }
+}
+
+/// The supplied PNG stays intact. Clip its right-hand signature in native layout.
+struct SchoolWordmarkView: View {
+    var body: some View {
+        GeometryReader { geometry in
+            let scale = geometry.size.width / 724
+            Image("SchoolSignature")
+                .renderingMode(.template)
+                .resizable()
+                .frame(width: 992 * scale, height: 329 * scale)
+                .offset(x: -268 * scale, y: -64 * scale)
+                .foregroundStyle(.primary)
+        }
+        .aspectRatio(724.0 / 198.0, contentMode: .fit)
+        .clipped()
+        .accessibilityLabel("长沙工业学院 Changsha Institute of Technology")
     }
 }
 

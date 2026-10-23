@@ -5,9 +5,9 @@
 //  登录页 · 短信验证码，全程留在 App 内
 //
 //  结构：
-//    底层常驻一个全屏 WKWebView（不可交互），上层用不透明的原生界面盖住。
-//    WebView 依然在视图层级里、依然全屏渲染，所以 CAS 的 Angular 能正常跑；
-//    而用户看到和操作的完全是原生控件。
+//    登录页底层使用全屏 WKWebView（不可交互），上层用原生界面盖住；
+//    打开网页登录时，先从登录页树中卸载，再把同一个实例挂到 large sheet。
+//    WebView 始终保持正常尺寸和透明度，让 CAS 的 Angular 正常运行。
 //
 //    为什么不能把 WebView 缩成 1×1 或 opacity(0.01)：
 //    WebKit 会判定它不可见并停止导航，表现为永远卡在「加载认证页」。
@@ -31,7 +31,9 @@ struct LoginView: View {
     @State private var code = ""
     @State private var busy: Busy = .idle
     @State private var hint = ""
-    @State private var showWeb = false          // 露出网页给用户看
+    @State private var isPreparingWebSheet = false
+    @State private var webViewIsInSheet = false
+    @State private var showWebSheet = false
     @State private var prepared = false         // 页签是否已经切过
 
     @State private var cooldown = 0             // 重发倒计时
@@ -40,6 +42,7 @@ struct LoginView: View {
     @State private var operationID = UUID()
     @State private var isFinishing = false
     @State private var pendingFinish = false
+    @State private var hasStarted = false
 
     @FocusState private var focused: Field?
     private enum Field { case account, code }
@@ -57,21 +60,32 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            // 底层：全屏 WebView。必须真的全屏且不透明地渲染，
-            // 只是被上面的原生层挡住而已。
-            WebPanel(webView: webView)
-                .ignoresSafeArea()
-                .allowsHitTesting(showWeb)
-
-            if showWeb {
-                webOverlay
-            } else {
-                nativeLayer
+            if !webViewIsInSheet && !isPreparingWebSheet {
+                // 必须全屏渲染，不能缩小或隐藏；原生界面只负责盖住它。
+                // 弹 sheet 前先从这棵树移除，避免同一 WKWebView 同时出现在两棵树里。
+                WebPanel(webView: webView)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .onDisappear {
+                        guard isPreparingWebSheet else { return }
+                        webViewIsInSheet = true
+                        isPreparingWebSheet = false
+                        showWebSheet = true
+                    }
             }
+
+            nativeLayer
         }
-        .animation(.smooth(duration: 0.25), value: showWeb)
+        .sheet(isPresented: $showWebSheet, onDismiss: restoreWebViewToLogin) {
+            WebLoginSheet(webView: webView, navigator: nav)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
         .onAppear(perform: start)
         .onDisappear {
+            let sheetTemporarilyCoversLogin = session.phase == .loggedOut &&
+                (isPreparingWebSheet || webViewIsInSheet || showWebSheet)
+            guard !sheetTemporarilyCoversLogin else { return }
             timer?.cancel()
             loginTimeout?.cancel()
             pendingFinish = false
@@ -93,208 +107,145 @@ struct LoginView: View {
         }
     }
 
-    // MARK: 网页层（用户主动查看时）
-
-    private var webOverlay: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button {
-                    showWeb = false
-                } label: {
-                    Label("返回", systemImage: "chevron.left")
-                        .font(.subheadline.weight(.medium))
-                }
-                Spacer()
-                Text("统一身份认证")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Button {
-                    webView.reload()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.bar)
-
-            Spacer()
-        }
-    }
-
     // MARK: 原生层
 
     private var nativeLayer: some View {
         ZStack {
-            backdrop
+            Color(uiColor: .systemBackground).ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 22) {
-                    Spacer(minLength: 56)
+                VStack(spacing: 30) {
                     brand
-                    formCard
-                    qrHint
+                    credentialsForm
+                    actions
+                    if !hint.isEmpty {
+                        Text(hint)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .transition(.opacity)
+                    }
                 }
-                .padding(.horizontal, 22)
-                .padding(.bottom, 40)
+                .padding(.horizontal, 28)
+                .padding(.top, 24)
+                .padding(.bottom, 32)
+                .frame(maxWidth: 480)
+                .frame(maxWidth: .infinity)
             }
             .scrollBounceBehavior(.basedOnSize)
+            .scrollDismissesKeyboard(.interactively)
         }
     }
 
     private var brand: some View {
-        VStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(.white.opacity(0.18))
-                    .frame(width: 90, height: 90)
-                Image(systemName: "graduationcap.fill")
-                    .font(.system(size: 42, weight: .medium))
-                    .foregroundStyle(.white)
-            }
-
-            VStack(spacing: 6) {
-                Text("长工教务")
-                    .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(.white)
-                Text("长沙工业学院 · 统一身份认证")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.82))
-            }
+        VStack(spacing: 18) {
+            SchoolEmblemView(size: 92)
+            SchoolWordmarkView()
+                .frame(maxWidth: 270)
         }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
-    private var formCard: some View {
-        VStack(spacing: 16) {
-            inputRow(symbol: "person.text.rectangle",
-                     placeholder: "手机号 / 学号",
-                     text: $account,
-                     keyboard: .default)
+    private var credentialsForm: some View {
+        VStack(spacing: 0) {
+            TextField("手机号 / 学号", text: $account)
+                .keyboardType(.default)
                 .textContentType(.telephoneNumber)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.body)
+                .foregroundStyle(.primary)
                 .focused($focused, equals: .account)
                 .submitLabel(.next)
                 .onSubmit { focused = .code }
+                .padding(.horizontal, 17)
+                .frame(height: 56)
 
-            Divider().overlay(.white.opacity(0.18))
+            Rectangle()
+                .fill(Color(uiColor: .separator).opacity(0.42))
+                .frame(height: 0.5)
+                .padding(.leading, 17)
 
-            HStack(spacing: 10) {
-                inputRow(symbol: "number.square",
-                         placeholder: "短信验证码",
-                         text: $code,
-                         keyboard: .numberPad)
+            HStack(spacing: 12) {
+                TextField("短信验证码", text: $code)
+                    .keyboardType(.numberPad)
+                    .textContentType(.oneTimeCode)
+                    .font(.body)
+                    .foregroundStyle(.primary)
                     .focused($focused, equals: .code)
-                    .submitLabel(.go)
+                    .submitLabel(.done)
                     .onSubmit { submit() }
 
                 Button(action: sendCode) {
                     Group {
                         if busy == .sending {
-                            ProgressView().controlSize(.mini).tint(.white)
+                            ProgressView().controlSize(.mini)
                         } else {
                             Text(cooldown > 0 ? "\(cooldown)s" : "获取验证码")
-                                .font(.caption.weight(.semibold))
+                                .font(.subheadline.weight(.medium))
                                 .monospacedDigit()
                         }
                     }
-                    .frame(width: 78)
-                    .padding(.vertical, 8)
-                    .background(.white.opacity(0.22), in: .capsule)
-                    .foregroundStyle(.white)
+                    .frame(minWidth: 78, minHeight: 40)
+                    .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSend)
             }
+            .padding(.leading, 17)
+            .padding(.trailing, 9)
+            .frame(height: 56)
+        }
+        .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: 17))
+        .overlay {
+            RoundedRectangle(cornerRadius: 17)
+                .strokeBorder(Color(uiColor: .separator).opacity(0.25), lineWidth: 0.5)
+        }
+        .clipShape(.rect(cornerRadius: 17))
+        .frame(maxWidth: .infinity)
+    }
 
+    private var actions: some View {
+        VStack(spacing: 12) {
             Button(action: submit) {
                 HStack(spacing: 10) {
                     if busy == .logging {
-                        ProgressView().controlSize(.small)
-                            .tint(Color(red: 0.10, green: 0.31, blue: 0.82))
+                        ProgressView().controlSize(.small).tint(.white)
                     } else {
-                        Image(systemName: "arrow.right.circle.fill")
+                        Image(systemName: "arrow.right")
                     }
                     Text("登录").font(.headline)
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 50)
-                .background(canLogin ? Color.white : Color.white.opacity(0.45))
-                .foregroundStyle(Color(red: 0.10, green: 0.31, blue: 0.82))
-                .clipShape(.rect(cornerRadius: 14))
+                .frame(height: 52)
+                .background(canLogin ? Color.accentColor : Color.accentColor.opacity(0.42),
+                            in: .rect(cornerRadius: 15))
+                .foregroundStyle(.white)
             }
             .buttonStyle(.plain)
             .disabled(!canLogin)
 
-            if !hint.isEmpty {
-                Text(hint)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        .padding(20)
-        .glassCard(radius: 26)
-    }
-
-    private func inputRow(symbol: String,
-                          placeholder: String,
-                          text: Binding<String>,
-                          keyboard: UIKeyboardType) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 17))
-                .foregroundStyle(.white.opacity(0.75))
-                .frame(width: 22)
-
-            TextField(placeholder, text: text)
-                .keyboardType(keyboard)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .font(.body)
-                .foregroundStyle(.white)
-        }
-        .padding(.vertical, 6)
-    }
-
-    private var qrHint: some View {
-        Button {
-            showWeb = true
-        } label: {
-            Label("扫码登录", systemImage: "qrcode")
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .frame(height: 46)
-                .background(.white.opacity(0.18), in: .rect(cornerRadius: 13))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 13)
-                        .strokeBorder(.white.opacity(0.26), lineWidth: 1)
+            Button(action: showWebLogin) {
+                HStack(spacing: 8) {
+                    Image(systemName: "safari")
+                        .font(.subheadline.weight(.medium))
+                    Text("网页登录")
+                        .font(.subheadline.weight(.semibold))
                 }
-                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+                .foregroundStyle(Color.accentColor)
+                .background(Color(uiColor: .systemBackground), in: .rect(cornerRadius: 15))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 15)
+                        .strokeBorder(Color.accentColor.opacity(0.36), lineWidth: 1)
+                }
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
-    }
-
-    private var backdrop: some View {
-        MeshGradient(
-            width: 3, height: 3,
-            points: [
-                [0.0, 0.0], [0.5, 0.0], [1.0, 0.0],
-                [0.0, 0.5], [0.55, 0.45], [1.0, 0.5],
-                [0.0, 1.0], [0.5, 1.0], [1.0, 1.0],
-            ],
-            colors: [
-                Color(red: 0.06, green: 0.20, blue: 0.62),
-                Color(red: 0.12, green: 0.34, blue: 0.86),
-                Color(red: 0.22, green: 0.47, blue: 0.95),
-                Color(red: 0.10, green: 0.30, blue: 0.80),
-                Color(red: 0.28, green: 0.55, blue: 0.98),
-                Color(red: 0.18, green: 0.42, blue: 0.92),
-                Color(red: 0.14, green: 0.30, blue: 0.74),
-                Color(red: 0.30, green: 0.52, blue: 0.96),
-                Color(red: 0.42, green: 0.68, blue: 1.00),
-            ]
-        )
-        .ignoresSafeArea()
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: 状态
@@ -306,6 +257,9 @@ struct LoginView: View {
     // MARK: 流程
 
     private func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        guard !InterfacePreview.enabled else { return }
         hint = session.lastError ?? ""
         webView.navigationDelegate = nav
         nav.onNavigate = { url in handle(url) }
@@ -346,8 +300,8 @@ struct LoginView: View {
     }
 
     private func sendCode() {
-        focused = nil
         guard canSend else { return }
+        guard !InterfacePreview.enabled else { return }
         UserDefaults.standard.set(trimmed, forKey: "ccsut.lastAccount")
 
         busy = .sending
@@ -379,7 +333,7 @@ struct LoginView: View {
                     startCooldown(60)
                     focused = .code
                 case "no-tab", "no-form":
-                    hint = "认证页还没准备好，点右上角网页看看"
+                    hint = "认证页还没准备好，点“网页登录”继续"
                 case "no-account":
                     hint = "账号框没填上，先检查账号"
                 case "timeout":
@@ -393,8 +347,9 @@ struct LoginView: View {
     }
 
     private func submit() {
-        focused = nil
         guard canLogin else { return }
+        guard !InterfacePreview.enabled else { return }
+        focused = nil
         UserDefaults.standard.set(trimmed, forKey: "ccsut.lastAccount")
 
         busy = .logging
@@ -480,6 +435,16 @@ struct LoginView: View {
                 await MainActor.run { cooldown -= 1 }
             }
         }
+    }
+
+    private func showWebLogin() {
+        guard !isPreparingWebSheet, !webViewIsInSheet, !showWebSheet else { return }
+        focused = nil
+        isPreparingWebSheet = true
+    }
+
+    private func restoreWebViewToLogin() {
+        webViewIsInSheet = false
     }
 
     // MARK: 注入脚本

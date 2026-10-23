@@ -124,6 +124,7 @@ struct NagiPageHeader: View {
 }
 
 private struct NagiHeaderGaussianBlur: UIViewRepresentable {
+    @Environment(\.colorScheme) private var colorScheme
     let statusBarFraction: CGFloat
 
     func makeUIView(context: Context) -> NagiGradientMaskedBlurView {
@@ -131,6 +132,7 @@ private struct NagiHeaderGaussianBlur: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: NagiGradientMaskedBlurView, context: Context) {
+        uiView.setColorScheme(colorScheme)
         uiView.statusBarFraction = statusBarFraction
     }
 }
@@ -138,6 +140,16 @@ private struct NagiHeaderGaussianBlur: UIViewRepresentable {
 private final class NagiGradientMaskedBlurView: UIView {
     private let blurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
     private let gradientMask = CAGradientLayer()
+    private var appliedStyle: UIUserInterfaceStyle = .unspecified
+
+    func setColorScheme(_ scheme: ColorScheme) {
+        let style: UIUserInterfaceStyle = scheme == .dark ? .dark : .light
+        guard appliedStyle != style else { return }
+        appliedStyle = style
+        overrideUserInterfaceStyle = style
+        blurView.overrideUserInterfaceStyle = style
+        blurView.effect = UIBlurEffect(style: scheme == .dark ? .systemMaterialDark : .systemMaterialLight)
+    }
 
     var statusBarFraction: CGFloat = 0.35 {
         didSet {
