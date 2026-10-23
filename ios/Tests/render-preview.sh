@@ -25,10 +25,14 @@ capture() {
   xcrun simctl io "$DEVICE" screenshot "$OUT/$1-$2.png"
 }
 
-capture loading light
 capture schedule light
 capture schedule dark
 capture academic light
+capture loading light
+capture scores light
+capture exams light
+capture electives light
+capture electives dark
 capture account light
 capture course light
 capture conflict light

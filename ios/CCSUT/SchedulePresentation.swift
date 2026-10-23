@@ -8,6 +8,16 @@ struct ScheduleCell: Identifiable {
 }
 
 enum SchedulePresentation {
+    /// The API keeps its raw term code; only the visible caption is normalized.
+    static func termTitle(_ raw: String) -> String {
+        let parts = raw.split(separator: "-")
+        guard parts.count == 3, parts[0].count == 4, parts[1].count == 4,
+              Int(parts[0]) != nil, Int(parts[1]) != nil,
+              let term = Int(parts[2]), (1...3).contains(term) else { return raw }
+        let names = ["第一学期", "第二学期", "第三学期"]
+        return "\(parts[0])–\(parts[1]) 学年 · \(names[term - 1])"
+    }
+
     static func cells(_ slots: [ScheduleSlot], week: Int) -> [ScheduleCell] {
         let visible = slots.filter { $0.weeks.isEmpty || $0.weeks.contains(week) }
         return Dictionary(grouping: visible) { "\($0.weekday)-\($0.bigSection)" }.values.compactMap { group in

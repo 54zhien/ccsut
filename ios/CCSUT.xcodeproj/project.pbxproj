@@ -39,6 +39,7 @@
 900000000000000000000008 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.imzhien.ccsut.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = CCSUT; CODE_SIGNING_ALLOWED = NO; }; name = Debug; };
 900000000000000000000009 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.imzhien.ccsut.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = CCSUT; CODE_SIGNING_ALLOWED = NO; }; name = Release; };
 
+		A0000000000000000000001D /* PageSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001D; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -61,6 +62,7 @@
 		B0000000000000000000001A /* InterfacePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterfacePreview.swift; sourceTree = "<group>"; };
 		B0000000000000000000001B /* SchedulePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulePresentation.swift; sourceTree = "<group>"; };
 		B0000000000000000000001C /* NagiPageChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NagiPageChrome.swift; sourceTree = "<group>"; };
+		B0000000000000000000001D /* PageSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageSurface.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -103,6 +105,7 @@
 				B0000000000000000000001A /* InterfacePreview.swift */,
 				B00000000000000000000019 /* AcademicView.swift */,
 				B0000000000000000000001C /* NagiPageChrome.swift */,
+                B0000000000000000000001D /* PageSurface.swift */,
 				B00000000000000000000011 /* Assets.xcassets */,
 			);
 			path = CCSUT;
@@ -205,6 +208,7 @@
 				A0000000000000000000001A /* InterfacePreview.swift in Sources */,
 				A00000000000000000000019 /* AcademicView.swift in Sources */,
 				A0000000000000000000001C /* NagiPageChrome.swift in Sources */,
+                A0000000000000000000001D /* PageSurface.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

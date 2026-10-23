@@ -4,10 +4,12 @@ import SwiftUI
 struct AcademicView: View {
     private enum Destination: Hashable { case scores, exams, electives }
     @State private var nextExam: ExamItem?
+    @State private var path: [Destination] = []
+    @State private var didNavigatePreview = false
     @State private var headerScrollOffset: CGFloat = 0
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 if let nextExam {
                     Section("近期安排") {
@@ -68,7 +70,18 @@ struct AcademicView: View {
                 case .electives: ElectiveView()
                 }
             }
-            .task { await loadUpcomingExam() }
+            .task {
+                await loadUpcomingExam()
+                if InterfacePreview.enabled && !didNavigatePreview {
+                    didNavigatePreview = true
+                    switch InterfacePreview.page {
+                    case "scores": path = [.scores]
+                    case "exams": path = [.exams]
+                    case "electives": path = [.electives]
+                    default: break
+                    }
+                }
+            }
         }
     }
 

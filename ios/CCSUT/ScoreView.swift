@@ -18,6 +18,7 @@ struct ScoreView: View {
 
     @State private var items: [ScoreItem] = []
     @State private var isLoading = false
+    @State private var headerScrollOffset: CGFloat = 0
     @State private var errorText: String?
     @State private var selectedTerm: String?
 
@@ -44,22 +45,10 @@ struct ScoreView: View {
                 content
             }
         }
-        .toolbar(.visible, for: .navigationBar)
-        .navigationTitle("成绩单")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task { await load(force: true) }
-                } label: {
-                    if isLoading {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-                .disabled(isLoading)
-            }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+        .nagiPageChrome(title: "成绩单", scrollOffset: headerScrollOffset, showsBackButton: true) {
+            NagiRefreshButton(isLoading: isLoading) { Task { await load(force: true) } }
         }
         .refreshable { await load(force: true) }
         .task { if items.isEmpty { await load() } }
@@ -86,7 +75,7 @@ struct ScoreView: View {
 
     private var content: some View {
         ScrollView {
-            LazyVStack(spacing: 14, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(spacing: 18, pinnedViews: [.sectionHeaders]) {
                 summaryCard
 
                 ForEach(terms) { term in
@@ -99,7 +88,7 @@ struct ScoreView: View {
                                 }
                             }
                         }
-                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20))
                         .padding(.horizontal, 16)
                     } header: {
                         termHeader(term)
@@ -108,10 +97,14 @@ struct ScoreView: View {
             }
             .padding(.vertical, 12)
         }
+        .trackVerticalPageOffset($headerScrollOffset)
     }
 
     private var summaryCard: some View {
-        VStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("学业概览", systemImage: "chart.bar.doc.horizontal")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
             HStack(spacing: 0) {
                 statBlock(value: String(format: "%.2f", overallGPA), label: "加权绩点", tint: .blue)
                 Divider().frame(height: 34)
@@ -120,8 +113,8 @@ struct ScoreView: View {
                 statBlock(value: "\(items.count)", label: "门课程", tint: .orange)
             }
         }
-        .padding(18)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
+        .padding(20)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
         .padding(.horizontal, 16)
     }
 
@@ -138,33 +131,45 @@ struct ScoreView: View {
     }
 
     private func termHeader(_ term: ScoreTerm) -> some View {
-        HStack {
-            Text(term.name)
-                .font(.subheadline.weight(.semibold))
-            Spacer()
-            if term.failedCount > 0 {
-                Text("\(term.failedCount) 挂")
-                    .font(.caption2.weight(.bold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.red.opacity(0.15), in: .capsule)
-                    .foregroundStyle(.red)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(SchedulePresentation.termTitle(term.name))
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                if term.failedCount > 0 {
+                    Text("\(term.failedCount) 门未通过")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.red)
+                }
             }
-            Text(String(format: "GPA %.2f", term.gpa))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            Text("· \(String(format: "%.1f", term.credits)) 学分")
+            HStack(spacing: 12) {
+                Text(String(format: "GPA %.2f", term.gpa))
+                Text("\(String(format: "%.1f", term.credits)) 学分")
+                Text("\(term.items.count) 门课程")
+            }
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(.bar)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemGroupedBackground))
     }
 
     // MARK: - 加载
 
     private func load(force: Bool = false) async {
+        #if DEBUG
+        if InterfacePreview.enabled {
+            isLoading = true
+            defer { isLoading = false }
+            try? await Task.sleep(for: .milliseconds(250))
+            items = InterfacePreview.scores
+            return
+        }
+        #endif
+
         guard !isLoading else { return }
         if !force, !items.isEmpty { return }
 

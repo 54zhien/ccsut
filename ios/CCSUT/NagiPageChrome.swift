@@ -30,6 +30,7 @@ struct NagiPageHeader: View {
     let actionAccessibilityLabel: String?
     let action: (() -> Void)?
     let secondaryAction: AnyView?
+    let leadingAction: AnyView?
 
     init(
         title: String,
@@ -38,7 +39,8 @@ struct NagiPageHeader: View {
         actionIcon: String? = nil,
         actionAccessibilityLabel: String? = nil,
         action: (() -> Void)? = nil,
-        secondaryAction: AnyView? = nil
+        secondaryAction: AnyView? = nil,
+        leadingAction: AnyView? = nil
     ) {
         self.title = title
         self.transitionProgress = transitionProgress
@@ -47,10 +49,12 @@ struct NagiPageHeader: View {
         self.actionAccessibilityLabel = actionAccessibilityLabel
         self.action = action
         self.secondaryAction = secondaryAction
+        self.leadingAction = leadingAction
     }
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
+            if let leadingAction { leadingAction }
             Text(title)
                 .font(.system(size: titleFontSize, weight: .bold))
                 .foregroundStyle(.primary)
@@ -185,11 +189,13 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
     @State private var transitionProgress: CGFloat = 0
     let title: String
     let scrollOffset: CGFloat
+    let showsBackButton: Bool
     @ViewBuilder let actions: () -> Actions
 
     func body(content: Content) -> some View {
         GeometryReader { geometry in
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .toolbar(.hidden, for: .navigationBar)
                 .scrollEdgeEffectHidden(true, for: .top)
                 .safeAreaInset(edge: .top, spacing: 0) {
@@ -198,7 +204,8 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
                         title: title,
                         transitionProgress: transitionProgress,
                         isHeaderHidden: isHeaderHidden,
-                        secondaryAction: AnyView(actions())
+                        secondaryAction: AnyView(actions()),
+                        leadingAction: showsBackButton ? AnyView(NagiBackButton()) : nil
                     )
                     .background(alignment: .top) {
                         NagiHeaderGaussianBlur(statusBarFraction: height > 0 ? geometry.safeAreaInsets.top / height : 0)
@@ -230,7 +237,7 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
 }
 
 extension View {
-    func nagiPageChrome<Actions: View>(title: String, scrollOffset: CGFloat, @ViewBuilder actions: @escaping () -> Actions) -> some View {
-        modifier(NagiPageChrome(title: title, scrollOffset: scrollOffset, actions: actions))
+    func nagiPageChrome<Actions: View>(title: String, scrollOffset: CGFloat, showsBackButton: Bool = false, @ViewBuilder actions: @escaping () -> Actions) -> some View {
+        modifier(NagiPageChrome(title: title, scrollOffset: scrollOffset, showsBackButton: showsBackButton, actions: actions))
     }
 }

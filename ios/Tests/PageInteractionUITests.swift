@@ -26,11 +26,18 @@ final class PageInteractionUITests: XCTestCase {
                              "Loading must fill the page instead of collapsing to a narrow strip")
     }
 
+    func testDeviceCornersResolveOnRoundedPhone() {
+        let app = launch("interactions")
+        let radius = app.staticTexts["device-corner-radius"]
+        XCTAssertTrue(radius.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(Double(radius.label) ?? 0, 0)
+    }
+
     func testSemesterAndWeekdaysMoveWithCourses() {
         let app = launch("interactions")
         let semester = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "2026")).firstMatch
         XCTAssertTrue(semester.waitForExistence(timeout: 5))
-        let weekday = app.staticTexts["周一"]
+        let weekday = app.staticTexts.matching(NSPredicate(format: "label == %@", "周一")).firstMatch
         let originalTermY = semester.frame.minY
         let originalDayY = weekday.frame.minY
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.82))

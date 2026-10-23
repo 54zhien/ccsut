@@ -17,6 +17,7 @@ struct ExamView: View {
 
     @State private var items: [ExamItem] = []
     @State private var isLoading = false
+    @State private var headerScrollOffset: CGFloat = 0
     @State private var errorText: String?
     @State private var loadedTerms: Set<String> = []
 
@@ -54,21 +55,10 @@ struct ExamView: View {
                 content
             }
         }
-        .toolbar(.visible, for: .navigationBar)
-        .navigationTitle("考试")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task { await load(force: true) }
-                } label: {
-                    if isLoading {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-                .disabled(isLoading)
-            }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+        .nagiPageChrome(title: "考试", scrollOffset: headerScrollOffset, showsBackButton: true) {
+            NagiRefreshButton(isLoading: isLoading) { Task { await load(force: true) } }
         }
         .refreshable { await load(force: true) }
         .task { if items.isEmpty { await load() } }
@@ -78,7 +68,7 @@ struct ExamView: View {
 
     private var content: some View {
         ScrollView {
-            LazyVStack(spacing: 14, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(spacing: 18, pinnedViews: [.sectionHeaders]) {
                 if let next = upcoming.first {
                     nextCard(next)
                 }
@@ -95,7 +85,7 @@ struct ExamView: View {
                                     }
                                 }
                             }
-                            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+                            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20))
                             .padding(.horizontal, 16)
                         } header: {
                             termHeader(term, count: list.count)
@@ -105,6 +95,7 @@ struct ExamView: View {
             }
             .padding(.vertical, 12)
         }
+        .trackVerticalPageOffset($headerScrollOffset)
     }
 
     /// 即将开始的那场（未来 60 天内最近的一场）
@@ -151,7 +142,7 @@ struct ExamView: View {
                 .foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
                 Label(timeText(exam), systemImage: "clock.fill")
                 if !exam.location.isEmpty {
                     Label(exam.location, systemImage: "mappin.and.ellipse")
@@ -169,7 +160,7 @@ struct ExamView: View {
                     .foregroundStyle(.white)
             }
         }
-        .padding(16)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             LinearGradient(
@@ -178,23 +169,24 @@ struct ExamView: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ),
-            in: .rect(cornerRadius: 18)
+            in: .rect(cornerRadius: 24)
         )
         .padding(.horizontal, 16)
     }
 
     private func termHeader(_ term: String, count: Int) -> some View {
         HStack {
-            Text(term)
+            Text(SchedulePresentation.termTitle(term))
                 .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Text("\(count) 场")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(.bar)
+        .padding(.vertical, 10)
+        .background(Color(.systemGroupedBackground))
     }
 
     private func timeText(_ exam: ExamItem) -> String {
@@ -217,6 +209,16 @@ struct ExamView: View {
     // MARK: 加载
 
     private func load(force: Bool = false) async {
+        #if DEBUG
+        if InterfacePreview.enabled {
+            isLoading = true
+            defer { isLoading = false }
+            try? await Task.sleep(for: .milliseconds(250))
+            items = [InterfacePreview.exam]
+            return
+        }
+        #endif
+
         guard !isLoading else { return }
         if !force, !items.isEmpty { return }
 

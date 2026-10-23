@@ -18,12 +18,38 @@ enum InterfacePreview {
     }
 
     #if DEBUG
+    static var electiveInit: ElectiveInit {
+        decode("""
+        {"xsxm":"预览同学","xkxnxq":"2026-2027-1"}
+        """)
+    }
+
+    static var scores: [ScoreItem] {
+        decode("""
+        [{"id":"1","kcmc":"高等数学","kcbh":"01","xf":"4","zhcj":"92","jd":4.2,"xnxq":"2026-2027-1","sfjg":"1"},
+         {"id":"2","kcmc":"大学英语","kcbh":"02","xf":"3","zhcj":"86","jd":3.6,"xnxq":"2026-2027-1","sfjg":"1"},
+         {"id":"3","kcmc":"机械设计基础","kcbh":"03","xf":"3.5","zhcj":"88","jd":3.8,"xnxq":"2025-2026-2","sfjg":"1"}]
+        """)
+    }
+
+    static var classes: [TeachingClass] {
+        decode("""
+        [{"id":"1","kcmc":"工程制图","teacher":"示例教师","xf":"3","yxrl":"28/40","sksjdd":"周四 1–2节 · 9-205","sfkxk":"1","status":"1"},
+         {"id":"2","kcmc":"大学英语","teacher":"示例教师","xf":"3","yxrl":"32/40","sksjdd":"周二 1–2节 · 6-208","sfkxk":"1","status":"0"},
+         {"id":"3","kcmc":"机械设计基础","teacher":"示例教师","xf":"3.5","yxrl":"40/40","sksjdd":"周一 3–4节 · 9-112","sfkxk":"1","status":"0"}]
+        """)
+    }
+
+    private static func decode<T: Decodable>(_ json: String) -> T {
+        try! JSONDecoder().decode(T.self, from: Data(json.utf8))
+    }
+
     static var schedule: ScheduleBundle {
         func course(_ name: String, _ teacher: String, _ room: String, _ day: Int, _ section: Int) -> ScheduleSlot {
             ScheduleSlot(course: name, teacher: teacher, room: room, weekday: day,
                          startPeriod: section * 2 - 1, endPeriod: section * 2, weeks: Array(1...16))
         }
-        var bundle = ScheduleBundle(title: "2026–2027 学年 · 第一学期", slots: [
+        var bundle = ScheduleBundle(title: "2026-2027-1", slots: [
             course("高等数学", "示例教师", "9-112", 1, 1),
             course("大学英语", "示例教师", "6-208", 2, 1),
             course("工程制图", "示例教师", "9-205", 4, 1),

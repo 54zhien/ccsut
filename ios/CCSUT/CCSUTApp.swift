@@ -11,6 +11,7 @@ import WebKit
 @main
 struct CCSUTApp: App {
     @State private var session = SessionStore()
+    @State private var deviceCornerRadius: CGFloat = 0
 
     var body: some Scene {
         WindowGroup {
@@ -18,6 +19,13 @@ struct CCSUTApp: App {
                 if InterfacePreview.enabled { MainTabs() } else { RootView() }
             }
                 .environment(session)
+                .environment(\.deviceCornerRadius, deviceCornerRadius)
+                .background {
+                    ScreenCornerReader { deviceCornerRadius = $0 }
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
                 .task {
                     guard !InterfacePreview.enabled else { return }
                     await session.bootstrap()
@@ -94,7 +102,7 @@ struct MainTabs: View {
     @State private var selection: AppTab = .schedule
 
     init() {
-        _selection = State(initialValue: InterfacePreview.page == "academic" ? .academic : .schedule)
+        _selection = State(initialValue: ["academic", "scores", "exams", "electives"].contains(InterfacePreview.page) ? .academic : .schedule)
     }
 
     var body: some View {
@@ -114,6 +122,7 @@ struct MainTabs: View {
 // MARK: - 账号入口与面板
 
 struct AccountButton: View {
+    @Environment(\.deviceCornerRadius) private var deviceCornerRadius
     @Environment(SessionStore.self) private var session
     @State private var isPresented = false
 
@@ -131,7 +140,7 @@ struct AccountButton: View {
             ProfileView()
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
-                .presentationCornerRadius(28)
+                .presentationCornerRadius(deviceCornerRadius)
         }
         .onAppear {
             if InterfacePreview.page == "account" { isPresented = true }

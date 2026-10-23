@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ScheduleView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(\.deviceCornerRadius) private var deviceCornerRadius
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -24,37 +25,67 @@ struct ScheduleView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if bundle?.isEmpty == false { weekBar.padding(.top, 8).padding(.bottom, 12) }
-                if isLoading && bundle == nil {
-                    Spacer()
-                    ProgressView("加载课表…")
-                    Spacer()
-                } else if let errorText, bundle == nil {
-                    ContentUnavailableView {
-                        Label("加载失败", systemImage: "wifi.exclamationmark")
-                    } description: { Text(errorText) } actions: {
-                        Button("重试") { Task { await load(force: true) } }
+            GeometryReader { viewport in
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical) {
+                        if let bundle, !bundle.isEmpty {
+                            VStack(spacing: 16) {
+                                weekBar.id("page-top")
+                                VStack(spacing: 8) {
+                                    termSummary
+                                    timetable(viewport: viewport.size)
+                                }
+                                .padding(.top, 12)
+                                .padding(.bottom, 12)
+                                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: deviceCornerRadius))
+                                .clipShape(.rect(cornerRadius: deviceCornerRadius))
+                                .padding(.horizontal, 12)
+                                .id("timetable-panel")
+                                Color.clear.frame(height: 1).id("page-end")
+                            }
+                            .padding(.top, 8)
+                            .padding(.bottom, 20)
+                            .frame(maxWidth: .infinity)
+                        } else {
+                            Group {
+                                if isLoading {
+                                    ProgressView("加载课表…")
+                                } else if let errorText {
+                                    ContentUnavailableView {
+                                        Label("加载失败", systemImage: "wifi.exclamationmark")
+                                    } description: { Text(errorText) } actions: {
+                                        Button("重试") { Task { await load(force: true) } }
+                                    }
+                                } else {
+                                    ContentUnavailableView {
+                                        Label("暂无课表", systemImage: "calendar.badge.exclamationmark")
+                                    } description: { Text("当前学期还没有排课数据。") } actions: {
+                                        Button("重新加载") { Task { await load(force: true) } }
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: viewport.size.height)
+                        }
                     }
-                } else if let bundle, !bundle.isEmpty {
-                    VStack(spacing: 8) {
-                        termSummary
-                        timetable
-                    }
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
-                    .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 24).strokeBorder(Color.primary.opacity(0.04), lineWidth: 0.5)
-                            .allowsHitTesting(false)
-                    }
-                    .clipShape(.rect(cornerRadius: 24))
-                    .padding(.horizontal, 12)
-                } else {
-                    ContentUnavailableView {
-                        Label("暂无课表", systemImage: "calendar.badge.exclamationmark")
-                    } description: { Text("当前学期还没有排课数据。") } actions: {
-                        Button("重新加载") { Task { await load(force: true) } }.buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("schedule-scroll")
+                    .scrollIndicators(.hidden)
+                    .scrollBounceBehavior(.always, axes: .vertical)
+                    .refreshable { await load(force: true) }
+                    .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                        max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
+                    } action: { _, offset in headerScrollOffset = offset }
+                    .task {
+                        #if DEBUG
+                        if InterfacePreview.page == "bottom" || InterfacePreview.page == "header-hidden" {
+                            try? await Task.sleep(for: .milliseconds(300))
+                            proxy.scrollTo("page-end", anchor: .bottom)
+                        } else if InterfacePreview.page == "header-motion" {
+                            try? await Task.sleep(for: .seconds(2))
+                            withAnimation(.easeInOut(duration: 0.5)) { proxy.scrollTo("page-end", anchor: .bottom) }
+                            try? await Task.sleep(for: .seconds(2))
+                            withAnimation(.easeInOut(duration: 0.5)) { proxy.scrollTo("page-top", anchor: .top) }
+                        }
+                        #endif
                     }
                 }
             }
@@ -63,35 +94,25 @@ struct ScheduleView: View {
             .background(Color(.systemGroupedBackground))
             .nagiPageChrome(title: "课表", scrollOffset: headerScrollOffset) {
                 HStack(spacing: 8) {
-                    Button { Task { await load(force: true) } } label: {
-                        Group {
-                            if isLoading { ProgressView().controlSize(.small) }
-                            else { Image(systemName: "arrow.clockwise").font(.system(size: 20, weight: .medium)) }
-                        }
-                        .frame(width: 48, height: 48)
-                        .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: Circle())
-                    .accessibilityLabel("刷新课表")
-                    .disabled(isLoading)
+                    NagiRefreshButton(isLoading: isLoading) { Task { await load(force: true) } }
                     AccountButton()
                 }
             }
-            .refreshable { await load(force: true) }
             .task { if bundle == nil { await load() } }
             .overlay(alignment: .bottomTrailing) {
                 if InterfacePreview.page == "interactions" {
-                    Text("\(previewRefreshCount)")
-                        .accessibilityIdentifier("refresh-count")
-                        .padding(.bottom, 100)
+                    VStack {
+                        Text("\(previewRefreshCount)").accessibilityIdentifier("refresh-count")
+                        Text("\(deviceCornerRadius)").accessibilityIdentifier("device-corner-radius")
+                    }
+                    .padding(.bottom, 100)
                 }
             }
             .sheet(item: $detail) { slot in
                 ScheduleDetailSheet(slot: slot)
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
-                    .presentationCornerRadius(26)
+                    .presentationCornerRadius(deviceCornerRadius)
             }
             .sheet(item: $choosing, onDismiss: {
                 detail = pendingDetail
@@ -124,13 +145,14 @@ struct ScheduleView: View {
                 }
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+                .presentationCornerRadius(deviceCornerRadius)
             }
         }
     }
 
     private var termSummary: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(bundle?.title ?? "")
+            Text(SchedulePresentation.termTitle(bundle?.title ?? ""))
                 .font(.footnote).foregroundStyle(.secondary)
                 .lineLimit(1).minimumScaleFactor(0.85)
             Spacer(minLength: 4)
@@ -181,6 +203,7 @@ struct ScheduleView: View {
                 }
                 .scrollIndicators(.hidden)
                 .scrollTargetBehavior(.viewAligned)
+                .environment(\.refresh, nil)
                 .onChange(of: selectedWeek) { _, week in
                     withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) { proxy.scrollTo(week, anchor: .center) }
                 }
@@ -191,59 +214,31 @@ struct ScheduleView: View {
 
     private var cells: [ScheduleCell] { SchedulePresentation.cells(bundle?.slots ?? [], week: selectedWeek) }
 
-    private var timetable: some View {
-        GeometryReader { geo in
-            let minColumn: CGFloat = dynamicTypeSize.isAccessibilitySize ? max(94, courseFont * 4) : 42
-            let colWidth = max(minColumn, (geo.size.width - railWidth) / 7)
-            let rowHeight = dynamicTypeSize.isAccessibilitySize ? max(180, courseFont * 10) : max(116, min(148, (geo.size.height - headerHeight - 16) / 4))
-            let width = railWidth + colWidth * 7
-            ScrollView(.horizontal) {
-                VStack(spacing: 0) {
-                    weekdayHeader(colWidth: colWidth)
-                    ScrollViewReader { verticalProxy in
-                      ScrollView(.vertical) {
-                        VStack(spacing: 0) {
-                            ForEach(1...4, id: \.self) { section in
-                                HStack(alignment: .top, spacing: 0) {
-                                    periodLabel(section, height: rowHeight)
-                                    ForEach(1...7, id: \.self) { day in
-                                        timetableCell(day: day, section: section, width: colWidth, height: rowHeight)
-                                    }
-                                }
-                                .frame(height: rowHeight)
-                                .id(section)
-                            }
+    private func timetable(viewport: CGSize) -> some View {
+        let minColumn: CGFloat = dynamicTypeSize.isAccessibilitySize ? max(94, courseFont * 4) : 42
+        let width = max(viewport.width - 32, railWidth + 7 * minColumn)
+        let colWidth = (width - railWidth) / 7
+        let rowHeight = dynamicTypeSize.isAccessibilitySize ? max(180, courseFont * 10) : max(116, min(136, (viewport.height - 180) / 4))
+        return ScrollView(.horizontal) {
+            VStack(spacing: 0) {
+                weekdayHeader(colWidth: colWidth)
+                ForEach(1...4, id: \.self) { section in
+                    HStack(alignment: .top, spacing: 0) {
+                        periodLabel(section, height: rowHeight)
+                        ForEach(1...7, id: \.self) { day in
+                            timetableCell(day: day, section: section, width: colWidth, height: rowHeight)
                         }
-                        .padding(.bottom, 88)
-                      }
-                      .scrollIndicators(.hidden)
-                      .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                          max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
-                      } action: { _, offset in
-                          headerScrollOffset = offset
-                      }
-                      .onAppear {
-                          if InterfacePreview.page == "bottom" || InterfacePreview.page == "header-hidden" {
-                              verticalProxy.scrollTo(4, anchor: .top)
-                          }
-                      }
-                      .task {
-                          #if DEBUG
-                          if InterfacePreview.page == "header-motion" {
-                              try? await Task.sleep(for: .seconds(2))
-                              withAnimation(.easeInOut(duration: 0.5)) { verticalProxy.scrollTo(4, anchor: .top) }
-                              try? await Task.sleep(for: .seconds(2))
-                              withAnimation(.easeInOut(duration: 0.5)) { verticalProxy.scrollTo(1, anchor: .top) }
-                          }
-                          #endif
-                      }
                     }
+                    .frame(height: rowHeight)
                 }
-                .frame(width: width, height: geo.size.height)
             }
-            .scrollIndicators(.hidden)
+            .frame(width: width)
         }
+        .frame(height: headerHeight + rowHeight * 4)
         .padding(.horizontal, 4)
+        .scrollIndicators(.hidden)
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .environment(\.refresh, nil)
     }
 
     private func weekdayHeader(colWidth: CGFloat) -> some View {
