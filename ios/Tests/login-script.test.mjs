@@ -8,8 +8,8 @@ const source = readFileSync(new URL('../CCSUT/LoginView.swift', import.meta.url)
 const script = source.match(/private static let script = """([\s\S]*?)"""/)[1]
   .replace(/\\\\/g, '\\').replace(/\\"/g, '"');
 
-async function action(mode, reply) {
-  let alerts = [];
+async function action(mode, reply, initialReply = null) {
+  let alerts = initialReply ? [{ textContent: initialReply, offsetWidth: 100, offsetHeight: 20 }] : [];
   class Input {
     constructor(placeholder) { this.placeholder = placeholder; this.type = 'text'; this.offsetWidth = 100; }
     set value(v) { this.text = v; }
@@ -52,4 +52,7 @@ test('invalid login code is returned to the native hint', async () => {
 });
 test('login without navigation or response terminates', async () => {
   assert.equal(await action('submit', null), 'timeout');
+});
+test('repeated identical login error in a new alert is still reported', async () => {
+  assert.match(await action('submit', '验证码错误', '验证码错误'), /验证码错误/);
 });

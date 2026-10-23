@@ -95,21 +95,68 @@ struct StoredCookie: Codable, Sendable {
 
 // MARK: - WKHTTPCookieStore async 包装
 
-extension WKHTTPCookieStore {
-    func allCookies() async -> [HTTPCookie] {
-        await withCheckedContinuation { c in getAllCookies { c.resume(returning: $0) } }
+/// WebKit 回调丢失或任务取消时也要结束等待；迟到的回调只能完成一次。
+final class CookieCallback<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<Value, Error>?
+    private var continuation: CheckedContinuation<Value, Error>?
+
+    private func install(_ continuation: CheckedContinuation<Value, Error>) {
+        lock.lock()
+        if let result {
+            lock.unlock()
+            continuation.resume(with: result)
+        } else {
+            self.continuation = continuation
+            lock.unlock()
+        }
     }
 
-    func set(_ cookie: HTTPCookie) async {
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            setCookie(cookie) { c.resume() }
+    private func finish(_ result: Result<Value, Error>) {
+        lock.lock()
+        guard self.result == nil else { lock.unlock(); return }
+        self.result = result
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+
+    static func wait(timeout: Duration = .seconds(5),
+                     start: (@escaping (Value) -> Void) -> Void) async throws -> Value {
+        let callback = CookieCallback<Value>()
+        let deadline = Task {
+            do { try await Task.sleep(for: timeout) } catch { return }
+            callback.finish(.failure(URLError(.timedOut)))
+        }
+        defer { deadline.cancel() }
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                callback.install(continuation)
+                start { callback.finish(.success($0)) }
+            }
+        } onCancel: {
+            callback.finish(.failure(CancellationError()))
+        }
+    }
+}
+
+extension WKHTTPCookieStore {
+    func allCookies() async throws -> [HTTPCookie] {
+        try await CookieCallback.wait { completion in getAllCookies(completion) }
+    }
+
+    func set(_ cookie: HTTPCookie) async throws {
+        let _: Void = try await CookieCallback.wait { completion in
+            setCookie(cookie) { completion(()) }
         }
     }
 
     /// deleteCookie 在新 SDK 里已改名为 delete，这里换个名字避免递归
-    func remove(_ cookie: HTTPCookie) async {
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            delete(cookie) { c.resume() }
+    func remove(_ cookie: HTTPCookie) async throws {
+        let _: Void = try await CookieCallback.wait { completion in
+            delete(cookie) { completion(()) }
         }
     }
 }
@@ -173,6 +220,7 @@ final class SessionStore {
     private let api: APIClient
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var adoptionTask: Task<Bool, Never>?
+    @ObservationIgnored private var isLoggingOut = false
 
     init(api: APIClient = .shared) { self.api = api }
 
@@ -198,16 +246,22 @@ final class SessionStore {
             return
         }
 
-        if await probe() {
+        do {
+            try await verifySession()
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             phase = .loggedIn
             await loadProfile()
             await refreshIfNeeded()
-        } else if CookieJar.generation == generation, !Task.isCancelled,
-                  allCookies().contains(where: { $0.name == "TGC" }) {
-            await refresh()
-        } else {
-            phase = .loggedOut
+        } catch {
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            lastError = error.localizedDescription
+            // 断网和 5xx 不会因重登改善；只在明确认证失效时尝试 CAS。
+            if let e = error as? APIError, case .notLoggedIn = e,
+               allCookies().contains(where: { $0.name == "TGC" }) {
+                await refresh()
+            } else {
+                phase = .loggedOut
+            }
         }
     }
 
@@ -227,11 +281,14 @@ final class SessionStore {
 
     /// 用身份相关的 JSON 验证会话，不能把任意一个 200 页面当成成功。
     func probe() async -> Bool {
+        let generation = CookieJar.generation
         do {
             try await verifySession()
+            guard CookieJar.generation == generation, !Task.isCancelled else { return false }
             lastError = nil
             return true
         } catch {
+            guard CookieJar.generation == generation, !Task.isCancelled else { return false }
             lastError = error.localizedDescription
             return false
         }
@@ -246,6 +303,7 @@ final class SessionStore {
 
     /// 带着 TGC 访问 caslogin，CAS 会自动发新 ticket 并回到教务系统
     func refresh() async {
+        guard !isLoggingOut, phase != .loggedOut else { return }
         if let refreshTask { await refreshTask.value; return }
         let task = Task { await performRefresh() }
         refreshTask = task
@@ -254,9 +312,11 @@ final class SessionStore {
     }
 
     private func performRefresh() async {
+        guard !Task.isCancelled, !isLoggingOut else { return }
         let previous = phase
         let generation = CookieJar.generation
-        phase = .refreshing
+        // 启动验证结束前不展示 MainTabs，避免页面拿过期 Cookie 抢先加载。
+        if previous != .checking { phase = .refreshing }
         lastError = nil
 
         do {
@@ -296,6 +356,7 @@ final class SessionStore {
     /// didFinish 回调的瞬间去读经常是空的，这里轮询等最多 2 秒。
     @discardableResult
     func adoptCookies() async -> Bool {
+        guard !isLoggingOut else { return false }
         if let adoptionTask { return await adoptionTask.value }
         let task = Task { await performAdoption() }
         adoptionTask = task
@@ -304,7 +365,10 @@ final class SessionStore {
         return result
     }
 
+    func cancelLogin() { adoptionTask?.cancel() }
+
     private func performAdoption() async -> Bool {
+        guard !Task.isCancelled, !isLoggingOut else { return false }
         var cookies: [HTTPCookie] = []
         let initialGeneration = CookieJar.generation
 
@@ -313,8 +377,13 @@ final class SessionStore {
         // 那时还停在登录页，必须等真正代表登录态的 Cookie 出现。
         var authenticated = false
         for attempt in 0..<24 {
-            cookies = await WebStore.dataStore.httpCookieStore.allCookies()
-                .filter { CookieJar.isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
+            do {
+                cookies = try await WebStore.dataStore.httpCookieStore.allCookies()
+                    .filter { CookieJar.isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
+            } catch {
+                if !Task.isCancelled { lastError = "读取登录凭证失败，请重试" }
+                return false
+            }
             guard CookieJar.generation == initialGeneration, !Task.isCancelled else { return false }
 
             let keys = Set(cookies.map(\.name))
@@ -338,19 +407,22 @@ final class SessionStore {
             return false
         }
 
-        // 验证过程中 Set-Cookie 可能轮换，后面不能再用旧 WebKit 快照覆盖。
-        CookieJar.shared = cookies
+        // 验证前仅替换内存；失败恢复旧凭证，成功再提交（含验证中轮换的值）。
+        let previous = CookieJar.shared
+        CookieJar.replace(cookies, persistChanges: false)
         let generation = CookieJar.generation
 
-        // 真正验证一次：能不能访问 /admin/
+        // 真正验证一次：能不能取得当前身份的业务数据。
         guard await probe() else {
+            if CookieJar.generation == generation { CookieJar.shared = previous }
             return false
         }
         guard CookieJar.generation == generation, !Task.isCancelled else { return false }
+        CookieJar.commit(generation: generation)
         phase = .loggedIn
         lastError = nil
-        await loadProfile()
-        return true
+        Task { await loadProfile() }
+        return CookieJar.generation == generation && !Task.isCancelled
     }
 
     /// 顺手把姓名学号读出来（/admin/xsd/xk/listV2 里有）
@@ -391,14 +463,20 @@ final class SessionStore {
     }
 
     private func injectToWebKit(_ cookies: [HTTPCookie]) async {
+        let generation = CookieJar.generation
         for c in cookies {
-            await WebStore.dataStore.httpCookieStore.set(c)
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            do { try await WebStore.dataStore.httpCookieStore.set(c) }
+            catch { return }
         }
     }
 
     // MARK: 退出
 
     func logout() async {
+        guard !isLoggingOut else { return }
+        isLoggingOut = true
+        defer { isLoggingOut = false }
         refreshTask?.cancel()
         adoptionTask?.cancel()
         CookieJar.shared = []
@@ -409,17 +487,28 @@ final class SessionStore {
         studentId = nil
         lastError = nil
         lastCookieCount = 0
-        phase = .loggedOut
+        // 等待所有可能写 WebKit 的任务结束，再做最终清理。
+        // 登录页也在清理完成后才出现，避免它接管尚未删除的旧 Cookie。
+        await refreshTask?.value
+        _ = await adoptionTask?.value
 
         for c in HTTPCookieStorage.shared.cookies ?? [] where CookieJar.isSchoolCookie(c) {
             HTTPCookieStorage.shared.deleteCookie(c)
         }
 
         let store = WebStore.dataStore.httpCookieStore
-        for c in await store.allCookies() where CookieJar.isSchoolCookie(c) {
-            await store.remove(c)
+        // 退出后新建的登录页使用全新的内存 Cookie Store。旧回调即使迟到，
+        // 也只能写旧实例；Keychain 是跨启动保存凭证的唯一位置。
+        WebStore.dataStore = .nonPersistent()
+        do {
+            for c in try await store.allCookies() where CookieJar.isSchoolCookie(c) {
+                try await store.remove(c)
+            }
+        } catch {
+            // 新登录已隔离到新 Store，旧实例回收后凭证一并丢弃。
         }
 
+        CookieJar.shared = []
         phase = .loggedOut
     }
 }
@@ -458,6 +547,7 @@ enum CookieJar {
     private static let lock = NSRecursiveLock()
     private nonisolated(unsafe) static var cookies: [HTTPCookie] = []
     private nonisolated(unsafe) static var revision: UInt64 = 0
+    private nonisolated(unsafe) static var shouldPersist = true
 
     /// 只允许这里维护原生 Cookie；替换账号或退出时递增代数，丢弃迟到响应。
     static var shared: [HTTPCookie] {
@@ -466,11 +556,23 @@ enum CookieJar {
             return cookies.filter { isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
         }
         set {
-            lock.lock(); defer { lock.unlock() }
-            revision &+= 1
-            cookies = newValue.filter { isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
-            persist()
+            replace(newValue)
         }
+    }
+
+    static func replace(_ value: [HTTPCookie], persistChanges: Bool = true) {
+        lock.lock(); defer { lock.unlock() }
+        revision &+= 1
+        shouldPersist = persistChanges
+        cookies = value.filter { isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
+        if shouldPersist { persist() }
+    }
+
+    static func commit(generation: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        guard generation == revision else { return }
+        shouldPersist = true
+        persist()
     }
 
     static var generation: UInt64 {
@@ -527,7 +629,7 @@ enum CookieJar {
             if (cookie.expiresDate ?? .distantFuture) > Date() { cookies.append(cookie) }
         }
         cookies.removeAll { ($0.expiresDate ?? .distantFuture) <= Date() }
-        if !incoming.isEmpty { persist() }
+        if !incoming.isEmpty, shouldPersist { persist() }
     }
 
     /// 在锁内落盘，退出和响应轮换不会交错写回旧凭证。
@@ -539,5 +641,5 @@ enum CookieJar {
 }
 
 enum WebStore {
-    static let dataStore: WKWebsiteDataStore = .default()
+    nonisolated(unsafe) static var dataStore: WKWebsiteDataStore = .nonPersistent()
 }

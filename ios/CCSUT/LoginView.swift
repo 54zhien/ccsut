@@ -39,6 +39,7 @@ struct LoginView: View {
     @State private var loginTimeout: Task<Void, Never>?
     @State private var operationID = UUID()
     @State private var isFinishing = false
+    @State private var pendingFinish = false
 
     @FocusState private var focused: Field?
     private enum Field { case account, code }
@@ -425,21 +426,24 @@ struct LoginView: View {
     }
 
     private func finish() async {
-        guard !isFinishing, busy != .done else { return }
+        guard busy != .done else { return }
+        if isFinishing { pendingFinish = true; return }
         isFinishing = true
-        defer { isFinishing = false }
+        defer {
+            isFinishing = false
+            if pendingFinish, busy != .done {
+                pendingFinish = false
+                Task { await finish() }
+            }
+        }
         let id = operationID
-        // 跳转瞬间 Cookie 可能还在写，重试几次
-        for attempt in 0..<3 {
-            if await session.adoptCookies() {
-                loginTimeout?.cancel()
-                busy = .done
-                return
-            }
-            guard operationID == id, !Task.isCancelled else { return }
-            if attempt < 2 {
-                try? await Task.sleep(for: .milliseconds(700))
-            }
+        // 会话层已等待 Cookie 落地并验证一次，网络失败不在这里重复整条链。
+        let adopted = await session.adoptCookies()
+        guard operationID == id, !Task.isCancelled else { return }
+        if adopted {
+            loginTimeout?.cancel()
+            busy = .done
+            return
         }
         loginTimeout?.cancel()
         busy = .idle
@@ -454,6 +458,7 @@ struct LoginView: View {
         loginTimeout = Task {
             do { try await Task.sleep(for: .seconds(45)) } catch { return }
             guard operationID == id, busy != .done else { return }
+            session.cancelLogin()
             operationID = UUID()
             busy = .idle
             hint = "认证请求超时，请重试或使用网页登录"
@@ -486,7 +491,11 @@ struct LoginView: View {
         const sleep = ms => new Promise(r => setTimeout(r, ms));
         const messages = () => [...document.querySelectorAll(
           '.ant-message-notice-content, .ant-alert-message, .ant-form-explain, .ant-form-item-explain-error, [role="alert"], .ant-notification-notice-message'
-        )].filter(el => el.offsetWidth > 0).map(el => (el.textContent || '').trim()).filter(Boolean);
+        )].filter(el => el.offsetWidth > 0 && (el.textContent || '').trim());
+        const snapshot = () => new Map(messages().map(el => [el, (el.textContent || '').trim()]));
+        const freshMessages = previous => messages()
+          .filter(el => previous.get(el) !== (el.textContent || '').trim())
+          .map(el => (el.textContent || '').trim());
 
         // 1. 等页签
         let tabs = [];
@@ -537,11 +546,11 @@ struct LoginView: View {
           const sendBtn = [...document.querySelectorAll('button')]
             .find(b => (b.textContent || '').includes('获取验证码'));
           if (!sendBtn) return 'no-button';
-          const previous = new Set(messages());
+          const previous = snapshot();
           sendBtn.click();
           for (let i = 0; i < 60; i++) {
             await sleep(200);
-            const fresh = messages().filter(m => !previous.has(m));
+            const fresh = freshMessages(previous);
             const error = fresh.find(m => /失败|错误|无效|频繁|不存在|未绑定|限制|稍后|不正确|过期/.test(m));
             if (error) return 'error:' + error;
             if (/\\d+\\s*(秒|s)|重新获取|重新发送/.test(sendBtn.textContent || '') ||
@@ -557,11 +566,11 @@ struct LoginView: View {
           const loginBtn = [...document.querySelectorAll('button')]
             .find(b => (b.textContent || '').trim() === '登录');
           if (!loginBtn) return 'no-button';
-          const previous = new Set(messages());
+          const previous = snapshot();
           loginBtn.click();
           for (let i = 0; i < 60; i++) {
             await sleep(200);
-            const error = messages().find(m => !previous.has(m));
+            const error = freshMessages(previous)[0];
             if (error) return 'error:' + error;
           }
           return 'timeout';

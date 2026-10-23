@@ -100,8 +100,8 @@ struct SessionRegressionTests {
 
         CookieJar.shared = [cookie("jw_uf", "previous")]
         let webCookies = WebStore.dataStore.httpCookieStore
-        for c in await webCookies.allCookies() { await webCookies.remove(c) }
-        await webCookies.set(cookie("jw_uf", "unverified"))
+        for c in (try? await webCookies.allCookies()) ?? [] { try? await webCookies.remove(c) }
+        try? await webCookies.set(cookie("jw_uf", "unverified"))
         SchoolProtocol.response = { (503, $0.url!, [:], "unavailable") }
         let failedAdoption = SessionStore(api: api)
         check(!(await failedAdoption.adoptCookies()), "failed business probe rejects WebKit adoption")
@@ -112,11 +112,13 @@ struct SessionRegressionTests {
               "unverified WebKit credentials do not overwrite Keychain")
 
         CookieJar.shared = [cookie("jw_uf", "old"), cookie("TGC", "fixture-tgc", domain: "auth.ccsut.cn")]
-        SchoolProtocol.response = { _ in throw URLError(.timedOut) }
+        var offlineRequests = 0
+        SchoolProtocol.response = { _ in offlineRequests += 1; throw URLError(.timedOut) }
         let bootstrap = SessionStore(api: api)
         await bootstrap.bootstrap()
         check(bootstrap.phase == .loggedOut, "actual cold bootstrap exits after probe and renewal timeouts")
         check(Keychain.load("ccsut.cookies.v2") != nil, "transient bootstrap failure retains credentials for retry")
+        check(offlineRequests == 1, "offline bootstrap does not retry a doomed CAS request")
 
         CookieJar.shared = [cookie("jw_uf", "old"), cookie("TGC", "fixture-tgc", domain: "auth.ccsut.cn")]
         var casStarts = 0
@@ -180,6 +182,21 @@ struct SessionRegressionTests {
         await loggedOut.logout()
         check(CookieJar.shared.isEmpty, "logout clears the authoritative Cookie jar")
         check(Keychain.load("ccsut.cookies.v2") == nil, "logout removes persisted credentials")
+
+        do {
+            let _: Int = try await CookieCallback.wait(timeout: .milliseconds(10)) { _ in }
+            check(false, "missing WebKit callback times out")
+        } catch { check((error as? URLError)?.code == .timedOut, "missing WebKit callback times out") }
+        let waiting = Task {
+            let _: Int = try await CookieCallback.wait { _ in }
+        }
+        waiting.cancel()
+        do { try await waiting.value; check(false, "cancelled WebKit wait terminates") }
+        catch { check(error is CancellationError, "cancelled WebKit wait terminates") }
+        do {
+            let first: Int = try await CookieCallback.wait { complete in complete(7); complete(9) }
+            check(first == 7, "duplicate WebKit callback completes exactly once")
+        } catch { check(false, "duplicate WebKit callback completes exactly once") }
 
         print("Session regression failures: \(failures)")
         exit(failures == 0 ? 0 : 1)

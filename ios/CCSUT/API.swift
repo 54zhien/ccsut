@@ -99,6 +99,7 @@ final class APIClient {
         for _ in 0..<8 {
             try Task.checkCancellation()
             guard CookieJar.generation == generation else { throw CancellationError() }
+            guard !CookieJar.shared.isEmpty else { throw APIError.notLoggedIn }
             guard let url = req.url, url.scheme == "https",
                   let host = url.host, host == "ccsut.cn" || host.hasSuffix(".ccsut.cn")
             else { throw APIError.notLoggedIn }
