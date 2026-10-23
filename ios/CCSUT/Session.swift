@@ -28,12 +28,14 @@ enum Keychain {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
         ]
-        SecItemDelete(base as CFDictionary)
-
-        var attrs = base
-        attrs[kSecValueData as String] = data
-        attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(attrs as CFDictionary, nil)
+        let value = [kSecValueData as String: data]
+        let status = SecItemUpdate(base as CFDictionary, value as CFDictionary)
+        if status == errSecItemNotFound {
+            var attrs = base
+            attrs[kSecValueData as String] = data
+            attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            SecItemAdd(attrs as CFDictionary, nil)
+        }
     }
 
     static func load(_ key: String) -> Data? {
@@ -86,27 +88,75 @@ struct StoredCookie: Codable, Sendable {
         ]
         if let expires { p[.expires] = expires }
         if isSecure { p[.secure] = "TRUE" }
+        if isHTTPOnly { p[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
         return HTTPCookie(properties: p)
     }
 }
 
 // MARK: - WKHTTPCookieStore async 包装
 
-extension WKHTTPCookieStore {
-    func allCookies() async -> [HTTPCookie] {
-        await withCheckedContinuation { c in getAllCookies { c.resume(returning: $0) } }
+/// WebKit 回调丢失或任务取消时也要结束等待；迟到的回调只能完成一次。
+final class CookieCallback<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<Value, Error>?
+    private var continuation: CheckedContinuation<Value, Error>?
+
+    private func install(_ continuation: CheckedContinuation<Value, Error>) {
+        lock.lock()
+        if let result {
+            lock.unlock()
+            continuation.resume(with: result)
+        } else {
+            self.continuation = continuation
+            lock.unlock()
+        }
     }
 
-    func set(_ cookie: HTTPCookie) async {
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            setCookie(cookie) { c.resume() }
+    private func finish(_ result: Result<Value, Error>) {
+        lock.lock()
+        guard self.result == nil else { lock.unlock(); return }
+        self.result = result
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+
+    static func wait(timeout: Duration = .seconds(5),
+                     start: (@escaping @Sendable (Value) -> Void) -> Void) async throws -> Value {
+        let callback = CookieCallback<Value>()
+        let deadline = Task {
+            do { try await Task.sleep(for: timeout) } catch { return }
+            callback.finish(.failure(URLError(.timedOut)))
+        }
+        defer { deadline.cancel() }
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                callback.install(continuation)
+                start { callback.finish(.success($0)) }
+            }
+        } onCancel: {
+            callback.finish(.failure(CancellationError()))
+        }
+    }
+}
+
+extension WKHTTPCookieStore {
+    func cookieSnapshot() async throws -> [HTTPCookie] {
+        try await CookieCallback.wait { completion in getAllCookies(completion) }
+    }
+
+    func set(_ cookie: HTTPCookie) async throws {
+        let _: Void = try await CookieCallback.wait { completion in
+            setCookie(cookie) { completion(()) }
         }
     }
 
     /// deleteCookie 在新 SDK 里已改名为 delete，这里换个名字避免递归
-    func remove(_ cookie: HTTPCookie) async {
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            delete(cookie) { c.resume() }
+    func remove(_ cookie: HTTPCookie) async throws {
+        let _: Void = try await CookieCallback.wait { completion in
+            delete(cookie) { completion(()) }
         }
     }
 }
@@ -167,19 +217,12 @@ final class SessionStore {
         return c.url!
     }
 
-    /// Cookie 数据仓库统一从 WebStore 取（见文件底部）
+    private let api: APIClient
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var adoptionTask: Task<Bool, Never>?
+    @ObservationIgnored private var isLoggingOut = false
 
-    /// 专用 session：关闭自动 Cookie 管理，Cookie 全部由 CookieJar 手写
-    private static let rawSession: URLSession = {
-        let cfg = URLSessionConfiguration.default
-        cfg.httpShouldSetCookies = false
-        cfg.httpCookieStorage = nil
-        cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
-        cfg.timeoutIntervalForRequest = 20
-        return URLSession(configuration: cfg,
-                          delegate: NoRedirect(),
-                          delegateQueue: nil)
-    }()
+    init(api: APIClient = .shared) { self.api = api }
 
     private let cookieKey = "ccsut.cookies.v2"
     private let nameKey = "ccsut.student.name"
@@ -190,25 +233,35 @@ final class SessionStore {
     func bootstrap() async {
         phase = .checking
         lastError = nil
+        defer {
+            // 网络错误、取消和续期失败都必须离开启动页；保留凭证供用户重试。
+            if phase == .checking || phase == .refreshing { phase = .loggedOut }
+        }
 
         let restored = restoreFromKeychain()
-        if !restored.isEmpty { CookieJar.shared = restored }
+        CookieJar.shared = restored
+        let generation = CookieJar.generation
         guard !restored.isEmpty else {
             phase = .loggedOut
             return
         }
 
-        await injectToWebKit(restored)
-        injectToURLSession(restored)
-
-        if await probe() {
+        do {
+            try await verifySession()
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
             phase = .loggedIn
             await loadProfile()
             await refreshIfNeeded()
-        } else if restored.contains(where: { $0.name == "TGC" }) {
-            await refresh()
-        } else {
-            phase = .loggedOut
+        } catch {
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            lastError = error.localizedDescription
+            // 断网和 5xx 不会因重登改善；只在明确认证失效时尝试 CAS。
+            if let e = error as? APIError, case .notLoggedIn = e,
+               allCookies().contains(where: { $0.name == "TGC" }) {
+                await refresh()
+            } else {
+                phase = .loggedOut
+            }
         }
     }
 
@@ -219,80 +272,73 @@ final class SessionStore {
     /// 为什么要手动跟：续期要从 tls.ccsut.cn 跳到 auth.ccsut.cn 再跳回来，
     /// 而 TGC 属于 auth.ccsut.cn 域。关闭 URLSession 自动 Cookie 后，
     /// 自动重定向不会按新 host 补 Cookie，TGC 就永远发不出去。
-    private func rawGet(_ url: URL, timeout: TimeInterval = 20, maxHops: Int = 8) async throws -> HTTPURLResponse {
-        var current = url
-        var last: HTTPURLResponse?
-
-        for _ in 0..<maxHops {
-            var req = URLRequest(url: current)
-            req.timeoutInterval = timeout
-            req.setValue(UserAgent.mobile, forHTTPHeaderField: "User-Agent")
-            req.setValue("https://tls.ccsut.cn/frontend/views/student/xkPage/index.html",
-                         forHTTPHeaderField: "Referer")
-
-            // 按当前这一跳的 host 取 Cookie —— TGC 在 auth.ccsut.cn，jw_uf 在 tls.ccsut.cn
-            if let host = current.host, let cookie = CookieJar.header(for: host) {
-                req.setValue(cookie, forHTTPHeaderField: "Cookie")
-            }
-
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1) }
-            last = http
-
-            // 收 Set-Cookie
-            if let fields = http.allHeaderFields as? [String: String] {
-                let fresh = HTTPCookie.cookies(withResponseHeaderFields: fields, for: current)
-                if !fresh.isEmpty { CookieJar.upsert(fresh) }
-            }
-
-            // 3xx → 下一跳
-            if (300..<400).contains(http.statusCode),
-               let loc = http.value(forHTTPHeaderField: "Location"),
-               let next = URL(string: loc, relativeTo: current) {
-                current = next
-                continue
-            }
-            return http
-        }
-        guard let last else { throw APIError.http(-1) }
-        return last
+    private func rawGet(_ url: URL, timeout: TimeInterval = 20) async throws -> HTTPURLResponse {
+        var req = URLRequest(url: url)
+        req.setValue(UserAgent.mobile, forHTTPHeaderField: "User-Agent")
+        let (_, http) = try await api.response(for: req, timeout: timeout, allowAuthenticationRedirects: true)
+        return http
     }
 
-    /// GET /admin/ —— 被 303 到 /admin/login 就说明会话没了
+    /// 用身份相关的 JSON 验证会话，不能把任意一个 200 页面当成成功。
     func probe() async -> Bool {
+        let generation = CookieJar.generation
         do {
-            let http = try await rawGet(Self.jwBase.appending(path: "admin/"), timeout: 15)
-            let final = http.url?.absoluteString ?? ""
-            let ok = !final.contains("/admin/login") && !final.contains("loginFailPage")
-            if ok { persistCurrentCookies() }
-            return ok
+            try await verifySession()
+            guard CookieJar.generation == generation, !Task.isCancelled else { return false }
+            lastError = nil
+            return true
         } catch {
+            guard CookieJar.generation == generation, !Task.isCancelled else { return false }
             lastError = error.localizedDescription
             return false
         }
+    }
+
+    private func verifySession() async throws {
+        let profile = try await api.authenticatedProfile()
+        guard profile.xsxh?.isEmpty == false else { throw APIError.notLoggedIn }
     }
 
     // MARK: 静默续期
 
     /// 带着 TGC 访问 caslogin，CAS 会自动发新 ticket 并回到教务系统
     func refresh() async {
-        guard phase != .refreshing else { return }
+        guard !isLoggingOut, phase != .loggedOut else { return }
+        if let refreshTask { await refreshTask.value; return }
+        let task = Task { await performRefresh() }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+    }
+
+    private func performRefresh() async {
+        guard !Task.isCancelled, !isLoggingOut else { return }
         let previous = phase
-        phase = .refreshing
+        let generation = CookieJar.generation
+        // 启动验证结束前不展示 MainTabs，避免页面拿过期 Cookie 抢先加载。
+        if previous != .checking { phase = .refreshing }
+        lastError = nil
 
         do {
             let http = try await rawGet(URL(string: Self.serviceURL)!)
-            let final = http.url?.absoluteString ?? ""
-            if final.contains("/admin/login") || final.contains("loginFailPage") {
-                phase = .loggedOut
-                return
-            }
-            persistCurrentCookies()
+            guard let final = http.url, final.host == "tls.ccsut.cn",
+                  !APIClient.isAuthenticationURL(final) else { throw APIError.notLoggedIn }
+            try await verifySession()
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
             phase = .loggedIn
+            lastError = nil
+            await injectToWebKit(allCookies())
             await loadProfile()
         } catch {
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
             lastError = error.localizedDescription
-            phase = previous == .refreshing ? .loggedOut : previous
+            // 冷启动无论哪种失败都回到可重试的登录页；已进入主界面时，
+            // 仅暂时网络失败保留主界面，明确失效的认证则回到登录页。
+            if let e = error as? APIError, case .notLoggedIn = e {
+                phase = .loggedOut
+            } else {
+                phase = previous == .loggedIn ? .loggedIn : .loggedOut
+            }
         }
     }
 
@@ -310,20 +356,38 @@ final class SessionStore {
     /// didFinish 回调的瞬间去读经常是空的，这里轮询等最多 2 秒。
     @discardableResult
     func adoptCookies() async -> Bool {
+        guard !isLoggingOut else { return false }
+        if let adoptionTask { return await adoptionTask.value }
+        let task = Task { await performAdoption() }
+        adoptionTask = task
+        let result = await task.value
+        adoptionTask = nil
+        return result
+    }
+
+    func cancelLogin() { adoptionTask?.cancel() }
+
+    private func performAdoption() async -> Bool {
+        guard !Task.isCancelled, !isLoggingOut else { return false }
         var cookies: [HTTPCookie] = []
+        let initialGeneration = CookieJar.generation
 
         // 注意：不能以「拿到任意一条 Cookie」为结束条件。
         // 打开 CAS 登录页的瞬间就会有一条 JSESSIONID，
         // 那时还停在登录页，必须等真正代表登录态的 Cookie 出现。
         var authenticated = false
         for attempt in 0..<24 {
-            cookies = await WebStore.dataStore.httpCookieStore.allCookies()
-                .filter { $0.domain.contains("ccsut.cn") }
+            do {
+                cookies = try await WebStore.dataStore.httpCookieStore.cookieSnapshot()
+                    .filter { CookieJar.isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
+            } catch {
+                if !Task.isCancelled { lastError = "读取登录凭证失败，请重试" }
+                return false
+            }
+            guard CookieJar.generation == initialGeneration, !Task.isCancelled else { return false }
 
             let keys = Set(cookies.map(\.name))
             authenticated = keys.contains("jw_uf")
-                || keys.contains("puid")
-                || keys.contains("username")
 
             if authenticated { break }
             if attempt < 23 {
@@ -343,35 +407,39 @@ final class SessionStore {
             return false
         }
 
-        CookieJar.shared = cookies
+        // 验证前仅替换内存；失败恢复旧凭证，成功再提交（含验证中轮换的值）。
+        let previous = CookieJar.shared
+        CookieJar.replace(cookies, persistChanges: false)
+        let generation = CookieJar.generation
 
-        // 先只注入到内存，验证通过才落盘。
-        // 否则一条残缺的 JSESSIONID 会把 Keychain 里完整的 Cookie 覆盖掉。
-        await injectToWebKit(cookies)
-        injectToURLSession(cookies)
-
-        // 真正验证一次：能不能访问 /admin/
+        // 真正验证一次：能不能取得当前身份的业务数据。
         guard await probe() else {
-            lastError = "Cookie 只有 \(cookies.count) 条（\(cookies.map(\.name).joined(separator: ","))），没有登录态"
+            if CookieJar.generation == generation { CookieJar.shared = previous }
             return false
         }
-
-        persist(cookies)
-        CookieJar.shared = cookies
+        guard CookieJar.generation == generation, !Task.isCancelled else { return false }
+        CookieJar.commit(generation: generation)
         phase = .loggedIn
         lastError = nil
-        await loadProfile()
-        return true
+        Task {
+            guard CookieJar.generation == generation, !isLoggingOut else { return }
+            await loadProfile()
+        }
+        return CookieJar.generation == generation && !Task.isCancelled
     }
 
     /// 顺手把姓名学号读出来（/admin/xsd/xk/listV2 里有）
     func loadProfile() async {
+        guard !isLoggingOut, phase == .loggedIn || phase == .refreshing,
+              !CookieJar.shared.isEmpty else { return }
+        let generation = CookieJar.generation
         // 先用缓存顶上，避免冷启动时「我的」页空白
         if studentName == nil { studentName = UserDefaults.standard.string(forKey: nameKey) }
         if studentId == nil { studentId = UserDefaults.standard.string(forKey: sidKey) }
 
         do {
-            let initData: ElectiveInit = try await APIClient.shared.electiveInit()
+            let initData: ElectiveInit = try await api.electiveInit()
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
             if let name = initData.xsxm, !name.isEmpty {
                 studentName = name
                 UserDefaults.standard.set(name, forKey: nameKey)
@@ -381,6 +449,7 @@ final class SessionStore {
                 UserDefaults.standard.set(sid, forKey: sidKey)
             }
         } catch {
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
             lastError = "拉取学生信息失败：\(error.localizedDescription)"
         }
     }
@@ -388,58 +457,63 @@ final class SessionStore {
     // MARK: Cookie 存取
 
     func allCookies() -> [HTTPCookie] {
-        (HTTPCookieStorage.shared.cookies ?? []).filter { $0.domain.contains("ccsut.cn") }
-    }
-
-    private func persist(_ cookies: [HTTPCookie]) {
-        guard let data = try? JSONEncoder().encode(cookies.map(StoredCookie.init)) else { return }
-        Keychain.save(data, for: cookieKey)
-    }
-
-    private func persistCurrentCookies() {
-        let fresh = allCookies()
-        guard !fresh.isEmpty else { return }
-        persist(fresh)
+        CookieJar.shared
     }
 
     private func restoreFromKeychain() -> [HTTPCookie] {
         guard let data = Keychain.load(cookieKey),
               let stored = try? JSONDecoder().decode([StoredCookie].self, from: data)
         else { return [] }
-        return stored.compactMap(\.asHTTPCookie)
+        return stored.compactMap(\.asHTTPCookie).filter { CookieJar.isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
     }
 
     private func injectToWebKit(_ cookies: [HTTPCookie]) async {
+        let generation = CookieJar.generation
         for c in cookies {
-            await WebStore.dataStore.httpCookieStore.set(c)
-        }
-    }
-
-    private func injectToURLSession(_ cookies: [HTTPCookie]) {
-        for host in ["https://tls.ccsut.cn", "https://auth.ccsut.cn"] {
-            guard let url = URL(string: host) else { continue }
-            HTTPCookieStorage.shared.setCookies(cookies, for: url, mainDocumentURL: nil)
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            do { try await WebStore.dataStore.httpCookieStore.set(c) }
+            catch { return }
         }
     }
 
     // MARK: 退出
 
     func logout() async {
+        guard !isLoggingOut else { return }
+        isLoggingOut = true
+        defer { isLoggingOut = false }
+        refreshTask?.cancel()
+        adoptionTask?.cancel()
+        CookieJar.shared = []
         Keychain.delete(cookieKey)
         UserDefaults.standard.removeObject(forKey: nameKey)
         UserDefaults.standard.removeObject(forKey: sidKey)
         studentName = nil
         studentId = nil
+        lastError = nil
+        lastCookieCount = 0
+        // 等待所有可能写 WebKit 的任务结束，再做最终清理。
+        // 登录页也在清理完成后才出现，避免它接管尚未删除的旧 Cookie。
+        await refreshTask?.value
+        _ = await adoptionTask?.value
 
-        for c in HTTPCookieStorage.shared.cookies ?? [] where c.domain.contains("ccsut.cn") {
+        for c in HTTPCookieStorage.shared.cookies ?? [] where CookieJar.isSchoolCookie(c) {
             HTTPCookieStorage.shared.deleteCookie(c)
         }
 
         let store = WebStore.dataStore.httpCookieStore
-        for c in await store.allCookies() where c.domain.contains("ccsut.cn") {
-            await store.remove(c)
+        // 退出后新建的登录页使用全新的内存 Cookie Store。旧回调即使迟到，
+        // 也只能写旧实例；Keychain 是跨启动保存凭证的唯一位置。
+        WebStore.dataStore = .nonPersistent()
+        do {
+            for c in try await store.cookieSnapshot() where CookieJar.isSchoolCookie(c) {
+                try await store.remove(c)
+            }
+        } catch {
+            // 新登录已隔离到新 Store，旧实例回收后凭证一并丢弃。
         }
 
+        CookieJar.shared = []
         phase = .loggedOut
     }
 }
@@ -475,13 +549,62 @@ final class NoRedirect: NSObject, URLSessionTaskDelegate {
 }
 
 enum CookieJar {
-    nonisolated(unsafe) static var shared: [HTTPCookie] = []
+    private static let lock = NSRecursiveLock()
+    private nonisolated(unsafe) static var cookies: [HTTPCookie] = []
+    private nonisolated(unsafe) static var revision: UInt64 = 0
+    private nonisolated(unsafe) static var shouldPersist = true
+
+    /// 只允许这里维护原生 Cookie；替换账号或退出时递增代数，丢弃迟到响应。
+    static var shared: [HTTPCookie] {
+        get {
+            lock.lock(); defer { lock.unlock() }
+            return cookies.filter { isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
+        }
+        set {
+            replace(newValue)
+        }
+    }
+
+    static func replace(_ value: [HTTPCookie], persistChanges: Bool = true) {
+        lock.lock(); defer { lock.unlock() }
+        revision &+= 1
+        shouldPersist = persistChanges
+        cookies = value.filter { isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
+        if shouldPersist { persist() }
+    }
+
+    static func commit(generation: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        guard generation == revision else { return }
+        shouldPersist = true
+        persist()
+    }
+
+    static var generation: UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        return revision
+    }
+
+    static func isSchoolCookie(_ cookie: HTTPCookie) -> Bool {
+        let domain = cookie.domain.lowercased()
+        return domain == "ccsut.cn" || domain.hasSuffix(".ccsut.cn")
+    }
 
     static func header(for host: String) -> String? {
+        guard let url = URL(string: "https://\(host)/") else { return nil }
+        return header(for: url)
+    }
+
+    static func header(for url: URL) -> String? {
+        guard let host = url.host?.lowercased() else { return nil }
+        let path = url.path.isEmpty ? "/" : url.path
         let matched = shared.filter { c in
             let d = c.domain.hasPrefix(".") ? String(c.domain.dropFirst()) : c.domain
-            return host == d || host.hasSuffix("." + d)
-        }
+            let domainMatches = host == d || (c.domain.hasPrefix(".") && host.hasSuffix("." + d))
+            let pathMatches = path == c.path || (path.hasPrefix(c.path) &&
+                (c.path.hasSuffix("/") || path.dropFirst(c.path.count).hasPrefix("/")))
+            return domainMatches && pathMatches && (!c.isSecure || url.scheme == "https")
+        }.sorted { $0.path.count > $1.path.count }
         guard !matched.isEmpty else { return nil }
         return matched.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
     }
@@ -499,20 +622,29 @@ enum CookieJar {
     /// 按 (name, domain, path) 覆盖或追加。
     /// 服务端每次响应都可能轮换 jw_uf，不更新的话会一直用登录那一刻的旧值。
     static func upsert(_ cookie: HTTPCookie) {
-        let key: (HTTPCookie) -> String = { "\($0.name)|\($0.domain)|\($0.path)" }
-        let k = key(cookie)
-        if let idx = shared.firstIndex(where: { key($0) == k }) {
-            shared[idx] = cookie
-        } else {
-            shared.append(cookie)
-        }
+        upsert([cookie])
     }
 
-    static func upsert(_ cookies: [HTTPCookie]) {
-        for c in cookies { upsert(c) }
+    static func upsert(_ incoming: [HTTPCookie], generation: UInt64? = nil) {
+        lock.lock(); defer { lock.unlock() }
+        if let generation, generation != revision { return }
+        let key: (HTTPCookie) -> String = { "\($0.name)|\($0.domain)|\($0.path)" }
+        for cookie in incoming where isSchoolCookie(cookie) {
+            cookies.removeAll { key($0) == key(cookie) }
+            if (cookie.expiresDate ?? .distantFuture) > Date() { cookies.append(cookie) }
+        }
+        cookies.removeAll { ($0.expiresDate ?? .distantFuture) <= Date() }
+        if !incoming.isEmpty, shouldPersist { persist() }
+    }
+
+    /// 在锁内落盘，退出和响应轮换不会交错写回旧凭证。
+    private static func persist() {
+        guard !cookies.isEmpty else { Keychain.delete("ccsut.cookies.v2"); return }
+        guard let data = try? JSONEncoder().encode(cookies.map(StoredCookie.init)) else { return }
+        Keychain.save(data, for: "ccsut.cookies.v2")
     }
 }
 
 enum WebStore {
-    static let dataStore: WKWebsiteDataStore = .default()
+    nonisolated(unsafe) static var dataStore: WKWebsiteDataStore = .nonPersistent()
 }

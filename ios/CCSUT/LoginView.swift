@@ -36,6 +36,10 @@ struct LoginView: View {
 
     @State private var cooldown = 0             // 重发倒计时
     @State private var timer: Task<Void, Never>?
+    @State private var loginTimeout: Task<Void, Never>?
+    @State private var operationID = UUID()
+    @State private var isFinishing = false
+    @State private var pendingFinish = false
 
     @FocusState private var focused: Field?
     private enum Field { case account, code }
@@ -67,13 +71,22 @@ struct LoginView: View {
         }
         .animation(.smooth(duration: 0.25), value: showWeb)
         .onAppear(perform: start)
-        .onDisappear { timer?.cancel() }
+        .onDisappear {
+            timer?.cancel()
+            loginTimeout?.cancel()
+            pendingFinish = false
+            operationID = UUID()
+        }
         .onChange(of: nav.currentURL) { _, url in
             guard let url else { return }
             handle(url)
         }
         .onChange(of: nav.lastError) { _, err in
             if let err, busy != .done {
+                session.cancelLogin()
+                loginTimeout?.cancel()
+                pendingFinish = false
+                operationID = UUID()
                 hint = err
                 busy = .idle
             }
@@ -287,12 +300,13 @@ struct LoginView: View {
     // MARK: 状态
 
     private var trimmed: String { account.trimmingCharacters(in: .whitespaces) }
-    private var canSend: Bool { !trimmed.isEmpty && busy != .sending && cooldown == 0 }
-    private var canLogin: Bool { !trimmed.isEmpty && code.count >= 4 && busy != .logging && busy != .done }
+    private var canSend: Bool { !trimmed.isEmpty && busy == .idle && cooldown == 0 }
+    private var canLogin: Bool { !trimmed.isEmpty && code.count >= 4 && busy == .idle }
 
     // MARK: 流程
 
     private func start() {
+        hint = session.lastError ?? ""
         webView.navigationDelegate = nav
         nav.onNavigate = { url in handle(url) }
         if account.isEmpty,
@@ -338,14 +352,24 @@ struct LoginView: View {
 
         busy = .sending
         hint = ""
+        let id = beginTimeout()
 
         Task {
-            let r = try? await webView.callAsync(Self.script, arguments: [
-                "account": trimmed,
-                "code": "",
-                "action": "send",
-            ])
-            let outcome = (r as? String) ?? "?"
+            let outcome: String
+            do {
+                let r = try await webView.callAsync(Self.script, arguments: [
+                    "account": trimmed, "code": "", "action": "send",
+                ])
+                outcome = (r as? String) ?? "?"
+            } catch {
+                guard operationID == id, busy != .done, !isFinishing else { return }
+                loginTimeout?.cancel()
+                busy = .idle
+                hint = "认证页连接失败，请重试或使用网页登录"
+                return
+            }
+            guard operationID == id, busy != .done, !isFinishing else { return }
+            loginTimeout?.cancel()
 
             await MainActor.run {
                 busy = .idle
@@ -358,8 +382,11 @@ struct LoginView: View {
                     hint = "认证页还没准备好，点右上角网页看看"
                 case "no-account":
                     hint = "账号框没填上，先检查账号"
+                case "timeout":
+                    hint = "未确认验证码发送成功，请稍后重试或使用网页登录"
                 default:
-                    hint = "发送失败（\(outcome)），试试网页登录"
+                    hint = outcome.hasPrefix("error:") ? String(outcome.dropFirst(6))
+                        : "发送失败（\(outcome)），试试网页登录"
                 }
             }
         }
@@ -372,38 +399,75 @@ struct LoginView: View {
 
         busy = .logging
         hint = ""
+        let id = beginTimeout()
 
         Task {
-            let r = try? await webView.callAsync(Self.script, arguments: [
-                "account": trimmed,
-                "code": code.trimmingCharacters(in: .whitespaces),
-                "action": "submit",
-            ])
-            let outcome = (r as? String) ?? "?"
-
-            if outcome != "submitted" {
-                await MainActor.run {
-                    busy = .idle
+            do {
+                let r = try await webView.callAsync(Self.script, arguments: [
+                    "account": trimmed,
+                    "code": code.trimmingCharacters(in: .whitespaces),
+                    "action": "submit",
+                ])
+                guard operationID == id, busy != .done, !isFinishing else { return }
+                let outcome = (r as? String) ?? "?"
+                loginTimeout?.cancel()
+                busy = .idle
+                if outcome.hasPrefix("error:") {
+                    hint = String(outcome.dropFirst(6))
+                } else if outcome == "timeout" {
+                    hint = "登录未完成，请检查验证码后重试，或使用网页登录"
+                } else {
                     hint = outcome == "no-code" ? "页面还没准备好，稍等再点一次" : "提交失败（\(outcome)）"
                 }
+            } catch {
+                // 页面跳转也会终止 JS；给导航回调接管 Cookie 的时间，
+                // 若没有完成跳转，beginTimeout 保证按钮最终恢复。
+                guard operationID == id, busy != .done else { return }
+                hint = "正在确认登录结果…"
             }
-            // 成功时会由导航回调触发 finish()
         }
     }
 
     private func finish() async {
-        // 跳转瞬间 Cookie 可能还在写，重试几次
-        for attempt in 0..<3 {
-            if await session.adoptCookies() {
-                busy = .done
-                return
-            }
-            if attempt < 2 {
-                try? await Task.sleep(for: .milliseconds(700))
+        guard busy != .done else { return }
+        if isFinishing { pendingFinish = true; return }
+        isFinishing = true
+        defer {
+            isFinishing = false
+            if pendingFinish, busy != .done, session.phase == .loggedOut {
+                pendingFinish = false
+                Task { await finish() }
             }
         }
+        let id = operationID
+        // 会话层已等待 Cookie 落地并验证一次，网络失败不在这里重复整条链。
+        let adopted = await session.adoptCookies()
+        guard operationID == id, !Task.isCancelled else { return }
+        if adopted {
+            loginTimeout?.cancel()
+            busy = .done
+            return
+        }
+        loginTimeout?.cancel()
         busy = .idle
-        hint = "登录没有完成，请再试一次"
+        hint = session.lastError ?? "登录没有完成，请再试一次"
+    }
+
+    /// JS 卡住、页面未跳转、或回调丢失时也必须让用户能再次操作。
+    private func beginTimeout() -> UUID {
+        loginTimeout?.cancel()
+        let id = UUID()
+        operationID = id
+        loginTimeout = Task {
+            do { try await Task.sleep(for: .seconds(45)) } catch { return }
+            guard operationID == id, busy != .done else { return }
+            session.cancelLogin()
+            pendingFinish = false
+            operationID = UUID()
+            busy = .idle
+            hint = "认证请求超时，请重试或使用网页登录"
+        }
+        return id
     }
 
     private func startCooldown(_ seconds: Int) {
@@ -429,6 +493,13 @@ struct LoginView: View {
             el.dispatchEvent(new Event(t, { bubbles: true })));
         };
         const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const messages = () => [...document.querySelectorAll(
+          '.ant-message-notice-content, .ant-alert-message, .ant-form-explain, .ant-form-item-explain-error, [role="alert"], .ant-notification-notice-message'
+        )].filter(el => el.offsetWidth > 0 && (el.textContent || '').trim());
+        const snapshot = () => new Map(messages().map(el => [el, (el.textContent || '').trim()]));
+        const freshMessages = previous => messages()
+          .filter(el => previous.get(el) !== (el.textContent || '').trim())
+          .map(el => (el.textContent || '').trim());
 
         // 1. 等页签
         let tabs = [];
@@ -479,9 +550,17 @@ struct LoginView: View {
           const sendBtn = [...document.querySelectorAll('button')]
             .find(b => (b.textContent || '').includes('获取验证码'));
           if (!sendBtn) return 'no-button';
+          const previous = snapshot();
           sendBtn.click();
-          await sleep(800);
-          return 'sent';
+          for (let i = 0; i < 60; i++) {
+            await sleep(200);
+            const fresh = freshMessages(previous);
+            const error = fresh.find(m => /失败|错误|无效|频繁|不存在|未绑定|限制|稍后|不正确|过期/.test(m));
+            if (error) return 'error:' + error;
+            if (/\\d+\\s*(秒|s)|重新获取|重新发送/.test(sendBtn.textContent || '') ||
+                fresh.some(m => /发送成功|已发送/.test(m))) return 'sent';
+          }
+          return 'timeout';
         }
 
         if (action === 'submit') {
@@ -491,8 +570,14 @@ struct LoginView: View {
           const loginBtn = [...document.querySelectorAll('button')]
             .find(b => (b.textContent || '').trim() === '登录');
           if (!loginBtn) return 'no-button';
+          const previous = snapshot();
           loginBtn.click();
-          return 'submitted';
+          for (let i = 0; i < 60; i++) {
+            await sleep(200);
+            const error = freshMessages(previous)[0];
+            if (error) return 'error:' + error;
+          }
+          return 'timeout';
         }
 
         return 'unknown';

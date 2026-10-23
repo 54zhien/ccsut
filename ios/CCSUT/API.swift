@@ -44,18 +44,16 @@ final class APIClient {
     private let userAgent =
         "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 
-    private init() {
-        let cfg = URLSessionConfiguration.default
-
-        // 先恢复自动 Cookie（v0.4.1 的可用状态）。
-        // 手动 CookieJar 仍然会设 header，但会被这里覆盖 —— 这是事实，
-        // 先保证不报会话过期，选课的问题单独查。
-        cfg.httpShouldSetCookies = true
-        cfg.httpCookieStorage = HTTPCookieStorage.shared
+    init(configuration: URLSessionConfiguration = .default) {
+        let cfg = configuration
+        // 所有原生请求只使用 CookieJar；逐跳收取 Cookie，避免系统池覆盖请求头。
+        cfg.httpShouldSetCookies = false
+        cfg.httpCookieStorage = nil
 
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
         cfg.timeoutIntervalForRequest = 20
-        session = URLSession(configuration: cfg)
+        cfg.timeoutIntervalForResource = 20
+        session = URLSession(configuration: cfg, delegate: NoRedirect(), delegateQueue: nil)
     }
 
     // MARK: 基础请求
@@ -81,23 +79,7 @@ final class APIClient {
     }
 
     private func send(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, resp) = try await session.data(for: req)
-        guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1) }
-
-        // 收 Set-Cookie 并更新 CookieJar。
-        // 服务端每次响应都可能轮换 jw_uf（有效期只有 4 小时），
-        // CookieJar 若停留在登录那一刻的快照，后续请求就会用过期值。
-        if let url = req.url, let fields = http.allHeaderFields as? [String: String] {
-            let fresh = HTTPCookie.cookies(withResponseHeaderFields: fields, for: url)
-            if !fresh.isEmpty { CookieJar.upsert(fresh) }
-        }
-
-        // 被踢回登录页
-        let final = http.url?.absoluteString ?? ""
-        if final.contains("/admin/login") || final.contains("loginFailPage") {
-            throw APIError.notLoggedIn
-        }
-        guard (200..<300).contains(http.statusCode) else { throw APIError.http(http.statusCode) }
+        let (data, http) = try await response(for: req)
 
         if let path = req.url?.path, path.contains("listjxbDataV2") || path.contains("listV2") {
             let body = String(data: data, encoding: .utf8) ?? ""
@@ -105,6 +87,66 @@ final class APIClient {
             Self.lastTrace = "\(path.components(separatedBy: "/").last ?? "") \(data.count)b initData=\(hasInit ? "有" : "无")"
         }
         return (data, http)
+    }
+
+    /// 认证和业务共用同一条传输路径。禁止自动跳转，每跳重新匹配 Cookie。
+    /// timeout 是整个跳转链的预算，避免冷启动被多次超时拖住。
+    func response(for request: URLRequest, timeout: TimeInterval = 20,
+                  allowAuthenticationRedirects: Bool = false) async throws -> (Data, HTTPURLResponse) {
+        var req = request
+        let generation = CookieJar.generation
+        let deadline = Date().addingTimeInterval(timeout)
+        for _ in 0..<8 {
+            try Task.checkCancellation()
+            guard CookieJar.generation == generation else { throw CancellationError() }
+            guard !CookieJar.shared.isEmpty else { throw APIError.notLoggedIn }
+            guard let url = req.url, url.scheme == "https",
+                  let host = url.host, host == "ccsut.cn" || host.hasSuffix(".ccsut.cn")
+            else { throw APIError.notLoggedIn }
+            if !allowAuthenticationRedirects, Self.isAuthenticationURL(url) { throw APIError.notLoggedIn }
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { throw URLError(.timedOut) }
+            req.timeoutInterval = remaining
+            req.httpShouldHandleCookies = false
+            req.setValue(CookieJar.header(for: url), forHTTPHeaderField: "Cookie")
+
+            let (data, resp) = try await session.data(for: req)
+            try Task.checkCancellation()
+            guard CookieJar.generation == generation else { throw CancellationError() }
+            guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1) }
+            if let fields = http.allHeaderFields as? [String: String] {
+                CookieJar.upsert(HTTPCookie.cookies(withResponseHeaderFields: fields, for: url),
+                                 generation: generation)
+            }
+            if [401, 403].contains(http.statusCode) { throw APIError.notLoggedIn }
+            if [301, 302, 303, 307, 308].contains(http.statusCode) {
+                guard let location = http.value(forHTTPHeaderField: "Location"),
+                      let next = URL(string: location, relativeTo: url)?.absoluteURL
+                else { throw APIError.http(http.statusCode) }
+                if http.statusCode == 303 || ([301, 302].contains(http.statusCode) && req.httpMethod == "POST") {
+                    req.httpMethod = "GET"
+                    req.httpBody = nil
+                    req.setValue(nil, forHTTPHeaderField: "Content-Type")
+                    req.setValue(nil, forHTTPHeaderField: "Content-Length")
+                }
+                // 不把业务 POST 的表单转发到另一个认证域。
+                if next.host != url.host, req.httpBody != nil { throw APIError.notLoggedIn }
+                req.url = next
+                continue
+            }
+            guard (200..<300).contains(http.statusCode) else { throw APIError.http(http.statusCode) }
+            if !allowAuthenticationRedirects, let final = http.url, Self.isAuthenticationURL(final) {
+                throw APIError.notLoggedIn
+            }
+            return (data, http)
+        }
+        throw URLError(.httpTooManyRedirects)
+    }
+
+    static func isAuthenticationURL(_ url: URL) -> Bool {
+        if url.host == "auth.ccsut.cn" { return true }
+        let path = url.path.lowercased()
+        return path == "/admin/caslogin" || path.hasPrefix("/admin/login") || path.contains("loginfailpage")
     }
 
     // MARK: 泛型 JSON
@@ -123,9 +165,7 @@ final class APIClient {
 
         // 先按统一壳解
         if let env = try? JSONDecoder().decode(APIEnvelope<T>.self, from: data) {
-            if let payload = env.data {
-                return payload
-            }
+            if let payload = env.data { return payload }
             if env.ret != 0 {
                 throw APIError.business(env.ret, env.msg ?? "")
             }
@@ -151,6 +191,15 @@ final class APIClient {
 // MARK: - 业务接口
 
 extension APIClient {
+    /// 认证探测单独要求 ret=0；不改变其他业务接口现有的解码行为。
+    func authenticatedProfile() async throws -> ElectiveInit {
+        let (data, _) = try await send(makeRequest("/admin/xsd/xk/listV2", method: "POST", form: [:]))
+        let envelope = try JSONDecoder().decode(APIEnvelope<ElectiveInit>.self, from: data)
+        guard envelope.ret == 0 else { throw APIError.business(envelope.ret, envelope.msg ?? "") }
+        guard let profile = envelope.data else { throw APIError.empty }
+        return profile
+    }
+
     /// 选课页初始化：学生信息、字典、批次加密串
     func electiveInit() async throws -> ElectiveInit {
         try await post("/admin/xsd/xk/listV2")
