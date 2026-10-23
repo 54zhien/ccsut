@@ -71,88 +71,63 @@ struct WebLoginSheet: View {
     }
 
     var body: some View {
-        ZStack {
-            Color(uiColor: .systemBackground).ignoresSafeArea()
-            WebPanel(webView: webView, onRefresh: refresh)
-                .ignoresSafeArea()
-        }
-        .overlay(alignment: .top) { topControls }
-        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
-            bottomControls
+        NavigationStack {
+            VStack(spacing: 0) {
+                WebPanel(webView: webView, onRefresh: refresh)
+                if !status.isEmpty {
+                    Text(AppMessages.readable(status))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭网页登录", systemImage: "xmark") { dismiss() }
+                        .labelStyle(.iconOnly)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("刷新网页", systemImage: "arrow.clockwise", action: refresh)
+                        .labelStyle(.iconOnly)
+                }
+                ToolbarItem(placement: .bottomBar) { Spacer() }
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Safari", systemImage: "safari", action: openCurrentURLInSafari)
+                        .labelStyle(.titleAndIcon)
+                        .disabled(currentURL == nil)
+                        .accessibilityLabel("在 Safari 中打开当前网址")
+                }
+            }
         }
         .onAppear {
             if ownsNavigation { start() }
+            else { nav.recoverLoginPageIfNeeded(in: webView) }
         }
         .onChange(of: nav.currentURL) { _, url in
             guard let url else { return }
-            if !ownsNavigation, !webView.isLoading { status = "" }
             handle(url)
         }
+        .onChange(of: nav.isFinished) { _, finished in
+            if finished { status = "" }
+        }
         .onChange(of: nav.lastError) { _, err in
-            if let err { status = "⚠️ \(err)" }
+            if err != nil { status = AppMessages.loadFailure }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
 
-    private var topControls: some View {
-        HStack {
-            chromeButton("xmark", label: "关闭网页登录") { dismiss() }
-            Spacer()
-            chromeButton("arrow.clockwise", label: "刷新网页") { refresh() }
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 8)
-    }
-
-    private var bottomControls: some View {
-        HStack(spacing: 12) {
-            if !status.isEmpty {
-                Text(AppMessages.readable(status))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Spacer(minLength: 0)
-            }
-
-            Button(action: openCurrentURLInSafari) {
-                Label("Safari", systemImage: "safari")
-                    .font(.footnote.weight(.semibold))
-                    .frame(minWidth: 96, minHeight: 44)
-                    .foregroundStyle(Color("AccentForeground"))
-                    .background(Color.accentColor, in: .capsule)
-            }
-            .buttonStyle(.plain)
-            .disabled(currentURL == nil)
-            .accessibilityLabel("在 Safari 中打开当前网址")
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
-        .background(.bar)
-    }
-
-    private func chromeButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.primary)
-                .frame(width: 44, height: 44)
-                .background(.thinMaterial, in: Circle())
-                .overlay { Circle().strokeBorder(Color(uiColor: .separator).opacity(0.28), lineWidth: 0.5) }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-    }
-
     private var currentURL: URL? {
-        webView.url ?? nav.currentURL
+        webView.url ?? nav.currentURL ?? SessionStore.casLoginURL
     }
 
     private func refresh() {
         status = "加载认证页…"
-        webView.reload()
+        didPrepare = false
+        nav.refresh(in: webView)
     }
 
     private func openCurrentURLInSafari() {
@@ -163,11 +138,11 @@ struct WebLoginSheet: View {
     // MARK: 流程
 
     private func start() {
-        guard let request else { return }
+        guard request != nil else { return }
         webView.navigationDelegate = nav
         nav.onNavigate = { url in handle(url) }
         status = "加载认证页…"
-        webView.load(URLRequest(url: SessionStore.casLoginURL))
+        nav.loadLoginPage(in: webView)
     }
 
     private func handle(_ url: URL) {

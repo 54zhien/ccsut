@@ -81,7 +81,7 @@ struct ExamView: View {
                                     }
                                 }
                             }
-                            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20))
+                            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
                             .padding(.horizontal, 16)
                         } header: {
                             termHeader(term, count: list.count)
@@ -92,7 +92,6 @@ struct ExamView: View {
             .padding(.vertical, 12)
         }
         .coordinateSpace(name: "academic-scroll")
-        .trackAcademicTermHeaders(termHeaderTracker)
     }
 
     /// 即将开始的那场（未来 60 天内最近的一场）
@@ -160,7 +159,7 @@ struct ExamView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.accentColor, in: .rect(cornerRadius: 24))
+        .background(Color.accentColor, in: .rect(cornerRadius: 28))
         .padding(.horizontal, 16)
     }
 

@@ -133,26 +133,22 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
     @ViewBuilder let actions: () -> Actions
 
     func body(content: Content) -> some View {
-        GeometryReader { _ in
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .toolbar(.hidden, for: .navigationBar)
-                .scrollEdgeEffectStyle(.soft, for: .top)
-                .safeAreaBar(edge: .top, spacing: 0) {
-                    NagiPageHeader(
-                        title: title,
-                        transitionProgress: transitionProgress,
-                        isHeaderHidden: isHeaderHidden,
-                        secondaryAction: AnyView(actions()),
-                        leadingAction: showsBackButton ? AnyView(NagiBackButton()) : nil
-                    )
-                }
-        }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
-        .onChange(of: scrollOffset) { _, offset in
-            updateVisibility(offset)
-        }
-        .onAppear { updateVisibility(scrollOffset) }
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .nagiTopBar {
+                NagiPageHeader(
+                    title: title,
+                    transitionProgress: transitionProgress,
+                    isHeaderHidden: isHeaderHidden,
+                    secondaryAction: AnyView(actions()),
+                    leadingAction: showsBackButton ? AnyView(NagiBackButton()) : nil
+                )
+            }
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .onChange(of: scrollOffset) { _, offset in
+                updateVisibility(offset)
+            }
+            .onAppear { updateVisibility(scrollOffset) }
     }
 
     private func updateVisibility(_ offset: CGFloat) {
@@ -181,11 +177,8 @@ private struct AcademicDetailChrome: ViewModifier {
     #endif
 
     func body(content: Content) -> some View {
-        GeometryReader { _ in
-            content
+        content
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .toolbar(.hidden, for: .navigationBar)
-                .scrollEdgeEffectStyle(.soft, for: .top)
                 .refreshable {
                     await refresh()
                     #if DEBUG
@@ -193,7 +186,7 @@ private struct AcademicDetailChrome: ViewModifier {
                     #endif
                 }
                 .scrollBounceBehavior(.always, axes: .vertical)
-                .safeAreaBar(edge: .top, spacing: 0) {
+                .nagiTopBar {
                     HStack {
                         NagiBackButton()
                         Spacer(minLength: 12)
@@ -213,8 +206,8 @@ private struct AcademicDetailChrome: ViewModifier {
                     }
                     .frame(height: 48)
                     .padding(.horizontal, 16)
+                    .padding(.vertical, NagiPageHeaderMetrics.verticalPadding)
                 }
-        }
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle(title)
             .background { AcademicPopSupport() }
@@ -248,6 +241,18 @@ private struct AcademicDetailChrome: ViewModifier {
 }
 
 extension View {
+    /// Keep the bar material outside title/control opacity animations. Both root
+    /// and detail pages register the same persistent bar and soft edge effect.
+    fileprivate func nagiTopBar<Bar: View>(@ViewBuilder content: () -> Bar) -> some View {
+        toolbar(.hidden, for: .navigationBar)
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            .safeAreaBar(edge: .top, spacing: 0) {
+                content()
+                    .frame(maxWidth: .infinity)
+                    .background(.bar)
+            }
+    }
+
     func academicDetailChrome(title: String, refresh: @escaping () async -> Void) -> some View {
         modifier(AcademicDetailChrome(title: title, refresh: refresh))
     }

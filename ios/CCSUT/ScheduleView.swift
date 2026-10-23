@@ -378,7 +378,17 @@ struct ScheduleView: View {
         } catch { errorText = error.localizedDescription }
     }
 
-    private static func tint(for _: String) -> Color { .accentColor }
+    private static let palette: [Color] = [
+        Color(red: 0.20, green: 0.33, blue: 0.62),
+        Color(red: 0.16, green: 0.46, blue: 0.42),
+        Color(red: 0.54, green: 0.34, blue: 0.24),
+        Color(red: 0.45, green: 0.33, blue: 0.56),
+        Color(red: 0.56, green: 0.37, blue: 0.17),
+    ]
+
+    private static func tint(for name: String) -> Color {
+        palette[name.unicodeScalars.reduce(0) { $0 &+ Int($1.value) } % palette.count]
+    }
 
 }
 

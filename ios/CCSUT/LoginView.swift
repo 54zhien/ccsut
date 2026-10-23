@@ -46,6 +46,7 @@ struct LoginView: View {
 
     @FocusState private var focused: Field?
     private enum Field { case account, code }
+    private let fieldInset: CGFloat = 20
 
     private enum Busy: Equatable {
         case idle
@@ -96,7 +97,7 @@ struct LoginView: View {
             handle(url)
         }
         .onChange(of: nav.lastError) { _, err in
-            if let err, busy != .done {
+            if let err, busy != .done, !webViewIsInSheet, !showWebSheet {
                 session.cancelLogin()
                 loginTimeout?.cancel()
                 pendingFinish = false
@@ -113,29 +114,30 @@ struct LoginView: View {
         ZStack {
             Color(uiColor: .systemBackground).ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: 30) {
-                    brand
-                        .padding(.bottom, 18)
-                    credentialsForm
-                    actions
-                    if !hint.isEmpty {
-                        Text(AppMessages.readable(hint))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
-                            .transition(.opacity)
+            GeometryReader { viewport in
+                ScrollView {
+                    VStack(spacing: 30) {
+                        brand
+                            .padding(.bottom, 18)
+                        credentialsForm
+                        actions
+                        if !hint.isEmpty {
+                            Text(AppMessages.readable(hint))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                                .transition(.opacity)
+                        }
                     }
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 32)
+                    .frame(maxWidth: 480)
+                    .frame(maxWidth: .infinity, minHeight: viewport.size.height, alignment: .center)
                 }
-                .padding(.horizontal, 28)
-                .padding(.top, 24)
-                .padding(.bottom, 32)
-                .frame(maxWidth: 480)
-                .frame(maxWidth: .infinity)
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollDismissesKeyboard(.interactively)
             }
-            .scrollBounceBehavior(.basedOnSize)
-            .scrollDismissesKeyboard(.interactively)
         }
     }
 
@@ -161,13 +163,13 @@ struct LoginView: View {
                 .focused($focused, equals: .account)
                 .submitLabel(.next)
                 .onSubmit { focused = .code }
-                .padding(.horizontal, 17)
+                .padding(.horizontal, fieldInset)
                 .frame(height: 56)
 
             Rectangle()
-                .fill(Color(uiColor: .separator).opacity(0.42))
-                .frame(height: 0.5)
-                .padding(.leading, 17)
+                .fill(Color(uiColor: .separator))
+                .frame(height: 1)
+                .padding(.horizontal, fieldInset)
 
             HStack(spacing: 12) {
                 TextField("短信验证码", text: $code)
@@ -189,14 +191,13 @@ struct LoginView: View {
                                 .monospacedDigit()
                         }
                     }
-                    .frame(minWidth: 78, minHeight: 44)
+                    .frame(minWidth: 84, minHeight: 44, alignment: .trailing)
                     .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSend)
             }
-            .padding(.leading, 17)
-            .padding(.trailing, 9)
+            .padding(.horizontal, fieldInset)
             .frame(height: 56)
         }
         .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: 28))
@@ -262,7 +263,7 @@ struct LoginView: View {
            let saved = UserDefaults.standard.string(forKey: "ccsut.lastAccount") {
             account = saved
         }
-        webView.load(URLRequest(url: SessionStore.casLoginURL))
+        nav.loadLoginPage(in: webView)
     }
 
     private func handle(_ url: URL) {
@@ -279,6 +280,7 @@ struct LoginView: View {
         // CAS 页首次到达 → 预先切到「验证码登录」页签
         if url.host == "auth.ccsut.cn",
            absolute.contains("/cas/login"),
+           !isPreparingWebSheet, !webViewIsInSheet, !showWebSheet,
            !prepared {
             prepared = true
             Task { await prepare() }
@@ -435,6 +437,13 @@ struct LoginView: View {
     private func showWebLogin() {
         guard !isPreparingWebSheet, !webViewIsInSheet, !showWebSheet else { return }
         focused = nil
+        // Manual web authentication has its own lifetime. A native SMS request
+        // must not time out and cancel Cookie adoption while this sheet is open.
+        loginTimeout?.cancel()
+        operationID = UUID()
+        pendingFinish = false
+        busy = .idle
+        hint = ""
         isPreparingWebSheet = true
     }
 

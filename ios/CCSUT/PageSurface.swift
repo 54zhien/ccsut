@@ -10,19 +10,6 @@ enum AppMessages {
     }
 }
 
-struct GlassSheetSurface: ViewModifier {
-    @Environment(\.deviceCornerRadius) private var cornerRadius
-
-    func body(content: Content) -> some View {
-        content
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background {
-                Color.clear.glassEffect(.regular, in: .rect(cornerRadius: max(cornerRadius, 28)))
-            }
-            .presentationBackground(.clear)
-    }
-}
-
 struct SheetHeader: View {
     let title: String
     let close: () -> Void
@@ -34,10 +21,11 @@ struct SheetHeader: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .frame(width: 44, height: 44)
-                    .background(Color(.tertiarySystemFill), in: .circle)
+                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .controlSize(.large)
             .accessibilityLabel("关闭\(title)")
         }
         .overlay {
@@ -124,24 +112,12 @@ struct RefreshablePlaceholder: ViewModifier {
     }
 }
 
-/// Only publish a change when a header pins or its successor is within 8 points.
+/// Keep the active native pinned header glass, then hand off at close range.
 /// Keep per-frame geometry outside observation so scrolling does not redraw the list.
 @MainActor @Observable
 final class AcademicTermHeaderTracker {
     private(set) var floatingTerms: Set<String> = []
     @ObservationIgnored private var frames: [String: CGRect] = [:]
-    @ObservationIgnored private var viewport: CGRect = .zero
-    @ObservationIgnored private var topInset: CGFloat = 0
-
-    func setViewport(_ frame: CGRect) {
-        viewport = frame
-        updateFloatingTerms()
-    }
-
-    func setTopInset(_ inset: CGFloat) {
-        topInset = inset
-        updateFloatingTerms()
-    }
 
     func setFrame(_ frame: CGRect, for term: String) {
         frames[term] = frame
@@ -154,35 +130,23 @@ final class AcademicTermHeaderTracker {
     }
 
     private func updateFloatingTerms() {
-        guard viewport.height > 0 else { return }
-        // The visible surface is inset 6 points inside each pinned header.
-        let pinY = viewport.minY + topInset + 6
-        let visible = frames.filter { $0.value.maxY > pinY && $0.value.minY < viewport.maxY }
-            .sorted { $0.value.minY < $1.value.minY }
+        let ordered = frames.sorted {
+            $0.value.minY == $1.value.minY ? $0.key > $1.key : $0.value.minY < $1.value.minY
+        }
         var next: Set<String> = []
-        for (index, header) in visible.enumerated() {
-            if header.value.minY <= pinY + 1 {
-                next.insert(header.key)
-            } else if index > 0 {
-                let previous = visible[index - 1].value
-                let gap = header.value.minY - previous.maxY
-                if previous.minY <= pinY + 1, gap >= -1, gap <= 8 {
-                    next.insert(header.key)
-                }
+        // Pinned headers can report their scrolled layout frame. Do not reject
+        // the active header because maxY is above zero or use that bottom as
+        // the on-screen pin position. Match the original scroll coordinate.
+        if let index = ordered.lastIndex(where: { $0.value.minY <= 0.5 }) {
+            let active = ordered[index]
+            next.insert(active.key)
+            let successor = index + 1
+            if ordered.indices.contains(successor),
+               ordered[successor].value.minY <= active.value.height + 2 {
+                next.insert(ordered[successor].key)
             }
         }
         if next != floatingTerms { floatingTerms = next }
-    }
-}
-
-extension View {
-    func trackAcademicTermHeaders(_ tracker: AcademicTermHeaderTracker) -> some View {
-        onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
-            tracker.setViewport($0)
-        }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.top } action: { _, inset in
-            tracker.setTopInset(inset)
-        }
     }
 }
 
@@ -210,15 +174,15 @@ struct AcademicTermStrip<Content: View>: View {
                 }
             }
             .animation(.easeOut(duration: 0.16), value: isFloating)
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
-                tracker.setFrame($0, for: term)
-            }
-            .onDisappear { tracker.remove(term) }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("term-header-\(term)")
             .accessibilityValue(isFloating ? "floating" : "inline")
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("academic-scroll")) } action: {
+                tracker.setFrame($0, for: term)
+            }
+            .onDisappear { tracker.remove(term) }
     }
 }
 

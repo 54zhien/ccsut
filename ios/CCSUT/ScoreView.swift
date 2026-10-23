@@ -86,7 +86,7 @@ struct ScoreView: View {
                                 }
                             }
                         }
-                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20))
+                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
                         .padding(.horizontal, 16)
                     } header: {
                         termHeader(term)
@@ -96,7 +96,6 @@ struct ScoreView: View {
             .padding(.vertical, 12)
         }
         .coordinateSpace(name: "academic-scroll")
-        .trackAcademicTermHeaders(termHeaderTracker)
     }
 
     private var summaryCard: some View {
@@ -113,7 +112,7 @@ struct ScoreView: View {
             }
         }
         .padding(20)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
         .padding(.horizontal, 16)
     }
 

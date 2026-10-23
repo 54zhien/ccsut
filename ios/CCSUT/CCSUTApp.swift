@@ -218,18 +218,17 @@ struct ProfileView: View {
                         Text("退出登录")
                             .font(.headline)
                             .frame(maxWidth: .infinity, minHeight: 52, alignment: .center)
-                            .foregroundStyle(.red)
-                            .background(Color.red.opacity(0.09), in: .capsule)
-                            .contentShape(.capsule)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.capsule)
+                    .tint(.red)
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
             }
             .scrollBounceBehavior(.basedOnSize)
         }
-        .modifier(GlassSheetSurface())
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .alert("退出登录", isPresented: $showLogoutAlert) {
             Button("取消", role: .cancel) {}
             Button("退出", role: .destructive) {

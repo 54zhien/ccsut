@@ -16,6 +16,7 @@
 
 import SwiftUI
 import WebKit
+import OSLog
 
 // MARK: - 容器
 
@@ -89,16 +90,56 @@ final class WebNavigator: NSObject, WKNavigationDelegate {
     private(set) var currentURL: URL?
     private(set) var lastError: String?
     private(set) var isFinished = false
+    private static let logger = Logger(subsystem: "com.imzhien.ccsut", category: "WebLogin")
 
     /// 外部注入的处理逻辑
     var onNavigate: ((URL) -> Void)?
     var onFailure: ((String) -> Void)?
+
+    func loadLoginPage(in webView: WKWebView) {
+        lastError = nil
+        isFinished = false
+        webView.navigationDelegate = self
+        webView.load(URLRequest(url: SessionStore.casLoginURL,
+                                cachePolicy: .reloadIgnoringLocalCacheData,
+                                timeoutInterval: 30))
+    }
+
+    /// Reparenting a failed/empty web view does not start a new navigation.
+    /// Preserve a live authentication page, but recover an initial failed load.
+    func recoverLoginPageIfNeeded(in webView: WKWebView) {
+        guard !webView.isLoading else { return }
+        if lastError != nil || !isFinished || webView.url == nil {
+            loadLoginPage(in: webView)
+        }
+    }
+
+    func refresh(in webView: WKWebView) {
+        if lastError != nil || !isFinished || webView.url == nil {
+            loadLoginPage(in: webView)
+        } else {
+            lastError = nil
+            isFinished = false
+            if webView.reloadFromOrigin() == nil { loadLoginPage(in: webView) }
+        }
+    }
+
+    private func recordFailure(_ error: Error) {
+        let underlying = error as NSError
+        guard underlying.domain != NSURLErrorDomain || underlying.code != NSURLErrorCancelled else { return }
+        isFinished = false
+        lastError = error.localizedDescription
+        // No URL, account, ticket, Cookie or server response is logged.
+        Self.logger.error("Navigation failed: domain=\(underlying.domain, privacy: .public), code=\(underlying.code, privacy: .public)")
+        onFailure?(error.localizedDescription)
+    }
 
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor in
             let url = webView.url
             currentURL = url
             isFinished = true
+            lastError = nil
             if let url { onNavigate?(url) }
         }
     }
@@ -106,22 +147,27 @@ final class WebNavigator: NSObject, WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         Task { @MainActor in
             isFinished = false
+            lastError = nil
         }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
-            if (error as NSError).code == NSURLErrorCancelled { return }
-            lastError = error.localizedDescription
-            onFailure?(error.localizedDescription)
+            recordFailure(error)
         }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
-            if (error as NSError).code == NSURLErrorCancelled { return }
-            lastError = error.localizedDescription
-            onFailure?(error.localizedDescription)
+            recordFailure(error)
+        }
+    }
+
+    nonisolated func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Task { @MainActor in
+            isFinished = false
+            lastError = "加载失败，请重试"
+            Self.logger.error("Web content process terminated")
         }
     }
 

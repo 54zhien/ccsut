@@ -93,7 +93,7 @@ struct ElectiveView: View {
             }
         }
         .padding(12)
-        .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+        .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 18))
     }
 
     private var list: some View {
@@ -105,7 +105,7 @@ struct ElectiveView: View {
                     if let initData { header(initData) }
                 }
                 .padding(16)
-                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
+                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
 
                 ForEach(filtered) { item in
                     ClassCard(
@@ -414,10 +414,10 @@ struct ClassCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20))
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
         .overlay {
             if item.isSelected {
-                RoundedRectangle(cornerRadius: 20)
+                RoundedRectangle(cornerRadius: 26)
                     .strokeBorder(.green.opacity(0.55), lineWidth: 1.5)
             }
         }

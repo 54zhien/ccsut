@@ -39,7 +39,7 @@ struct ScheduleDetailSheet: View {
             }
             .scrollBounceBehavior(.basedOnSize)
         }
-        .modifier(GlassSheetSurface())
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private func information(_ symbol: String, label: String, value: String) -> some View {
