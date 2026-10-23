@@ -1,4 +1,6 @@
 import SwiftUI
+import QuartzCore
+import Observation
 
 struct ScheduleView: View {
     @Environment(SessionStore.self) private var session
@@ -19,6 +21,7 @@ struct ScheduleView: View {
     @State private var pendingDetail: ScheduleSlot?
     @State private var headerScrollOffset: CGFloat = 0
     @State private var previewRefreshCount = 0
+    @State private var weekTrail = WeekCapsuleTrail()
     private let railWidth: CGFloat = 44
     private let headerHeight: CGFloat = 52
     private let weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -32,7 +35,7 @@ struct ScheduleView: View {
                     ScrollView(.vertical) {
                         if let bundle, !bundle.isEmpty {
                             VStack(spacing: 16) {
-                                weekBar.id("page-top")
+                                weekBar(width: viewport.size.width).id("page-top")
                                 VStack(spacing: 8) {
                                     termSummary
                                     timetable(viewport: viewport.size)
@@ -167,14 +170,16 @@ struct ScheduleView: View {
     private var maxWeek: Int { max(18, bundle?.slots.flatMap(\.weeks).max() ?? 18, currentWeek) }
 
     private func selectWeek(_ week: Int) {
+        weekTrail.reset()
         didPickWeek = true
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
             selectedWeek = week
         }
     }
 
-    private var weekBar: some View {
-        GlassEffectContainer(spacing: 8) {
+    private func weekBar(width: CGFloat) -> some View {
+        let trailFrame = weekTrail.frame(reducedMotion: reduceMotion)
+        return GlassEffectContainer(spacing: 8) {
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
@@ -196,6 +201,12 @@ struct ScheduleView: View {
                             }
                             .accessibilityLabel(week == currentWeek ? "本周" : "第 \(week) 周")
                             .accessibilityAddTraits(week == selectedWeek ? [.isSelected] : [])
+                            .visualEffect { content, geometry in
+                                content.offset(x: trailFrame.displacement(
+                                    centerX: geometry.frame(in: .scrollView(axis: .horizontal)).midX,
+                                    viewportWidth: width
+                                ))
+                            }
                             .id(week)
                         }
                     }
@@ -204,6 +215,24 @@ struct ScheduleView: View {
                 }
                 .scrollIndicators(.hidden)
                 .contentMargins(.horizontal, 16, for: .scrollContent)
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.contentOffset.x
+                } action: { _, offset in
+                    weekTrail.record(offset)
+                }
+                .onScrollPhaseChange { _, phase in
+                    guard !reduceMotion else { weekTrail.reset(); return }
+                    switch phase {
+                    case .interacting: weekTrail.begin()
+                    case .idle: weekTrail.finish()
+                    case .animating: weekTrail.reset()
+                    default: break
+                    }
+                }
+                .onDisappear { weekTrail.reset() }
+                .onChange(of: reduceMotion) { _, reduced in
+                    if reduced { weekTrail.reset() }
+                }
                 // Automatic view-aligned settling overrides the requested center on iOS26.
                 .onAppear { proxy.scrollTo(selectedWeek, anchor: .center) }
                 .onChange(of: selectedWeek) { _, week in
@@ -418,5 +447,109 @@ struct ScheduleView: View {
     ]
     private static func tint(for name: String) -> Color {
         palette[name.unicodeScalars.reduce(0) { $0 &+ Int($1.value) } % palette.count]
+    }
+}
+
+/// A short history of the native scroll position gives each following capsule
+/// a later sample. Visual offsets never change the row's layout or scroll targets.
+@MainActor @Observable
+private final class WeekCapsuleTrail {
+    private(set) var time: CFTimeInterval = 0
+    @ObservationIgnored private var samples: [WeekTrailSample] = []
+    @ObservationIgnored private var offset: CGFloat = 0
+    @ObservationIgnored private var direction: CGFloat = 1
+    @ObservationIgnored private var isInteracting = false
+    @ObservationIgnored private var settlingUntil: CFTimeInterval = 0
+    @ObservationIgnored private var displayLink: CADisplayLink?
+    @ObservationIgnored private var clockTarget: ClockTarget?
+
+    func record(_ value: CGFloat) {
+        let delta = value - offset
+        offset = value
+        guard displayLink != nil else { return }
+        if abs(delta) > 0.25 { direction = delta > 0 ? 1 : -1 }
+        let now = CACurrentMediaTime()
+        samples.append(WeekTrailSample(time: now, offset: value))
+        samples.removeAll { $0.time < now - 0.3 }
+    }
+
+    func begin() {
+        let now = CACurrentMediaTime()
+        isInteracting = true
+        samples = [WeekTrailSample(time: now - 0.2, offset: offset), WeekTrailSample(time: now, offset: offset)]
+        time = now
+        guard displayLink == nil else { return }
+        let target = ClockTarget(owner: self)
+        let link = CADisplayLink(target: target, selector: #selector(ClockTarget.tick(_:)))
+        clockTarget = target
+        displayLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    func finish() {
+        guard displayLink != nil else { return }
+        isInteracting = false
+        settlingUntil = CACurrentMediaTime() + 0.18
+        record(offset)
+    }
+
+    func reset() {
+        displayLink?.invalidate()
+        displayLink = nil
+        clockTarget = nil
+        isInteracting = false
+        samples.removeAll(keepingCapacity: true)
+        time = CACurrentMediaTime()
+    }
+
+    func frame(reducedMotion: Bool) -> WeekTrailFrame {
+        WeekTrailFrame(time: time, offset: offset, direction: direction,
+                       samples: !reducedMotion && displayLink != nil ? samples : [])
+    }
+
+    private func tick() {
+        let now = CACurrentMediaTime()
+        if !isInteracting, now >= settlingUntil { reset() }
+        else { time = now }
+    }
+
+    @MainActor private final class ClockTarget: NSObject {
+        weak var owner: WeekCapsuleTrail?
+        init(owner: WeekCapsuleTrail) { self.owner = owner }
+        @objc func tick(_ link: CADisplayLink) {
+            if let owner { owner.tick() }
+            else { link.invalidate() }
+        }
+    }
+}
+
+private struct WeekTrailSample: Sendable {
+    let time: CFTimeInterval
+    let offset: CGFloat
+}
+
+private struct WeekTrailFrame: Sendable {
+    let time: CFTimeInterval
+    let offset: CGFloat
+    let direction: CGFloat
+    let samples: [WeekTrailSample]
+
+    func displacement(centerX: CGFloat, viewportWidth: CGFloat) -> CGFloat {
+        guard !samples.isEmpty else { return 0 }
+        let distance = direction > 0 ? centerX - 42 : viewportWidth - centerX - 42
+        let rank = min(max(distance / 92, 0), 5)
+        let limit = min(rank * 6, 28)
+        let lag = offset - historicalOffset(at: time - Double(rank) * 0.024)
+        return min(max(lag, -limit), limit)
+    }
+
+    private func historicalOffset(at target: CFTimeInterval) -> CGFloat {
+        guard let first = samples.first, let last = samples.last else { return offset }
+        if target <= first.time { return first.offset }
+        for (start, end) in zip(samples, samples.dropFirst()) where target <= end.time {
+            let fraction = CGFloat((target - start.time) / max(end.time - start.time, 0.0001))
+            return start.offset + (end.offset - start.offset) * fraction
+        }
+        return last.offset
     }
 }

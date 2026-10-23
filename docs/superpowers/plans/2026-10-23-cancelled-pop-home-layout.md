@@ -158,3 +158,32 @@ and leave too much unused lower space. Keep the icon and business logic unchange
   and position binding, keep chronological chips, Liquid Glass, ordinary16pt
   margins and natural end clamping. Remove all temporary matrix branches and its
   observation-only test; retain the unchanged strict initial/select/return check.
+- Final production candidate0401499f429c4332b90cc32439e0abbaabb037aa passed
+  Release39937665787 and regression39937664016. Downloaded IPA passes ZIP
+  integrity and retains com.imzhien.ccsut/AppIcon. SHA256:
+  7f3c70bc95fc30ee0431df93b1fa9f43b1fac82d34418affb5752df67de5eb58.
+  Independent read-only review found no confirmed state-loading, click or nested
+  scroll regression. Manual horizontal movement remains free scrolling and does
+  not select a week; the requirement is default centering, without added edge
+  space. Final native acceptance is pending at this entry.
+
+## User-requested motion preview package
+
+- User requested a staggered following effect for the horizontal week capsules,
+  then explicitly asked to skip the full test suite and deliver an IPA now.
+  Cancel UI39937664030 for this scope change; its partial work is not passing
+  acceptance. Preserve the successful0401499 Release/regression and the prior
+  diagnostic evidence. This preview package uses a skip-CI commit plus a manually
+  dispatched Release build, without changing automatic workflow configuration.
+- Retain the observed explicit initial-center mechanism and existing16pt margins.
+  Add a small visual-only trail driven by the native scroll position history:
+  following chips sample up to24ms later per visible position, capped at120ms and
+  28pt. Reverse the ordering with drag direction. Keep sampling through native
+  deceleration; the trail settles within180ms after idle. A display link runs only
+  during the interaction/settlement, with weak ownership and cleanup on leaving.
+  Programmatic selection and reduced motion clear the trail. Immutable Sendable
+  frame snapshots isolate visualEffect rendering from main-thread history writes.
+- Scope of preview verification: source/diff checks, focused read-only lifecycle
+  review, Release compilation and IPA ZIP/bundle/icon integrity. No full UI suite
+  or simulator motion acceptance is claimed for this new effect. Device feel is
+  intentionally left for the user to try in the requested preview package.
