@@ -98,6 +98,8 @@ final class PageInteractionUITests: XCTestCase {
             capture(app, "edge-back-\(title)")
             XCTAssertTrue(app.buttons["账号"].waitForExistence(timeout: 5),
                           "Each academic detail must support interactive edge swipe back")
+            XCTAssertTrue(app.buttons["账号"].isHittable)
+            XCTAssertFalse(app.navigationBars.firstMatch.exists)
         }
     }
 

@@ -255,10 +255,13 @@ private struct AcademicDetailChrome<Actions: View>: ViewModifier {
             }
             .background(alignment: .top) {
                 GeometryReader { geometry in
-                    let height = geometry.safeAreaInsets.top + 12
-                    NagiHeaderGaussianBlur(statusBarFraction: height > 0 ? max(geometry.safeAreaInsets.top - 44, 0) / height : 0)
+                    // A background can already be inside the navigation safe area.
+                    // Its window position still gives the full distance to the top.
+                    let top = max(geometry.safeAreaInsets.top, geometry.frame(in: .global).minY, 0)
+                    let height = top + 12
+                    NagiHeaderGaussianBlur(statusBarFraction: max(top - 44, 0) / height)
                         .frame(height: height)
-                        .offset(y: -geometry.safeAreaInsets.top)
+                        .offset(y: -top)
                 }
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
