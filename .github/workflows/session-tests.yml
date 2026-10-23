@@ -1,0 +1,27 @@
+name: Session regression tests
+
+on:
+  push:
+    paths:
+      - 'ios/CCSUT/**'
+      - 'ios/Tests/**'
+      - '.github/workflows/session-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  session:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile session regression runner
+        run: |
+          xcrun swiftc -parse-as-library \
+            ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/Models.swift \
+            ios/Tests/SessionRegressionTests.swift \
+            -o "$RUNNER_TEMP/session-tests"
+      - name: Run Swift session regressions
+        run: '"$RUNNER_TEMP/session-tests"'
+      - name: Run embedded login script regressions
+        if: always()
+        run: node --test ios/Tests/login-script.test.mjs
