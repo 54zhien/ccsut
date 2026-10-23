@@ -175,6 +175,15 @@ private struct PageRefreshContent: ViewModifier {
     let showsRefreshCount: Bool
     let action: @MainActor () async -> Void
     @State private var refreshCount = 0
+    @State private var refreshDiagnostic = "waiting for scroll attachment"
+
+    private var diagnosticsEnabled: Bool {
+        #if DEBUG
+        InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh")
+        #else
+        false
+        #endif
+    }
 
     func body(content: Content) -> some View {
         content
@@ -182,16 +191,31 @@ private struct PageRefreshContent: ViewModifier {
                 PageRefreshAttachment {
                     await action()
                     refreshCount += 1
+                } diagnosticsEnabled: {
+                    diagnosticsEnabled
+                } onDiagnostic: {
+                    refreshDiagnostic = $0
                 }
                 .allowsHitTesting(false)
             }
             .overlay(alignment: .topTrailing) {
                 #if DEBUG
-                if showsRefreshCount && InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh") {
-                    Text("\(refreshCount)").font(.caption2)
-                        .accessibilityIdentifier("academic-refresh-count")
-                        .allowsHitTesting(false)
+                VStack(alignment: .trailing, spacing: 0) {
+                    if showsRefreshCount && InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh") {
+                        Text("\(refreshCount)").font(.caption2)
+                            .accessibilityIdentifier("academic-refresh-count")
+                    }
+                    if diagnosticsEnabled {
+                        Text(refreshDiagnostic)
+                            .font(.system(size: 1))
+                            .foregroundStyle(.clear)
+                            .frame(width: 1, height: 1)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(refreshDiagnostic)
+                            .accessibilityIdentifier("page-refresh-diagnostic")
+                    }
                 }
+                .allowsHitTesting(false)
                 #endif
             }
     }
@@ -201,8 +225,12 @@ private struct PageRefreshContent: ViewModifier {
 /// Keep this attachment outside loading/empty/data branches and end only after await.
 private struct PageRefreshAttachment: UIViewRepresentable {
     let action: @MainActor () async -> Void
+    let diagnosticsEnabled: () -> Bool
+    let onDiagnostic: @MainActor (String) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action, diagnosticsEnabled: diagnosticsEnabled, onDiagnostic: onDiagnostic)
+    }
     func makeUIView(context: Context) -> AnchorView {
         let view = AnchorView()
         view.coordinator = context.coordinator
@@ -211,6 +239,8 @@ private struct PageRefreshAttachment: UIViewRepresentable {
     }
     func updateUIView(_ view: AnchorView, context: Context) {
         context.coordinator.action = action
+        context.coordinator.diagnosticsEnabled = diagnosticsEnabled
+        context.coordinator.onDiagnostic = onDiagnostic
         view.connect()
     }
     static func dismantleUIView(_ view: AnchorView, coordinator: Coordinator) {
@@ -238,25 +268,87 @@ private struct PageRefreshAttachment: UIViewRepresentable {
 
     @MainActor final class Coordinator: NSObject {
         var action: @MainActor () async -> Void
+        var diagnosticsEnabled: () -> Bool
+        var onDiagnostic: @MainActor (String) -> Void
         private weak var scrollView: UIScrollView?
         private let control = UIRefreshControl()
         private var task: Task<Void, Never>?
+        private weak var diagnosticPanRecognizer: UIPanGestureRecognizer?
+        private var minimumObservedOffsetY: CGFloat?
+        private var valueChangedCount = 0
+        private var lastDiagnostic: String?
 
-        init(action: @escaping @MainActor () async -> Void) {
+        init(action: @escaping @MainActor () async -> Void,
+             diagnosticsEnabled: @escaping () -> Bool,
+             onDiagnostic: @escaping @MainActor (String) -> Void) {
             self.action = action
+            self.diagnosticsEnabled = diagnosticsEnabled
+            self.onDiagnostic = onDiagnostic
             super.init()
             control.addTarget(self, action: #selector(refresh), for: .valueChanged)
         }
 
         func attach(to view: UIScrollView) {
-            guard scrollView !== view else { return }
+            if scrollView === view {
+                installDiagnosticPanObserver(on: view)
+                reportDiagnostic("attach-check")
+                return
+            }
             detach()
             scrollView = view
             view.alwaysBounceVertical = true
             view.refreshControl = control
+            installDiagnosticPanObserver(on: view)
+            reportDiagnostic("attached")
+        }
+
+        private func installDiagnosticPanObserver(on view: UIScrollView) {
+            guard diagnosticsEnabled() else { return }
+            guard diagnosticPanRecognizer !== view.panGestureRecognizer else { return }
+            diagnosticPanRecognizer?.removeTarget(self, action: #selector(trackPan(_:)))
+            diagnosticPanRecognizer = view.panGestureRecognizer
+            view.panGestureRecognizer.addTarget(self, action: #selector(trackPan(_:)))
+            minimumObservedOffsetY = view.contentOffset.y
+        }
+
+        @objc private func trackPan(_ recognizer: UIPanGestureRecognizer) {
+            guard diagnosticsEnabled(), let scrollView,
+                  recognizer === scrollView.panGestureRecognizer else { return }
+            if recognizer.state == .began {
+                minimumObservedOffsetY = scrollView.contentOffset.y
+            } else if minimumObservedOffsetY == nil || scrollView.contentOffset.y < minimumObservedOffsetY! {
+                minimumObservedOffsetY = scrollView.contentOffset.y
+            }
+            switch recognizer.state {
+            case .ended, .cancelled, .failed:
+                reportDiagnostic("pan-\(recognizer.state)")
+            default:
+                break
+            }
+        }
+
+        private func reportDiagnostic(_ event: String) {
+            guard diagnosticsEnabled(), let scrollView else { return }
+            let minimumY = minimumObservedOffsetY.map { String(format: "%.1f", Double($0)) } ?? "n/a"
+            let message = [
+                "event=\(event)",
+                "target=\(NSStringFromClass(type(of: scrollView)))",
+                "frame=\(NSStringFromCGRect(scrollView.frame))",
+                "contentSize=\(NSStringFromCGSize(scrollView.contentSize))",
+                "alwaysBounceVertical=\(scrollView.alwaysBounceVertical)",
+                "refreshControlMatches=\(scrollView.refreshControl === control)",
+                "contentOffsetY=\(String(format: "%.1f", Double(scrollView.contentOffset.y)))",
+                "minimumObservedOffsetY=\(minimumY)",
+                "valueChangedCount=\(valueChangedCount)"
+            ].joined(separator: "; ")
+            guard message != lastDiagnostic else { return }
+            lastDiagnostic = message
+            onDiagnostic(message)
         }
 
         @objc private func refresh() {
+            valueChangedCount += 1
+            reportDiagnostic("valueChanged")
             guard task == nil else { return }
             task = Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -268,6 +360,8 @@ private struct PageRefreshAttachment: UIViewRepresentable {
         }
 
         func detach() {
+            diagnosticPanRecognizer?.removeTarget(self, action: #selector(trackPan(_:)))
+            diagnosticPanRecognizer = nil
             task?.cancel()
             task = nil
             control.endRefreshing()
@@ -319,6 +413,7 @@ final class AcademicTermHeaderTracker {
 struct AcademicTermJumpMenu: View {
     let terms: [String]
     let onSelect: (String) -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         Menu {
@@ -327,12 +422,20 @@ struct AcademicTermJumpMenu: View {
                     .accessibilityIdentifier("academic-term-jump-\(term)")
             }
         } label: {
-            Label("学期", systemImage: "arrow.up.arrow.down")
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 10)
-                .frame(minHeight: 44)
-                .background(Color(.tertiarySystemGroupedBackground), in: .capsule)
-                .contentShape(.capsule)
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 20, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                } else {
+                    Label("学期", systemImage: "arrow.up.arrow.down")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 44)
+                }
+            }
+            .background(Color(.tertiarySystemGroupedBackground), in: .capsule)
+            .contentShape(.capsule)
         }
         .menuStyle(.borderlessButton)
         .accessibilityLabel("跳转学期")

@@ -16,6 +16,7 @@ struct ExamView: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var items: [ExamItem] = []
     @State private var isLoading = false
@@ -79,7 +80,7 @@ struct ExamView: View {
     // MARK: 内容
 
     private func content(proxy: ScrollViewProxy) -> some View {
-        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+        LazyVStack(spacing: 0, pinnedViews: dynamicTypeSize.isAccessibilitySize ? [] : [.sectionHeaders]) {
             if let next = upcoming.first {
                 nextCard(next).padding(.bottom, 12)
             }
@@ -278,6 +279,7 @@ struct ExamView: View {
 private struct ExamRow: View {
     let exam: ExamItem
     var showTerm: Bool
+    @ScaledMetric(relativeTo: .title3) private var dateColumnWidth: CGFloat = 34
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -294,7 +296,7 @@ private struct ExamRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 34)
+            .frame(width: dateColumnWidth)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(exam.kcmc ?? "—")

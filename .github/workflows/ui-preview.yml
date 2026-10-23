@@ -7,6 +7,11 @@ on:
       - 'ios/**'
       - '.github/workflows/ui-preview.yml'
   workflow_dispatch:
+    inputs:
+      render_catalog:
+        description: 'Also render the full static preview catalog and compact-device screenshots'
+        type: boolean
+        default: true
 
 jobs:
   preview:
@@ -60,6 +65,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - name: Verify native page interactions
+        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' }}
         run: |
           set -o pipefail
           xcrun simctl io "$CCSUT_PREVIEW_DEVICE" recordVideo --codec=h264 "$RUNNER_TEMP/ui-screenshots/native-interactions.mp4" &
@@ -84,11 +90,12 @@ jobs:
           path: |
             ${{ runner.temp }}/ui-test.log
             ${{ runner.temp }}/ui-test-attachments/*.png
+            ${{ runner.temp }}/ui-test-attachments/*.txt
             ${{ runner.temp }}/ui-test-attachments/manifest.json
           if-no-files-found: ignore
           retention-days: 14
       - name: Render preview screens
-        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' }}
+        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' && inputs.render_catalog != false }}
         run: bash ios/Tests/render-preview.sh
       - uses: actions/upload-artifact@v4
         if: always()

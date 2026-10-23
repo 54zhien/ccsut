@@ -15,6 +15,7 @@ import SwiftUI
 
 struct ScoreView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var onLoaded: ([ScoreItem]) -> Void = { _ in }
 
@@ -94,7 +95,7 @@ struct ScoreView: View {
     }
 
     private func content(onSelectTerm: @escaping (String) -> Void) -> some View {
-        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+        LazyVStack(spacing: 0, pinnedViews: dynamicTypeSize.isAccessibilitySize ? [] : [.sectionHeaders]) {
             summaryCard.padding(.bottom, 12)
 
             ForEach(terms) { term in
@@ -125,12 +126,22 @@ struct ScoreView: View {
             Label("学业概览", systemImage: "chart.bar.doc.horizontal")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
-            HStack(spacing: 0) {
-                statBlock(value: String(format: "%.2f", overallGPA), label: "加权绩点", tint: .accentColor)
-                Divider().frame(height: 34)
-                statBlock(value: String(format: "%.1f", overallCredits), label: "总学分", tint: .accentColor)
-                Divider().frame(height: 34)
-                statBlock(value: "\(items.count)", label: "门课程", tint: .accentColor)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 10) {
+                    summaryRow(value: String(format: "%.2f", overallGPA), label: "加权绩点")
+                    Divider()
+                    summaryRow(value: String(format: "%.1f", overallCredits), label: "总学分")
+                    Divider()
+                    summaryRow(value: "\(items.count)", label: "门课程")
+                }
+            } else {
+                HStack(spacing: 0) {
+                    statBlock(value: String(format: "%.2f", overallGPA), label: "加权绩点", tint: .accentColor)
+                    Divider().frame(height: 34)
+                    statBlock(value: String(format: "%.1f", overallCredits), label: "总学分", tint: .accentColor)
+                    Divider().frame(height: 34)
+                    statBlock(value: "\(items.count)", label: "门课程", tint: .accentColor)
+                }
             }
         }
         .padding(20)
@@ -150,26 +161,66 @@ struct ScoreView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private func summaryRow(value: String, label: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.title2.weight(.bold).monospacedDigit())
+                .foregroundStyle(Color.accentColor)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func termHeader(_ term: ScoreTerm, onSelectTerm: @escaping (String) -> Void) -> some View {
         let termNames = terms.map(\.name)
+        let stats = "GPA \(String(format: "%.2f", term.gpa)) · \(String(format: "%.1f", term.credits)) 学分 · \(term.items.count) 门课程"
         return AcademicTermStrip(term: term.name, tracker: termHeaderTracker) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
                     Text(SchedulePresentation.termTitle(term.name))
-                        .font(.subheadline.weight(.semibold))
+                        .font(.headline.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("GPA \(String(format: "%.2f", term.gpa)) · \(String(format: "%.1f", term.credits)) 学分 · \(term.items.count) 门课程")
-                        .font(.caption.monospacedDigit())
+                    Text(stats)
+                        .font(.footnote.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if term.failedCount > 0 {
                         Text("\(term.failedCount) 门未通过")
-                            .font(.caption.weight(.semibold))
+                            .font(.footnote.weight(.semibold))
                             .foregroundStyle(.red)
                     }
+                    if termNames.count > 1 {
+                        HStack {
+                            Spacer(minLength: 0)
+                            AcademicTermJumpMenu(terms: termNames, onSelect: onSelectTerm)
+                        }
+                    }
                 }
-                Spacer(minLength: 4)
-                if termNames.count > 1 {
-                    AcademicTermJumpMenu(terms: termNames, onSelect: onSelectTerm)
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(SchedulePresentation.termTitle(term.name))
+                            .font(.subheadline.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(stats)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        if term.failedCount > 0 {
+                            Text("\(term.failedCount) 门未通过")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    Spacer(minLength: 4)
+                    if termNames.count > 1 {
+                        AcademicTermJumpMenu(terms: termNames, onSelect: onSelectTerm)
+                    }
                 }
             }
         }
@@ -238,6 +289,8 @@ private struct ScoreRow: View {
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 12)
 
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(item.scoreText)
@@ -319,7 +372,6 @@ private struct ScoreRow: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 14)
         .contentShape(.rect)
-        .accessibilityIdentifier("score-row-\(accessibilityKey)")
     }
 
     private var accessibilityKey: String {

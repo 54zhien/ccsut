@@ -24,6 +24,15 @@ final class PageInteractionUITests: XCTestCase {
         add(attachment)
     }
 
+    private func logPageRefreshDiagnostic(_ app: XCUIApplication, _ stage: String) {
+        let probe = app.descendants(matching: .any).matching(identifier: "page-refresh-diagnostic").firstMatch
+        if probe.waitForExistence(timeout: 2) {
+            print("[PageRefreshDiagnostic] \(stage): \(probe.label)")
+        } else {
+            print("[PageRefreshDiagnostic] \(stage): missing accessibility probe")
+        }
+    }
+
     func testColdLoadingFillsPageWidth() {
         let app = launch("loading")
         let surface = app.descendants(matching: .any).matching(NSPredicate(
@@ -76,15 +85,18 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testPullingTimetableRefreshesWholePageOnce() {
-        let app = launch("interactions")
+        let app = launch("interactions", refresh: true)
         let counter = app.staticTexts["refresh-count"]
         XCTAssertTrue(counter.waitForExistence(timeout: 5))
         XCTAssertEqual(counter.label, "0")
+        logPageRefreshDiagnostic(app, "schedule-before-pull")
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.42))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.86))
         start.press(forDuration: 0.1, thenDragTo: end)
-        XCTAssertTrue(NSPredicate(format: "label == '1'").evaluate(with: counter) ||
-                      XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5) == .completed)
+        let refreshed = NSPredicate(format: "label == '1'").evaluate(with: counter) ||
+            XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5) == .completed
+        logPageRefreshDiagnostic(app, "schedule-after-pull")
+        XCTAssertTrue(refreshed)
         capture(app, "outer-page-refreshed")
         XCTAssertEqual(counter.label, "1")
     }
@@ -133,6 +145,13 @@ final class PageInteractionUITests: XCTestCase {
             entry.tap()
             let back = app.buttons["返回教务"]
             XCTAssertTrue(back.waitForExistence(timeout: 5))
+            // The cold simulator can expose the back button before the page's
+            // loading branch and native appearance transition have settled.
+            let contentReady = page == "electives"
+                ? app.textFields["课程名 / 教师"]
+                : app.descendants(matching: .any).matching(identifier: "term-header-2026-2027-1").firstMatch
+            XCTAssertTrue(contentReady.waitForExistence(timeout: 8))
+            XCTAssertTrue(contentReady.isHittable)
             let before = back.frame
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.45))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.45))
@@ -140,6 +159,7 @@ final class PageInteractionUITests: XCTestCase {
             capture(app, "cancelled-pop-\(page)")
             let sampleCount = Int(app.staticTexts["transition-samples"].label) ?? 0
             let drift = Double(app.staticTexts["transition-drift"].label) ?? 999
+            print("Transition diagnostic \(page): \(app.staticTexts["transition-diagnostics"].label)")
             add(XCTAttachment(string: "\(page): \(sampleCount) interactive samples, maximum local title drift \(drift)pt"))
             XCTAssertGreaterThan(sampleCount, 3, "Must measure actual in-flight interactive frames")
             XCTAssertLessThanOrEqual(drift, 2, "Title must travel with the detail page during a cancelled swipe")
@@ -194,11 +214,13 @@ final class PageInteractionUITests: XCTestCase {
                 XCTAssertEqual(counter.label, "0")
                 XCTAssertFalse(app.buttons["page-refresh"].exists)
                 XCTAssertFalse(app.buttons["刷新"].exists)
+                logPageRefreshDiagnostic(app, "\(page)-empty-\(empty)-before-pull")
                 let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.35))
                 let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.85))
                 start.press(forDuration: 0.1, thenDragTo: end)
-                XCTAssertTrue(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5) == .completed,
-                              "\(page) must refresh via its scroll surface even when empty=\(empty)")
+                let refreshed = XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5) == .completed
+                logPageRefreshDiagnostic(app, "\(page)-empty-\(empty)-after-pull")
+                XCTAssertTrue(refreshed, "\(page) must refresh via its scroll surface even when empty=\(empty)")
                 capture(app, "pull-refresh-\(page)-empty-\(empty)")
                 app.terminate()
             }
@@ -284,6 +306,18 @@ final class PageInteractionUITests: XCTestCase {
             XCTAssertTrue(control.waitForExistence(timeout: 5))
             XCTAssertTrue(control.isHittable)
             capture(app, "large-text-\(page)")
+            if page == "scores" {
+                let disclosure = app.buttons["score-breakdown-1"]
+                for _ in 0..<5 {
+                    if disclosure.isHittable { break }
+                    app.swipeUp(velocity: .slow)
+                }
+                XCTAssertTrue(disclosure.isHittable, "Large semester headers must not cover course actions")
+                disclosure.tap()
+                let detail = app.staticTexts["平时(40%)"]
+                XCTAssertTrue(detail.waitForExistence(timeout: 3))
+                capture(app, "large-text-score-details")
+            }
             app.terminate()
         }
     }

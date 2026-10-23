@@ -29,36 +29,47 @@
 ### Task 1: Score details and semester controls
 
 Files: ScoreView.swift, PageSurface.swift; UI fixture tests as appropriate.
-- [ ] Replace crowded inline breakdown with accessible tap-to-expand detail, with grade point labels.
-- [ ] Add reusable AcademicTermJumpMenu(terms: [String], onSelect: (String) -> Void) for ScrollViewReader anchors.
-- [ ] Add score semester quick jump and increase semester strip corner radius to harmonize with the 26/28-point cards, preserving pinned transitions.
+- [x] Replace crowded inline breakdown with accessible tap-to-expand detail, with grade point labels.
+- [x] Add reusable AcademicTermJumpMenu(terms: [String], onSelect: (String) -> Void) for ScrollViewReader anchors.
+- [x] Add score semester quick jump and increase semester strip corner radius to 26 points, preserving pinned transitions.
 - [ ] Verify actual macOS build and rendered screenshots / interaction tests.
 
 ### Task 2: Elective feedback
 
 Files: ElectiveView.swift, CourseDetailSheet.swift; related policy tests only if behavior changes.
-- [ ] Display existing safe action block reason on course cards/details and accessibility hints.
-- [ ] Show an empty-filter/search message and reset action without weakening eligibility or action gates.
+- [x] Display existing safe action block reason on course cards/details and accessibility hints.
+- [x] Show an empty-filter/search message and reset action without weakening eligibility or action gates.
 - [ ] Verify disabled reasons, reset, and existing regression suite.
 
 ### Task 3: Exam recovery
 
 Files: AcademicCalendar.swift, AcademicAPI.swift, ExamView.swift, AcademicReliabilityTests.swift, SessionRegressionTests.swift as needed.
-- [ ] Inspect actual contracts/probes and isolate the new failure dependency.
-- [ ] Capture a failing regression for the demonstrated unsupported response/term shape before production changes.
-- [ ] Fix discovery/load with strict validated terms, safe account handling, complete snapshots, and useful stage-specific failure feedback.
-- [ ] Add quick semester jump using the shared control.
-- [ ] Run Foundation regression suite and exact-commit macOS compilation; report remaining live-server uncertainty explicitly.
+- [x] Inspect actual contracts/probes and isolate the new failure dependency.
+- [x] Capture a failing regression for the demonstrated unsupported response/term shape before production changes.
+- [x] Fix discovery/load with strict validated terms, safe account handling, complete snapshots, and useful stage-specific failure feedback.
+- [x] Add quick semester jump using the shared control.
+- [x] Run Foundation regression suite and exact-commit macOS compilation; report remaining live-server uncertainty explicitly.
 
 ### Task 4: Readability and home summaries
 
 Files: ScheduleView.swift, AcademicView.swift and existing shared presentation/model helpers if required.
-- [ ] Scale period/time/day labels and improve auxiliary contrast while preserving grid geometry and animation.
-- [ ] Add truthful available summary data to existing home cards; avoid repeated requests and invented zero counts.
+- [x] Scale period/time/day labels and improve auxiliary contrast while preserving grid geometry and animation.
+- [x] Add truthful available summary data to existing home cards; avoid repeated requests and invented zero counts.
 - [ ] Verify large text layouts and existing fixture navigation.
 
 ### Task 5: Integration
 
-- [ ] Review shared changes for layout, privacy, cancellation, and account lifecycle regressions.
+- [x] Review shared changes for layout, privacy, cancellation, and account lifecycle regressions.
 - [ ] Run Swift/Node runners and macOS build/UI validation at the final commit.
 - [ ] Record exact commit, successful/failed run provenance, and physical-device acceptance still required.
+
+## Evidence checkpoint
+
+- Code commit: `2cc216e75b45bb7c9c044041fac3c5e7b9340c28`.
+- Root cause: the original official `kslist` HAR response uses five `onclick="loadKspc('term');"` controls, and no `option` or `changeXn` controls. The prior parser rejected this real page before any exam-list query.
+- Local RED: the sanitized captured controls produced one failed academic regression on the previous parser. GREEN after adding validated mobile control parsing: 26/26 academic assertions.
+- macOS regression run `39995033219`: 166 Swift PASS assertions, 6 Node tests, zero failures; Debug simulator build succeeded. The HTTP-boundary integration test uses the actual API, term parser, and complete snapshot loader for one discovery plus five semester reads.
+- Release run `39995275101`: succeeded; downloaded IPA ZIP verified, app executable present, bundle `com.imzhien.ccsut`, iOS 26 minimum, unsigned. SHA256 `d1c6ddf6331dfda46c7e0df140d38aa5b63ab99bd198215ec4ed36231dcfd546`.
+- UI run `39995043330`: week positioning test passed (one test, zero failures); exported initial/returned/scrolled screenshots. Actual timetable pixels inspected for period/time labels and preserved card/week styling. The interaction suite finished with 10/14 passing. Failures were cancelled-pop sampling, academic pull-to-refresh, timetable pull-to-refresh, and score disclosure lookup. Preserve this failed run. Actual AX evidence confirmed the outer score row identifier replaced the disclosure identifier; actual recordings confirmed pull movement without a refresh spinner. XXXL screenshots also exposed grade wrapping and oversized sticky headers. Follow-up fixes and observational refresh/transition probes are under validation; no passing claim is made for them yet.
+- No live enrollment/drop/SMS occurred. No new real-server session was used; the exam regression is reproduced from the user's previously captured official response. Physical-device exam loading and visual acceptance remain to be checked with the new IPA.
+- Read-only requests retain pre-existing outer generation checks: stale results cannot publish. Passing the captured generation through every read API is a separate hardening opportunity; mutation transport remains generation-bound.

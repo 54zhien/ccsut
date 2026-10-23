@@ -87,19 +87,23 @@ struct AcademicTitleMarker: UIViewRepresentable {
 /// portion of a cancelled native pop. Do not depend on SwiftUI child-controller
 /// forwarding of UINavigationController.transitionCoordinator.
 struct AcademicTransitionProbe: UIViewRepresentable {
-    let report: (CGFloat, Int) -> Void
+    let report: (CGFloat, Int, String) -> Void
 
     func makeUIView(context: Context) -> ProbeView { ProbeView(report: report) }
     func updateUIView(_ view: ProbeView, context: Context) { view.report = report }
 
     final class ProbeView: UIView {
-        var report: (CGFloat, Int) -> Void
+        var report: (CGFloat, Int, String) -> Void
         private var displayLink: CADisplayLink?
         private var baseline: CGFloat?
         private var maximum: CGFloat = 0
         private var samples = 0
+        private var ticks = 0
+        private var activeTicks = 0
+        private var maxTranslation: CGFloat = 0
+        private var lastDiagnosticState = ""
 
-        init(report: @escaping (CGFloat, Int) -> Void) {
+        init(report: @escaping (CGFloat, Int, String) -> Void) {
             self.report = report
             super.init(frame: .zero)
             isUserInteractionEnabled = false
@@ -139,15 +143,24 @@ struct AcademicTransitionProbe: UIViewRepresentable {
             return controller.children.contains { isPopActive(in: $0) }
         }
         @objc private func sample() {
+            ticks += 1
             guard let window, let root = window.rootViewController, let marker = findMarker(window) else { return }
             let pageX = frame(self, in: window).minX
             let localTitleX = frame(marker, in: window).midX - pageX
-            if isPopActive(in: root), abs(pageX) > 2, let baseline {
+            let active = isPopActive(in: root)
+            if active { activeTicks += 1 }
+            maxTranslation = max(maxTranslation, abs(pageX))
+            if active, abs(pageX) > 2, let baseline {
                 samples += 1
                 maximum = max(maximum, abs(localTitleX - baseline))
-                if samples % 8 == 0 { report(maximum, samples) }
             } else if abs(pageX) <= 2 {
                 self.baseline = localTitleX
+            }
+            if ticks % 30 == 0 {
+                let state = "active=\(activeTicks) maxX=\(Int(maxTranslation)) baseline=\(baseline != nil) width=\(Int(bounds.width))"
+                guard state != lastDiagnosticState else { return }
+                lastDiagnosticState = state
+                report(maximum, samples, "ticks=\(ticks) \(state)")
             }
         }
     }

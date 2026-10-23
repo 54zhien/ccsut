@@ -172,6 +172,7 @@ private struct AcademicDetailChrome: ViewModifier {
     #if DEBUG
     @State private var transitionDrift: CGFloat = 0
     @State private var transitionSamples = 0
+    @State private var transitionDiagnostics = "waiting"
     #endif
 
     func body(content: Content) -> some View {
@@ -206,9 +207,10 @@ private struct AcademicDetailChrome: ViewModifier {
             .background {
                 #if DEBUG
                 if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-transition") {
-                    AcademicTransitionProbe() { drift, samples in
+                    AcademicTransitionProbe() { drift, samples, diagnostics in
                         transitionDrift = drift
                         transitionSamples = samples
+                        transitionDiagnostics = diagnostics
                     }
                 }
                 #endif
@@ -219,6 +221,7 @@ private struct AcademicDetailChrome: ViewModifier {
                     VStack {
                         Text(String(format: "%.3f", transitionDrift)).accessibilityIdentifier("transition-drift")
                         Text("\(transitionSamples)").accessibilityIdentifier("transition-samples")
+                        Text(transitionDiagnostics).accessibilityIdentifier("transition-diagnostics")
                     }
                     .font(.caption2).allowsHitTesting(false)
                 }
