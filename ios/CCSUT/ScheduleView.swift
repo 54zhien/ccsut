@@ -11,7 +11,6 @@ struct ScheduleView: View {
     @State private var isLoading = false
     @State private var errorText: String?
     @State private var selectedWeek = 1
-    @State private var weekScrollID: Int? = 1
     @State private var currentWeek = 1
     @State private var didPickWeek = false
     @State private var referenceDate: Date?
@@ -20,8 +19,6 @@ struct ScheduleView: View {
     @State private var pendingDetail: ScheduleSlot?
     @State private var headerScrollOffset: CGFloat = 0
     @State private var previewRefreshCount = 0
-    @State private var diagnosticWeekOffset: CGFloat = 0
-    @State private var diagnosticVisibleWeeks = ""
     private let railWidth: CGFloat = 44
     private let headerHeight: CGFloat = 52
     private let weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -106,11 +103,6 @@ struct ScheduleView: View {
                     VStack {
                         Text("\(previewRefreshCount)").accessibilityIdentifier("refresh-count")
                         Text("\(deviceCornerRadius)").accessibilityIdentifier("device-corner-radius")
-                        if !weekDiagnosticMode.isEmpty {
-                            Text("mode=\(weekDiagnosticMode) offset=\(diagnosticWeekOffset) id=\(weekScrollID ?? -1) visible=\(diagnosticVisibleWeeks)")
-                                .font(.caption2)
-                                .accessibilityIdentifier("week-diagnostics")
-                        }
                     }
                     .padding(.bottom, 100)
                 }
@@ -178,101 +170,49 @@ struct ScheduleView: View {
         didPickWeek = true
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
             selectedWeek = week
-            weekScrollID = week
         }
     }
 
-    private var weekDiagnosticMode: String {
-        #if DEBUG
-        let args = ProcessInfo.processInfo.arguments
-        if InterfacePreview.enabled, let index = args.firstIndex(of: "--diagnose-week"), args.indices.contains(index + 1) {
-            return args[index + 1]
-        }
-        #endif
-        return ""
-    }
-
-    @ViewBuilder private var weekBar: some View {
-        if weekDiagnosticMode == "without-container" {
-            weekScroller
-        } else {
-            GlassEffectContainer(spacing: 8) { weekScroller }
-        }
-    }
-
-    @ViewBuilder private var weekScroller: some View {
-        if weekDiagnosticMode == "proxy-unsnapped" {
+    private var weekBar: some View {
+        GlassEffectContainer(spacing: 8) {
             ScrollViewReader { proxy in
-                ScrollView(.horizontal) { weekRow }
-                    .scrollIndicators(.hidden)
-                    .contentMargins(.horizontal, 16, for: .scrollContent)
-                    .onAppear { proxy.scrollTo(selectedWeek, anchor: .center) }
-                    .onChange(of: selectedWeek) { _, week in proxy.scrollTo(week, anchor: .center) }
-            }
-        } else {
-            ScrollView(.horizontal) {
-                weekRow
-            }
-            .scrollIndicators(.hidden)
-            .scrollTargetBehavior(.viewAligned(anchor: .center))
-            .contentMargins(.horizontal, 16, for: .scrollContent)
-            .scrollPosition(id: $weekScrollID, anchor: .center)
-            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, offset in
-                if !weekDiagnosticMode.isEmpty { diagnosticWeekOffset = offset }
-            }
-            .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { ids in
-                if !weekDiagnosticMode.isEmpty { diagnosticVisibleWeeks = ids.sorted().map(String.init).joined(separator: ",") }
-            }
-            .task {
-                if weekDiagnosticMode == "deferred" {
-                    weekScrollID = nil
-                    try? await Task.sleep(for: .milliseconds(250))
-                    weekScrollID = selectedWeek
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(1...maxWeek, id: \.self) { week in
+                            Button { selectWeek(week) } label: {
+                                Text(week == currentWeek ? "本周" : "第 \(week) 周")
+                                    .font(.subheadline.weight(week == selectedWeek ? .semibold : .medium))
+                                    .monospacedDigit()
+                                    .padding(.horizontal, 14)
+                                    .frame(minWidth: 84, minHeight: 44)
+                                    .foregroundStyle(week == selectedWeek ? Color.accentColor : Color.primary)
+                            }
+                            .buttonStyle(.plain)
+                            .glassEffect(week == selectedWeek ? .regular.tint(.accentColor.opacity(0.18)).interactive() : .regular.interactive(), in: .capsule)
+                            .overlay(alignment: .bottom) {
+                                if week == currentWeek && week != selectedWeek {
+                                    Circle().fill(Color.accentColor).frame(width: 4, height: 4).padding(.bottom, 4)
+                                }
+                            }
+                            .accessibilityLabel(week == currentWeek ? "本周" : "第 \(week) 周")
+                            .accessibilityAddTraits(week == selectedWeek ? [.isSelected] : [])
+                            .id(week)
+                        }
+                    }
+                    .scrollTargetLayout()
+                    .padding(.vertical, 8)
+                }
+                .scrollIndicators(.hidden)
+                .contentMargins(.horizontal, 16, for: .scrollContent)
+                // Automatic view-aligned settling overrides the requested center on iOS26.
+                .onAppear { proxy.scrollTo(selectedWeek, anchor: .center) }
+                .onChange(of: selectedWeek) { _, week in
+                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
+                        proxy.scrollTo(week, anchor: .center)
+                    }
                 }
             }
         }
-    }
-
-    @ViewBuilder private var weekRow: some View {
-        if weekDiagnosticMode == "lazy" {
-            LazyHStack(spacing: 8) { weekButtons }
-                .scrollTargetLayout()
-                .padding(.vertical, 8)
-        } else {
-            HStack(spacing: 8) { weekButtons }
-                .scrollTargetLayout()
-                .padding(.vertical, 8)
-        }
-    }
-
-    private var weekButtons: some View {
-                    ForEach(1...maxWeek, id: \.self) { week in
-                        if weekDiagnosticMode == "explicit-id" || weekDiagnosticMode == "proxy-unsnapped" {
-                            weekButton(week).id(week)
-                        } else {
-                            weekButton(week)
-                        }
-                    }
-    }
-
-    private func weekButton(_ week: Int) -> some View {
-                        Button { selectWeek(week) } label: {
-                            Text(week == currentWeek ? "本周" : "第 \(week) 周")
-                                .font(.subheadline.weight(week == selectedWeek ? .semibold : .medium))
-                                .monospacedDigit()
-                                .padding(.horizontal, 14)
-                                .frame(minWidth: 84, minHeight: 44)
-                                .foregroundStyle(week == selectedWeek ? Color.accentColor : Color.primary)
-                        }
-                        .buttonStyle(.plain)
-                        .glassEffect(week == selectedWeek ? .regular.tint(.accentColor.opacity(0.18)).interactive() : .regular.interactive(), in: .capsule)
-                        .overlay(alignment: .bottom) {
-                            if week == currentWeek && week != selectedWeek {
-                                Circle().fill(Color.accentColor).frame(width: 4, height: 4).padding(.bottom, 4)
-                            }
-                        }
-                        .accessibilityLabel(week == currentWeek ? "本周" : "第 \(week) 周")
-                        .accessibilityAddTraits(week == selectedWeek ? [.isSelected] : [])
     }
 
     private var cells: [ScheduleCell] { SchedulePresentation.cells(bundle?.slots ?? [], week: selectedWeek) }
@@ -435,7 +375,6 @@ struct ScheduleView: View {
             bundle = InterfacePreview.schedule
             currentWeek = 7
             selectedWeek = 7
-            weekScrollID = 7
             didPickWeek = true
             referenceDate = ISO8601DateFormatter().date(from: "2026-10-23T09:41:00+08:00")
             if InterfacePreview.page == "course" { detail = cells.first?.courses.first }
@@ -456,7 +395,6 @@ struct ScheduleView: View {
                 referenceDate = Date()
                 if !didPickWeek {
                     selectedWeek = week
-                    weekScrollID = week
                     didPickWeek = true
                 }
             }

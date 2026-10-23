@@ -145,3 +145,16 @@ and leave too much unused lower space. Keep the icon and business logic unchange
   Record chip geometry plus native offset/visible targets where available. These
   diagnostics are observations, not acceptance; the unchanged strict center test
   must still pass on the final production structure. Do not add edge spacers.
+- Runtime matrix4b53ff6 / UI39935833166: baseline and explicit-ID variants
+  both keep offset-16 and chip midpoint610 despite bound ID7 and visible targets
+  1,2,3,4. A deferred binding write moves to58; LazyHStack reaches99; removing
+  the glass container stays610. Unsnapped ScrollViewReader with the existing16pt
+  native content margins places the chip at201, exactly the viewport midpoint.
+  The diagnostic observer is not a fix: strict baseline acceptance still fails
+  at610 and is retained. This rules out glass removal as a useful correction and
+  shows programmatic targeting works when automatic alignment is removed.
+- Final candidate restores that observed explicit center mechanism for initial
+  mount and selected-week changes. Remove the conflicting view-aligned settling
+  and position binding, keep chronological chips, Liquid Glass, ordinary16pt
+  margins and natural end clamping. Remove all temporary matrix branches and its
+  observation-only test; retain the unchanged strict initial/select/return check.

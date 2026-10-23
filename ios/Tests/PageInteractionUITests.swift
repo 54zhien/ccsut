@@ -23,26 +23,6 @@ final class PageInteractionUITests: XCTestCase {
         add(attachment)
     }
 
-    func testDiagnoseWeekPositioning() {
-        for mode in ["baseline", "explicit-id", "deferred", "lazy", "without-container", "proxy-unsnapped"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["--preview-ui", "--preview-page", "interactions", "--diagnose-week", mode]
-            app.launch()
-            let metrics = app.staticTexts["week-diagnostics"]
-            XCTAssertTrue(metrics.waitForExistence(timeout: 5))
-            // Allow the single delayed-write experiment to settle before observing all variants.
-            Thread.sleep(forTimeInterval: 1)
-            let report = "WEEK EXPERIMENT \(mode): currentMidX=\(app.buttons["本周"].frame.midX), viewportMidX=\(app.frame.midX), \(metrics.label)"
-            print(report)
-            let attachment = XCTAttachment(string: report)
-            attachment.name = "week-\(mode)-metrics"
-            attachment.lifetime = .keepAlways
-            add(attachment)
-            capture(app, "week-experiment-\(mode)")
-            app.terminate()
-        }
-    }
-
     func testColdLoadingFillsPageWidth() {
         let app = launch("loading")
         let surface = app.descendants(matching: .any).matching(NSPredicate(

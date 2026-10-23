@@ -39,7 +39,6 @@ jobs:
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
             -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-week-tests.xcresult" \
-            -only-testing:CCSUTUITests/PageInteractionUITests/testDiagnoseWeekPositioning \
             -only-testing:CCSUTUITests/PageInteractionUITests/testSemesterAndWeekdaysMoveWithCourses \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-week-test.log"
       - name: Export week positioning screenshots
@@ -70,7 +69,6 @@ jobs:
             -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
             -skip-testing:CCSUTUITests/PageInteractionUITests/testSemesterAndWeekdaysMoveWithCourses \
-            -skip-testing:CCSUTUITests/PageInteractionUITests/testDiagnoseWeekPositioning \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
       - name: Export interaction screenshots
         if: always()
