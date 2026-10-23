@@ -236,8 +236,8 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
     }
 }
 
-/// Detail pages use the native navigation bar so the system owns interactive pop.
-/// Their titles stay centered and visible while retaining the shared blur.
+/// Inline chrome belongs to the child, so a cancelled pop cannot interpolate its
+/// title/buttons independently of the moving page. UIKit still owns the gesture.
 private struct AcademicDetailChrome<Actions: View>: ViewModifier {
     let title: String
     @ViewBuilder let actions: () -> Actions
@@ -247,12 +247,44 @@ private struct AcademicDetailChrome<Actions: View>: ViewModifier {
     #endif
 
     func body(content: Content) -> some View {
-        content
+        GeometryReader { geometry in
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .toolbar(.hidden, for: .navigationBar)
+                .scrollEdgeEffectHidden(true, for: .top)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    HStack {
+                        NagiBackButton()
+                        Spacer(minLength: 12)
+                        actions()
+                    }
+                    .overlay {
+                        Text(title)
+                            .font(.headline)
+                            .lineLimit(1)
+                            .accessibilityIdentifier("academic-detail-title")
+                            .background {
+                                #if DEBUG
+                                if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-transition") {
+                                    AcademicTitleMarker()
+                                }
+                                #endif
+                            }
+                    }
+                    .frame(height: 48)
+                    .padding(.horizontal, 16)
+                    .background(alignment: .top) {
+                        let height = geometry.safeAreaInsets.top + 60
+                        NagiHeaderGaussianBlur(statusBarFraction: max(geometry.safeAreaInsets.top, 0) / height)
+                            .frame(height: height)
+                            .offset(y: -geometry.safeAreaInsets.top)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
+        }
             .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar(.visible, for: .navigationBar)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .scrollEdgeEffectHidden(true, for: .top)
+            .background { AcademicPopSupport() }
             .background {
                 #if DEBUG
                 if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-transition") {
@@ -273,23 +305,6 @@ private struct AcademicDetailChrome<Actions: View>: ViewModifier {
                     .font(.caption2).allowsHitTesting(false)
                 }
                 #endif
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { actions() }
-                    .sharedBackgroundVisibility(.hidden)
-            }
-            .overlay(alignment: .top) {
-                GeometryReader { geometry in
-                    // Content can already be inside the navigation safe area.
-                    // Its window position still gives the full distance to the top.
-                    let top = max(geometry.safeAreaInsets.top, geometry.frame(in: .global).minY, 0)
-                    let height = top + 12
-                    NagiHeaderGaussianBlur(statusBarFraction: max(top - 44, 0) / height)
-                        .frame(height: height)
-                        .offset(y: -top)
-                }
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
             }
     }
 }

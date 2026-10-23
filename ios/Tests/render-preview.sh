@@ -29,6 +29,11 @@ capture() {
 capture schedule light
 capture schedule dark
 capture academic light
+capture academic dark
+xcrun simctl ui "$DEVICE" appearance light
+xcrun simctl launch --terminate-running-process "$DEVICE" com.imzhien.ccsut --preview-ui --preview-page academic --preview-no-upcoming
+sleep 3
+xcrun simctl io "$DEVICE" screenshot "$OUT/academic-empty-light.png"
 capture loading light
 capture scores light
 capture exams light

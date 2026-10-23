@@ -3,11 +3,12 @@ import XCTest
 final class PageInteractionUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
-    private func launch(_ page: String, longList: Bool = false, transition: Bool = false) -> XCUIApplication {
+    private func launch(_ page: String, longList: Bool = false, transition: Bool = false, withoutUpcoming: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", page]
         if longList { app.launchArguments.append("--preview-long-list") }
         if transition { app.launchArguments.append("--preview-transition") }
+        if withoutUpcoming { app.launchArguments.append("--preview-no-upcoming") }
         app.launch()
         return app
     }
@@ -76,13 +77,14 @@ final class PageInteractionUITests: XCTestCase {
             let entry = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
             XCTAssertTrue(entry.waitForExistence(timeout: 5))
             entry.tap()
-            let back = app.navigationBars.buttons.firstMatch
+            let back = app.buttons["返回教务"]
             XCTAssertTrue(back.waitForExistence(timeout: 5))
             XCTAssertLessThan(back.frame.midX, app.frame.width * 0.25)
             capture(app, "academic-\(title)")
             back.tap()
             XCTAssertTrue(app.buttons["账号"].waitForExistence(timeout: 5))
             XCTAssertFalse(app.navigationBars.firstMatch.exists)
+            XCTAssertFalse(app.buttons["page-refresh"].exists)
         }
     }
 
@@ -101,6 +103,7 @@ final class PageInteractionUITests: XCTestCase {
                           "Each academic detail must support interactive edge swipe back")
             XCTAssertTrue(app.buttons["账号"].isHittable)
             XCTAssertFalse(app.navigationBars.firstMatch.exists)
+            XCTAssertFalse(app.buttons["page-refresh"].exists)
         }
     }
 
@@ -125,11 +128,29 @@ final class PageInteractionUITests: XCTestCase {
         }
     }
 
+    func testAcademicHomeWithoutReminderHasStableSpacedEntries() {
+        let app = launch("academic", withoutUpcoming: true)
+        let first = app.buttons["academic-scores"]
+        let last = app.buttons["academic-electives"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        let before = first.frame
+        let account = app.buttons["账号"]
+        XCTAssertGreaterThanOrEqual(before.minY - account.frame.maxY, 24)
+        XCTAssertGreaterThanOrEqual(before.height, 128)
+        XCTAssertTrue(last.isHittable)
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.35))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.75))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertEqual(first.frame.minY, before.minY, accuracy: 2)
+        XCTAssertEqual(first.frame.height, before.height, accuracy: 2)
+        capture(app, "academic-home-no-reminder-pulled")
+    }
+
     func testAcademicTitlesAndTermStripsRemainStableWhenPinned() {
         var stripWidths: [CGFloat] = []
         for (page, title) in [("scores", "成绩单"), ("exams", "考试")] {
             let app = launch(page, longList: true)
-            let navigationTitle = app.navigationBars.staticTexts[title]
+            let navigationTitle = app.staticTexts["academic-detail-title"]
             XCTAssertTrue(navigationTitle.waitForExistence(timeout: 5))
             let titleFrame = navigationTitle.frame
             XCTAssertEqual(titleFrame.midX, app.frame.midX, accuracy: 6)

@@ -1,7 +1,88 @@
 import SwiftUI
 import UIKit
 
+/// Keep UIKit's interactive pop with a page-owned header. Scope the delegate
+/// override to the visible child and restore UIKit's delegates when it leaves.
+struct AcademicPopSupport: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> PopController { PopController() }
+    func updateUIViewController(_ controller: PopController, context: Context) {}
+    static func dismantleUIViewController(_ controller: PopController, coordinator: ()) {
+        controller.restore()
+    }
+
+    final class PopController: UIViewController, UIGestureRecognizerDelegate {
+        private struct SavedGesture {
+            let recognizer: UIGestureRecognizer
+            let delegate: (any UIGestureRecognizerDelegate)?
+            let wasEnabled: Bool
+        }
+        private var saved: [SavedGesture] = []
+
+        override func loadView() {
+            view = UIView()
+            view.backgroundColor = .clear
+            view.isUserInteractionEnabled = false
+        }
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            guard let nav = navigationController, nav.viewControllers.count > 1 else { return }
+            for gesture in [nav.interactivePopGestureRecognizer, nav.interactiveContentPopGestureRecognizer].compactMap({ $0 }) {
+                guard gesture.delegate !== self else { continue }
+                saved.append(SavedGesture(recognizer: gesture, delegate: gesture.delegate, wasEnabled: gesture.isEnabled))
+                gesture.delegate = self
+                gesture.isEnabled = true
+            }
+        }
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            restore()
+        }
+        func restore() {
+            for item in saved where item.recognizer.delegate === self {
+                item.recognizer.delegate = item.delegate
+                item.recognizer.isEnabled = item.wasEnabled
+            }
+            saved.removeAll()
+        }
+        func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+            guard let nav = navigationController, nav.viewControllers.count > 1,
+                  nav.transitionCoordinator == nil else { return false }
+            if let pan = gesture as? UIPanGestureRecognizer {
+                let velocity = pan.velocity(in: nav.view)
+                let direction: CGFloat = nav.view.effectiveUserInterfaceLayoutDirection == .rightToLeft ? -1 : 1
+                guard velocity.x * direction > abs(velocity.y) else { return false }
+            }
+            return true
+        }
+        private func original(for gesture: UIGestureRecognizer) -> (any UIGestureRecognizerDelegate)? {
+            saved.first { $0.recognizer === gesture }?.delegate
+        }
+        func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            original(for: gesture)?.gestureRecognizer?(gesture, shouldReceive: touch) ?? true
+        }
+        func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            original(for: gesture)?.gestureRecognizer?(gesture, shouldRecognizeSimultaneouslyWith: other) ?? false
+        }
+        func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldRequireFailureOf other: UIGestureRecognizer) -> Bool {
+            original(for: gesture)?.gestureRecognizer?(gesture, shouldRequireFailureOf: other) ?? false
+        }
+        func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+            original(for: gesture)?.gestureRecognizer?(gesture, shouldBeRequiredToFailBy: other) ?? false
+        }
+    }
+}
+
 #if DEBUG
+struct AcademicTitleMarker: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.accessibilityIdentifier = "academic-title-anchor"
+        return view
+    }
+    func updateUIView(_ view: UIView, context: Context) {}
+}
+
 /// Observe presentation geometry during a real UIKit interactive transition.
 struct AcademicTransitionProbe: UIViewControllerRepresentable {
     let title: String

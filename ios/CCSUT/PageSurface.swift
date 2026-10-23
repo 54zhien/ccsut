@@ -91,9 +91,10 @@ struct AcademicTermStrip<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 if isFloating {
-                    Color.clear.glassEffect(.regular, in: Capsule())
+                    Color.clear.glassEffect(.regular, in: .rect(cornerRadius: 18))
                 } else {
-                    Capsule().fill(Color(.secondarySystemGroupedBackground))
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color(.secondarySystemGroupedBackground))
                 }
             }
             .accessibilityElement(children: .contain)

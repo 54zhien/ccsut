@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A small directory of academic tasks; each destination keeps its existing UI.
+/// Stable, independently spaced entry cards; optional reminders follow the entries.
 struct AcademicView: View {
     private enum Destination: Hashable { case scores, exams, electives }
     @State private var nextExam: ExamItem?
@@ -10,56 +10,40 @@ struct AcademicView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                if let nextExam {
-                    Section("近期安排") {
+            GeometryReader { viewport in
+                let cardHeight = max(128, min(156, (viewport.size.height - 96) / 3))
+                ScrollView {
+                    VStack(spacing: 16) {
+                        NavigationLink(value: Destination.scores) {
+                            service("成绩查询", subtitle: "课程成绩、学分与绩点", symbol: "chart.bar.doc.horizontal", tint: .blue, height: cardHeight)
+                        }
+                        .accessibilityIdentifier("academic-scores")
                         NavigationLink(value: Destination.exams) {
-                            VStack(alignment: .leading, spacing: 9) {
-                                Label("即将考试", systemImage: "calendar.badge.clock")
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(.tint)
-                                Text(nextExam.kcmc ?? "考试安排")
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                if let date = nextExam.startDate {
-                                    Text(date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened,
-                                                                        locale: Locale(identifier: "zh_CN"),
-                                                                        timeZone: TimeZone(identifier: "Asia/Shanghai")!)))
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                                if !nextExam.location.isEmpty {
-                                    Text(nextExam.location)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(.vertical, 7)
+                            service("考试安排", subtitle: "考试时间、考场与座位", symbol: "calendar.badge.clock", tint: .teal, height: cardHeight)
+                        }
+                        .accessibilityIdentifier("academic-exams")
+                        NavigationLink(value: Destination.electives) {
+                            service("选课", subtitle: "浏览课程与管理已选课程", symbol: "list.bullet.rectangle.portrait", tint: .indigo, height: cardHeight)
+                        }
+                        .accessibilityIdentifier("academic-electives")
+                        if let nextExam {
+                            NavigationLink(value: Destination.exams) { upcomingCard(nextExam) }
+                                .padding(.top, 8)
                         }
                     }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 24)
+                    .padding(.bottom, 28)
+                    .frame(maxWidth: 720)
+                    .frame(maxWidth: .infinity)
                 }
-
-                Section {
-                    NavigationLink(value: Destination.scores) {
-                        service("成绩查询", subtitle: "课程成绩、学分与绩点", symbol: "chart.bar.doc.horizontal", tint: .blue)
-                    }
-                    NavigationLink(value: Destination.exams) {
-                        service("考试安排", subtitle: "考试时间、考场与座位", symbol: "calendar.badge.clock", tint: .teal)
-                    }
-                    NavigationLink(value: Destination.electives) {
-                        service("选课", subtitle: "浏览课程与管理已选课程", symbol: "list.bullet.rectangle.portrait", tint: .indigo)
-                    }
-                }
-
-                if InterfacePreview.enabled {
-                    Section { Text("界面预览 · 示例数据").font(.footnote).foregroundStyle(.secondary) }
-                }
+                .scrollBounceBehavior(.basedOnSize)
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
+                } action: { _, offset in headerScrollOffset = offset }
             }
-            .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
-            } action: { _, offset in
-                headerScrollOffset = offset
-            }
+            .background(Color(.systemGroupedBackground))
             .nagiPageChrome(title: "教务", scrollOffset: headerScrollOffset) {
                 AccountButton()
             }
@@ -86,25 +70,55 @@ struct AcademicView: View {
         }
     }
 
-    private func service(_ title: String, subtitle: String, symbol: String, tint: Color) -> some View {
-        HStack(spacing: 14) {
+    private func service(_ title: String, subtitle: String, symbol: String, tint: Color, height: CGFloat) -> some View {
+        HStack(spacing: 16) {
             Image(systemName: symbol)
                 .font(.system(size: 20, weight: .medium))
                 .foregroundStyle(tint)
-                .frame(width: 42, height: 42)
-                .background(tint.opacity(0.09), in: .rect(cornerRadius: 12))
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.body.weight(.medium)).foregroundStyle(.primary)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                .frame(width: 52, height: 52)
+                .background(tint.opacity(0.09), in: .rect(cornerRadius: 16))
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(.title3.weight(.semibold)).foregroundStyle(.primary)
+                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.vertical, 7)
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
         }
+        .padding(20)
+        .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
+        .contentShape(.rect(cornerRadius: 24))
         .accessibilityElement(children: .combine)
+    }
+
+    private func upcomingCard(_ exam: ExamItem) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("近期考试", systemImage: "calendar.badge.clock")
+                .font(.caption.weight(.medium)).foregroundStyle(.teal)
+            Text(exam.kcmc ?? "考试安排").font(.headline).foregroundStyle(.primary)
+            if let date = exam.startDate {
+                Text(date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened,
+                                                    locale: Locale(identifier: "zh_CN"),
+                                                    timeZone: TimeZone(identifier: "Asia/Shanghai")!)))
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            if !exam.location.isEmpty {
+                Text(exam.location).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
     }
 
     private func loadUpcomingExam() async {
         #if DEBUG
-        if InterfacePreview.enabled { nextExam = InterfacePreview.exam; return }
+        if InterfacePreview.enabled {
+            nextExam = ProcessInfo.processInfo.arguments.contains("--preview-no-upcoming") ? nil : InterfacePreview.exam
+            return
+        }
         #endif
         do {
             let info = try await APIClient.shared.electiveInit()
