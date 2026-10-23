@@ -22,48 +22,46 @@ struct ScoreView: View {
     @State private var selectedTerm: String?
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading && items.isEmpty {
-                    ProgressView("加载成绩…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorText, items.isEmpty {
-                    ContentUnavailableView {
-                        Label("加载失败", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(errorText)
-                    } actions: {
-                        Button("重试") { Task { await load(force: true) } }
-                    }
-                } else if items.isEmpty {
-                    ContentUnavailableView {
-                        Label("暂无成绩", systemImage: "doc.text.magnifyingglass")
-                    } description: {
-                        Text("这学期还没出成绩，或者还没完成评教。")
-                    }
-                } else {
-                    content
+        Group {
+            if isLoading && items.isEmpty {
+                ProgressView("加载成绩…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let errorText, items.isEmpty {
+                ContentUnavailableView {
+                    Label("加载失败", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(errorText)
+                } actions: {
+                    Button("重试") { Task { await load(force: true) } }
                 }
-            }
-            .navigationTitle("成绩单")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await load(force: true) }
-                    } label: {
-                        if isLoading {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                    .disabled(isLoading)
+            } else if items.isEmpty {
+                ContentUnavailableView {
+                    Label("暂无成绩", systemImage: "doc.text.magnifyingglass")
+                } description: {
+                    Text("这学期还没出成绩，或者还没完成评教。")
                 }
+            } else {
+                content
             }
-            .refreshable { await load(force: true) }
-            .task { if items.isEmpty { await load() } }
         }
+        .navigationTitle("成绩单")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    Task { await load(force: true) }
+                } label: {
+                    if isLoading {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .disabled(isLoading)
+            }
+        }
+        .refreshable { await load(force: true) }
+        .task { if items.isEmpty { await load() } }
     }
 
     // MARK: - 内容

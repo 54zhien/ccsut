@@ -8,12 +8,46 @@ struct ScheduleCell: Identifiable {
 }
 
 enum SchedulePresentation {
-    // Baseline extraction from ScheduleView.cells; regression tests precede the fix.
     static func cells(_ slots: [ScheduleSlot], week: Int) -> [ScheduleCell] {
         let visible = slots.filter { $0.weeks.isEmpty || $0.weeks.contains(week) }
         return Dictionary(grouping: visible) { "\($0.weekday)-\($0.bigSection)" }.values.compactMap { group in
             guard let first = group.first else { return nil }
-            return ScheduleCell(weekday: first.weekday, section: first.bigSection, courses: [first])
+            return ScheduleCell(weekday: first.weekday, section: first.bigSection, courses: coalesced(group))
         }.sorted { ($0.weekday, $0.section) < ($1.weekday, $1.section) }
+    }
+
+    private struct CourseKey: Hashable {
+        let name: String
+        let teacher: String
+        let room: String
+        let weeks: [Int]
+    }
+
+    /// Only join adjacent periods with identical course, place and week information.
+    /// Conflicting courses remain separate, so the UI can expose every source record.
+    private static func coalesced(_ slots: [ScheduleSlot]) -> [ScheduleSlot] {
+        let groups = Dictionary(grouping: slots) {
+            CourseKey(name: $0.course, teacher: $0.teacher, room: $0.room, weeks: $0.weeks.sorted())
+        }
+        var result: [ScheduleSlot] = []
+        for group in groups.values {
+            let ordered = group.sorted { $0.startPeriod < $1.startPeriod }
+            guard var current = ordered.first else { continue }
+            for next in ordered.dropFirst() {
+                if next.startPeriod <= current.endPeriod + 1 {
+                    current = ScheduleSlot(course: current.course, teacher: current.teacher, room: current.room,
+                                           weekday: current.weekday, startPeriod: current.startPeriod,
+                                           endPeriod: max(current.endPeriod, next.endPeriod), weeks: current.weeks)
+                } else {
+                    result.append(current)
+                    current = next
+                }
+            }
+            result.append(current)
+        }
+        return result.sorted {
+            if $0.startPeriod != $1.startPeriod { return $0.startPeriod < $1.startPeriod }
+            return ($0.course, $0.room, $0.teacher) < ($1.course, $1.room, $1.teacher)
+        }
     }
 }

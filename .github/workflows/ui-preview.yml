@@ -1,0 +1,37 @@
+name: UI preview
+
+on:
+  push:
+    branches: [ui/navigation-timetable]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ui-preview.yml'
+  workflow_dispatch:
+
+jobs:
+  preview:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test timetable presentation
+        run: |
+          xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
+          "$RUNNER_TEMP/schedule-tests"
+      - name: Build simulator app
+        run: |
+          set -o pipefail
+          xcodebuild build -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/UIPreview" \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-build.log"
+      - name: Render preview screens
+        run: bash ios/Tests/render-preview.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CCSUT-ui-preview
+          path: |
+            ${{ runner.temp }}/ui-screenshots/
+            ${{ runner.temp }}/ui-build.log
+          if-no-files-found: error
+          retention-days: 14

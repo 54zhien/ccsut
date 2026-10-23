@@ -14,9 +14,14 @@ struct CCSUTApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            Group {
+                if InterfacePreview.enabled { MainTabs() } else { RootView() }
+            }
                 .environment(session)
-                .task { await session.bootstrap() }
+                .task {
+                    guard !InterfacePreview.enabled else { return }
+                    await session.bootstrap()
+                }
         }
     }
 }
@@ -83,10 +88,14 @@ struct MainTabs: View {
     @Environment(SessionStore.self) private var session
 
     enum AppTab: Hashable {
-        case schedule, score, exam, elective, me
+        case schedule, academic
     }
 
     @State private var selection: AppTab = .schedule
+
+    init() {
+        _selection = State(initialValue: InterfacePreview.page == "academic" ? .academic : .schedule)
+    }
 
     var body: some View {
         TabView(selection: $selection) {
@@ -94,30 +103,41 @@ struct MainTabs: View {
                 ScheduleView()
             }
 
-            Tab("成绩", systemImage: "chart.bar.doc.horizontal", value: AppTab.score) {
-                ScoreView()
-            }
-
-            Tab("考试", systemImage: "calendar.badge.clock", value: AppTab.exam) {
-                ExamView()
-            }
-
-            Tab("选课", systemImage: "list.bullet.rectangle.portrait", value: AppTab.elective) {
-                ElectiveView()
-            }
-
-            Tab("我的", systemImage: "person.crop.circle", value: AppTab.me) {
-                ProfileView()
+            Tab("教务", systemImage: "square.grid.2x2", value: AppTab.academic) {
+                AcademicView()
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)   // iOS 26
     }
 }
 
-// MARK: - 我的
+// MARK: - 账号入口与面板
+
+struct AccountButton: View {
+    @Environment(SessionStore.self) private var session
+    @State private var isPresented = false
+
+    var body: some View {
+        Button { isPresented = true } label: {
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: 21, weight: .regular))
+        }
+        .accessibilityLabel("账号")
+        .sheet(isPresented: $isPresented) {
+            ProfileView()
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+        }
+        .onAppear {
+            if InterfacePreview.page == "account" { isPresented = true }
+        }
+    }
+}
 
 struct ProfileView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(\.dismiss) private var dismiss
 
     @State private var showLogoutAlert = false
 
@@ -136,9 +156,9 @@ struct ProfileView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(session.studentName ?? "已登录")
+                            Text(session.studentName ?? (InterfacePreview.enabled ? "预览同学" : "已登录"))
                                 .font(.headline)
-                            Text(session.studentId ?? "—")
+                            Text(session.studentId ?? (InterfacePreview.enabled ? "示例账号" : "—"))
                                 .font(.subheadline.monospaced())
                                 .foregroundStyle(.secondary)
                         }
@@ -152,11 +172,17 @@ struct ProfileView: View {
                     }
                 }
             }
-            .navigationTitle("我的")
+            .navigationTitle("账号")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
             .alert("退出登录", isPresented: $showLogoutAlert) {
                 Button("取消", role: .cancel) {}
                 Button("退出", role: .destructive) {
-                    Task { await session.logout() }
+                    Task { await session.logout(); dismiss() }
                 }
             } message: {
                 Text("下次打开需要重新登录。")

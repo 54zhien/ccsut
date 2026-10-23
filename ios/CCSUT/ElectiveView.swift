@@ -36,44 +36,42 @@ struct ElectiveView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading && classes.isEmpty {
-                    ProgressView("拉取教学班…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorText, classes.isEmpty {
-                    ContentUnavailableView {
-                        Label("加载失败", systemImage: "exclamationmark.icloud")
-                    } description: {
-                        Text(errorText)
-                    } actions: {
-                        Button("重试") { Task { await load(force: true) } }
-                            .buttonStyle(.borderedProminent)
-                    }
-                } else if classes.isEmpty {
-                    ContentUnavailableView {
-                        Label("当前没有可选课程", systemImage: "tray")
-                    } description: {
-                        Text(initData.map { "选课学期 \($0.xkxnxq ?? "—")" } ?? "")
-                    } actions: {
-                        Button("刷新") { Task { await load(force: true) } }
-                    }
-                } else {
-                    list
+        Group {
+            if isLoading && classes.isEmpty {
+                ProgressView("拉取教学班…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let errorText, classes.isEmpty {
+                ContentUnavailableView {
+                    Label("加载失败", systemImage: "exclamationmark.icloud")
+                } description: {
+                    Text(errorText)
+                } actions: {
+                    Button("重试") { Task { await load(force: true) } }
+                        .buttonStyle(.borderedProminent)
                 }
+            } else if classes.isEmpty {
+                ContentUnavailableView {
+                    Label("当前没有可选课程", systemImage: "tray")
+                } description: {
+                    Text(initData.map { "选课学期 \($0.xkxnxq ?? "—")" } ?? "")
+                } actions: {
+                    Button("刷新") { Task { await load(force: true) } }
+                }
+            } else {
+                list
             }
-            .navigationTitle("选课")
-            .searchable(text: $keyword, prompt: "课程名 / 教师")
-            .refreshable { await load(force: true) }
-            .task {
-                if classes.isEmpty { await load() }
-            }
-            .sheet(item: $detail) { item in
-                CourseDetailSheet(item: item)
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
-                    .presentationCornerRadius(26)
-            }
+        }
+        .navigationTitle("选课")
+        .searchable(text: $keyword, prompt: "课程名 / 教师")
+        .refreshable { await load(force: true) }
+        .task {
+            if classes.isEmpty { await load() }
+        }
+        .sheet(item: $detail) { item in
+            CourseDetailSheet(item: item)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(26)
         }
     }
 

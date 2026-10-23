@@ -30,49 +30,47 @@ struct ExamView: View {
     ]
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading && items.isEmpty {
-                    ProgressView("加载考试安排…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorText, items.isEmpty {
-                    ContentUnavailableView {
-                        Label("加载失败", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(errorText)
-                    } actions: {
-                        Button("重试") { Task { await load(force: true) } }
-                    }
-                } else if items.isEmpty {
-                    ContentUnavailableView {
-                        Label("暂无考试安排", systemImage: "calendar.badge.clock")
-                    } description: {
-                        Text("这个学期的考试还没排出来。")
-                    } actions: {
-                        Button("刷新") { Task { await load(force: true) } }
-                    }
-                } else {
-                    content
+        Group {
+            if isLoading && items.isEmpty {
+                ProgressView("加载考试安排…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let errorText, items.isEmpty {
+                ContentUnavailableView {
+                    Label("加载失败", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(errorText)
+                } actions: {
+                    Button("重试") { Task { await load(force: true) } }
                 }
-            }
-            .navigationTitle("考试")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await load(force: true) }
-                    } label: {
-                        if isLoading {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                    .disabled(isLoading)
+            } else if items.isEmpty {
+                ContentUnavailableView {
+                    Label("暂无考试安排", systemImage: "calendar.badge.clock")
+                } description: {
+                    Text("这个学期的考试还没排出来。")
+                } actions: {
+                    Button("刷新") { Task { await load(force: true) } }
                 }
+            } else {
+                content
             }
-            .refreshable { await load(force: true) }
-            .task { if items.isEmpty { await load() } }
         }
+        .navigationTitle("考试")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    Task { await load(force: true) }
+                } label: {
+                    if isLoading {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .disabled(isLoading)
+            }
+        }
+        .refreshable { await load(force: true) }
+        .task { if items.isEmpty { await load() } }
     }
 
     // MARK: 内容
