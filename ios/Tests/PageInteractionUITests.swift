@@ -83,4 +83,20 @@ final class PageInteractionUITests: XCTestCase {
             XCTAssertFalse(back.exists)
         }
     }
+
+    func testAcademicDetailsSupportEdgeSwipeBack() {
+        let app = launch("academic")
+        for title in ["成绩查询", "考试安排", "选课"] {
+            let entry = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+            XCTAssertTrue(entry.waitForExistence(timeout: 5))
+            entry.tap()
+            XCTAssertTrue(app.buttons["page-refresh"].waitForExistence(timeout: 5))
+            let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.45))
+            let destination = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.45))
+            edge.press(forDuration: 0.05, thenDragTo: destination)
+            capture(app, "edge-back-\(title)")
+            XCTAssertTrue(app.buttons["账号"].waitForExistence(timeout: 5),
+                          "Each academic detail must support interactive edge swipe back")
+        }
+    }
 }
