@@ -376,7 +376,10 @@ struct ExamItem: Decodable, Identifiable, Hashable {
     let zwh: String?       // 座位号
     let ksxs: String?      // 考试 / 考查
     let kspcmc: String?    // 考试批次 期末考试 / 开学补（缓）考
-    let dataXnxq: String?  // 学期
+    let dataXnxq: String?  // 服务端的「当前学年学期」上下文，不是本场考试所属学期
+    /// 本场考试实际所属学期。
+    /// 服务端不会返回它——dataXnxq 恒等于当前学期，只能由请求参数回填。
+    var term: String? = nil
 
     /// 完整的考场，如「9号栋 9-112」
     var location: String {
