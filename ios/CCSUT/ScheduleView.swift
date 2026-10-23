@@ -24,7 +24,7 @@ struct ScheduleView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if bundle?.isEmpty == false { termSummary; weekBar }
+                if bundle?.isEmpty == false { weekBar.padding(.top, 8).padding(.bottom, 12) }
                 if isLoading && bundle == nil {
                     Spacer()
                     ProgressView("加载课表…")
@@ -36,7 +36,19 @@ struct ScheduleView: View {
                         Button("重试") { Task { await load(force: true) } }
                     }
                 } else if let bundle, !bundle.isEmpty {
-                    timetable
+                    VStack(spacing: 8) {
+                        termSummary
+                        timetable
+                    }
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+                    .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 24).strokeBorder(Color.primary.opacity(0.04), lineWidth: 0.5)
+                            .allowsHitTesting(false)
+                    }
+                    .clipShape(.rect(cornerRadius: 24))
+                    .padding(.horizontal, 12)
                 } else {
                     ContentUnavailableView {
                         Label("暂无课表", systemImage: "calendar.badge.exclamationmark")
@@ -109,18 +121,16 @@ struct ScheduleView: View {
     private var termSummary: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(bundle?.title ?? "")
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(.secondary)
                 .lineLimit(1).minimumScaleFactor(0.85)
             Spacer(minLength: 4)
             if selectedWeek != currentWeek {
                 Button("回到本周") { selectWeek(currentWeek) }
                     .font(.caption.weight(.medium)).frame(minHeight: 44)
-            } else {
-                Text("第 \(selectedWeek) 周").font(.subheadline.weight(.medium).monospacedDigit())
             }
         }
-        .frame(minHeight: 36)
-        .padding(.horizontal, 20)
+        .frame(minHeight: 28)
+        .padding(.horizontal, 16)
     }
 
     private var maxWeek: Int { max(18, bundle?.slots.flatMap(\.weeks).max() ?? 18, currentWeek) }
@@ -137,15 +147,15 @@ struct ScheduleView: View {
                     HStack(spacing: 8) {
                         ForEach(1...maxWeek, id: \.self) { week in
                             Button { selectWeek(week) } label: {
-                                HStack(spacing: 3) {
-                                    Text("\(week)").font(.subheadline.weight(.semibold).monospacedDigit())
-                                    Text("周").font(.caption)
-                                }
-                                .frame(width: 54, height: 44)
-                                .foregroundStyle(week == selectedWeek ? .white : .primary)
+                                Text("第 \(week) 周")
+                                    .font(.subheadline.weight(week == selectedWeek ? .semibold : .medium))
+                                    .monospacedDigit()
+                                    .padding(.horizontal, 14)
+                                    .frame(minWidth: 84, minHeight: 44)
+                                    .foregroundStyle(week == selectedWeek ? Color.accentColor : Color.primary)
                             }
                             .buttonStyle(.plain)
-                            .glassEffect(week == selectedWeek ? .regular.tint(.accentColor).interactive() : .regular.interactive(), in: .capsule)
+                            .glassEffect(week == selectedWeek ? .regular.tint(.accentColor.opacity(0.18)).interactive() : .regular.interactive(), in: .capsule)
                             .overlay(alignment: .bottom) {
                                 if week == currentWeek && week != selectedWeek {
                                     Circle().fill(Color.accentColor).frame(width: 4, height: 4).padding(.bottom, 4)
@@ -223,7 +233,7 @@ struct ScheduleView: View {
             }
             .scrollIndicators(.hidden)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 4)
     }
 
     private func weekdayHeader(colWidth: CGFloat) -> some View {
@@ -274,7 +284,7 @@ struct ScheduleView: View {
     private func timetableCell(day: Int, section: Int, width: CGFloat, height: CGFloat) -> some View {
         ZStack(alignment: .top) {
             RoundedRectangle(cornerRadius: 12)
-                .fill(isToday(day) ? Color.accentColor.opacity(0.025) : Color(.secondarySystemGroupedBackground).opacity(0.45))
+                .fill(isToday(day) ? Color.accentColor.opacity(0.025) : Color(.systemGroupedBackground).opacity(0.7))
             if let cell = cells.first(where: { $0.weekday == day && $0.section == section }), let slot = cell.courses.first {
                 courseCard(slot, count: cell.courses.count) {
                     if cell.courses.count == 1 { detail = slot } else { choosing = cell }
