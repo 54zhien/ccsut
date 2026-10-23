@@ -1,11 +1,15 @@
-﻿diag: 显示 jw_uf 指纹与最近请求结果
+﻿fix(ios): 选课页空白的真正原因 —— 响应结构解码失败
 
-实验证明服务端只校验 jw_uf 一个 Cookie，
-其余 13 条全删也能拿到 75 门。
-而 App 的诊断显示 jw_uf 存在，却拿不到数据，
-说明值不是同一个。
+TeachingClassPage 声明了两个类型不对的字段：
+  kfrlbfb  服务端给的是字符串 "100"，Swift 声明成 Int
+  condition.jxms 等服务端给的是数组 ["中文教学"]，Swift 声明成 String
 
-我的页诊断新增：
-- CookieJar 里 jw_uf 的长度与首尾各 4 位
-- HTTPCookieStorage 里同名 Cookie 的指纹
-- 最近一次 listV2 / listjxbDataV2 的响应字节数与有无 initData
+任一不符都会让整个 TeachingClassPage 解码失败，
+于是 initData 拿不到、classes 为空、页面显示「当前没有可选课程」，
+而且因为 decode 走的是 try? 分支，连错误提示都不会冒出来。
+
+这两个字段代码里根本没用到，直接从结构体移除。
+Decodable 会自动忽略未声明的键。
+
+诊断佐证：jw_uf 指纹两边一致、最近请求 listjxbDataV2 返回 65553 字节
+且含 initData —— 数据一直都在，卡在解析这一步。

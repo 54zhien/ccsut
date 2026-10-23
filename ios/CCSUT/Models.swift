@@ -98,20 +98,16 @@ struct TeachingClass: Decodable, Identifiable, Hashable {
     }
 }
 
+/// POST /admin/xsd/xk/listjxbDataV2 的响应
+///
+/// 只声明真正用到的两个字段。
+/// 服务端返回的另外两个字段类型和直觉不符，解析它们会让整个结构解码失败：
+///   "kfrlbfb": "100"                              ← 字符串，不是数字
+///   "condition": { "jxms": ["中文教学"], ... }     ← 值是数组，不是字符串
+/// Decodable 会忽略未声明的键，所以不写它们最省事。
 struct TeachingClassPage: Decodable {
     let mysksjd: [String]?
     let initData: [TeachingClass]?
-    let kfrlbfb: Int?
-    let condition: ClassCondition?
-
-    struct ClassCondition: Decodable {
-        let jxms: String?
-        let kclx: String?
-        let kcgs: String?
-        let kcxz: String?
-        let kkxq: String?
-        let kclb: String?
-    }
 }
 
 // MARK: - 课表
