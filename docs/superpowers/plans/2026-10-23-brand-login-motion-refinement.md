@@ -70,3 +70,11 @@ up to300ms, with40pt displacement cap. Native scroll continues on the other side
 without extra motion. Keep500ms history and stop the clock400ms after idle.
 Shared GlassEffectContainer and interactive glass are removed from week chips.
 The native reader/16pt margins and reduced-motion/reset paths remain in place.
+
+Final-source4513c7481c10747f4ac03d422138fcf1dc6abef4 passed Release39945348726.
+Downloaded IPA ZIP, bundle and primary icon were intact, but inspecting the final
+Info.plist found CADisableMinimumFrameDurationOnPhone absent. The generated
+INFOPLIST_KEY build setting was not emitted. Preserve that incomplete-config
+artifact as provenance; add an explicit minimal Info.plist merged with generated
+bundle metadata for both configurations, then rebuild the changed configuration.
+No tests were run; this was final artifact metadata inspection.
