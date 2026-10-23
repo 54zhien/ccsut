@@ -1,6 +1,7 @@
 import SwiftUI
 import QuartzCore
 import Observation
+import UIKit
 
 struct ScheduleView: View {
     @Environment(SessionStore.self) private var session
@@ -21,7 +22,6 @@ struct ScheduleView: View {
     @State private var pendingDetail: ScheduleSlot?
     @State private var headerScrollOffset: CGFloat = 0
     @State private var previewRefreshCount = 0
-    @State private var weekTrail = WeekCapsuleTrail()
     private let railWidth: CGFloat = 44
     private let headerHeight: CGFloat = 52
     private let weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -35,7 +35,7 @@ struct ScheduleView: View {
                     ScrollView(.vertical) {
                         if let bundle, !bundle.isEmpty {
                             VStack(spacing: 16) {
-                                weekBar(width: viewport.size.width).id("page-top")
+                                weekBar().id("page-top")
                                 VStack(spacing: 8) {
                                     termSummary
                                     timetable(viewport: viewport.size)
@@ -112,7 +112,8 @@ struct ScheduleView: View {
             }
             .sheet(item: $detail) { slot in
                 ScheduleDetailSheet(slot: slot)
-                    .presentationDetents([.medium, .large])
+                    .presentationDetents([.medium])
+                    .presentationContentInteraction(.scrolls)
                     .presentationDragIndicator(.visible)
                     .presentationCornerRadius(deviceCornerRadius)
             }
@@ -170,78 +171,19 @@ struct ScheduleView: View {
     private var maxWeek: Int { max(18, bundle?.slots.flatMap(\.weeks).max() ?? 18, currentWeek) }
 
     private func selectWeek(_ week: Int) {
-        weekTrail.reset()
         didPickWeek = true
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
             selectedWeek = week
         }
     }
 
-    private func weekBar(width: CGFloat) -> some View {
-        let trailFrame = weekTrail.frame(reducedMotion: reduceMotion)
-        return GlassEffectContainer(spacing: 8) {
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(1...maxWeek, id: \.self) { week in
-                            Button { selectWeek(week) } label: {
-                                Text(week == currentWeek ? "本周" : "第 \(week) 周")
-                                    .font(.subheadline.weight(week == selectedWeek ? .semibold : .medium))
-                                    .monospacedDigit()
-                                    .padding(.horizontal, 14)
-                                    .frame(minWidth: 84, minHeight: 44)
-                                    .foregroundStyle(week == selectedWeek ? Color.accentColor : Color.primary)
-                            }
-                            .buttonStyle(.plain)
-                            .glassEffect(week == selectedWeek ? .regular.tint(.accentColor.opacity(0.18)).interactive() : .regular.interactive(), in: .capsule)
-                            .overlay(alignment: .bottom) {
-                                if week == currentWeek && week != selectedWeek {
-                                    Circle().fill(Color.accentColor).frame(width: 4, height: 4).padding(.bottom, 4)
-                                }
-                            }
-                            .accessibilityLabel(week == currentWeek ? "本周" : "第 \(week) 周")
-                            .accessibilityAddTraits(week == selectedWeek ? [.isSelected] : [])
-                            .visualEffect { content, geometry in
-                                content.offset(x: trailFrame.displacement(
-                                    centerX: geometry.frame(in: .scrollView(axis: .horizontal)).midX,
-                                    viewportWidth: width
-                                ))
-                            }
-                            .id(week)
-                        }
-                    }
-                    .scrollTargetLayout()
-                    .padding(.vertical, 8)
-                }
-                .scrollIndicators(.hidden)
-                .contentMargins(.horizontal, 16, for: .scrollContent)
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    geometry.contentOffset.x
-                } action: { _, offset in
-                    weekTrail.record(offset)
-                }
-                .onScrollPhaseChange { _, phase in
-                    guard !reduceMotion else { weekTrail.reset(); return }
-                    switch phase {
-                    case .interacting: weekTrail.begin()
-                    case .idle: weekTrail.finish()
-                    case .animating: weekTrail.reset()
-                    default: break
-                    }
-                }
-                .onDisappear { weekTrail.reset() }
-                .onChange(of: reduceMotion) { _, reduced in
-                    if reduced { weekTrail.reset() }
-                }
-                // Automatic view-aligned settling overrides the requested center on iOS26.
-                .onAppear { proxy.scrollTo(selectedWeek, anchor: .center) }
-                .onChange(of: selectedWeek) { _, week in
-                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
-                        proxy.scrollTo(week, anchor: .center)
-                    }
-                }
-            }
-        }
+    private func weekBar() -> some View {
+        WeekSelector(
+            selectedWeek: $selectedWeek,
+            currentWeek: currentWeek,
+            maxWeek: maxWeek,
+            onSelectWeek: selectWeek
+        )
     }
 
     private var cells: [ScheduleCell] { SchedulePresentation.cells(bundle?.slots ?? [], week: selectedWeek) }
@@ -329,7 +271,8 @@ struct ScheduleView: View {
     private func timetableCell(day: Int, section: Int, width: CGFloat, height: CGFloat) -> some View {
         ZStack(alignment: .top) {
             RoundedRectangle(cornerRadius: 12)
-                .fill(isToday(day) ? Color.accentColor.opacity(0.025) : Color(.systemGroupedBackground).opacity(0.7))
+                .fill(isToday(day) ? Color.accentColor.opacity(0.025) :
+                        (colorScheme == .dark ? Color.white.opacity(0.025) : Color(.systemGroupedBackground).opacity(0.7)))
             if let cell = cells.first(where: { $0.weekday == day && $0.section == section }), let slot = cell.courses.first {
                 courseCard(slot, count: cell.courses.count) {
                     if cell.courses.count == 1 { detail = slot } else { choosing = cell }
@@ -450,6 +393,82 @@ struct ScheduleView: View {
     }
 }
 
+private struct WeekSelector: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Binding var selectedWeek: Int
+    let currentWeek: Int
+    let maxWeek: Int
+    let onSelectWeek: (Int) -> Void
+    @State private var trail = WeekCapsuleTrail()
+
+    var body: some View {
+        let trailFrame = trail.frame(reducedMotion: reduceMotion)
+        let anchorWeek = selectedWeek
+        return ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(1...maxWeek, id: \.self) { week in
+                        Button {
+                            trail.reset()
+                            onSelectWeek(week)
+                        } label: {
+                            Text(week == currentWeek ? "本周" : "第 \(week) 周")
+                                .font(.subheadline.weight(week == selectedWeek ? .semibold : .medium))
+                                .monospacedDigit()
+                                .padding(.horizontal, 14)
+                                .frame(minWidth: 84, minHeight: 44)
+                                .foregroundStyle(week == selectedWeek ? Color.accentColor : Color.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(week == selectedWeek ? .regular.tint(.accentColor.opacity(0.18)) : .regular, in: .capsule)
+                        .overlay(alignment: .bottom) {
+                            if week == currentWeek && week != selectedWeek {
+                                Circle().fill(Color.accentColor).frame(width: 4, height: 4).padding(.bottom, 4)
+                            }
+                        }
+                        .accessibilityLabel(week == currentWeek ? "本周" : "第 \(week) 周")
+                        .accessibilityAddTraits(week == selectedWeek ? [.isSelected] : [])
+                        .visualEffect { content, _ in
+                            content.offset(x: trailFrame.displacement(week: week, selectedWeek: anchorWeek))
+                        }
+                        .id(week)
+                    }
+                }
+                .scrollTargetLayout()
+                .padding(.vertical, 8)
+            }
+            .scrollIndicators(.hidden)
+            .contentMargins(.horizontal, 16, for: .scrollContent)
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.x
+            } action: { _, offset in
+                trail.record(offset)
+            }
+            .onScrollPhaseChange { _, phase in
+                guard !reduceMotion else { trail.reset(); return }
+                switch phase {
+                case .interacting: trail.begin()
+                case .idle: trail.finish()
+                case .animating: trail.reset()
+                default: break
+                }
+            }
+            .onDisappear { trail.reset() }
+            .onChange(of: reduceMotion) { _, reduced in
+                if reduced { trail.reset() }
+            }
+            // Automatic view-aligned settling overrides the requested center on iOS 26.
+            .onAppear { proxy.scrollTo(selectedWeek, anchor: .center) }
+            .onChange(of: selectedWeek) { _, week in
+                trail.reset()
+                withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
+                    proxy.scrollTo(week, anchor: .center)
+                }
+            }
+        }
+    }
+}
+
 /// A short history of the native scroll position gives each following capsule
 /// a later sample. Visual offsets never change the row's layout or scroll targets.
 @MainActor @Observable
@@ -457,7 +476,7 @@ private final class WeekCapsuleTrail {
     private(set) var time: CFTimeInterval = 0
     @ObservationIgnored private var samples: [WeekTrailSample] = []
     @ObservationIgnored private var offset: CGFloat = 0
-    @ObservationIgnored private var direction: CGFloat = 1
+    @ObservationIgnored private var direction: CGFloat = 0
     @ObservationIgnored private var isInteracting = false
     @ObservationIgnored private var settlingUntil: CFTimeInterval = 0
     @ObservationIgnored private var displayLink: CADisplayLink?
@@ -470,17 +489,20 @@ private final class WeekCapsuleTrail {
         if abs(delta) > 0.25 { direction = delta > 0 ? 1 : -1 }
         let now = CACurrentMediaTime()
         samples.append(WeekTrailSample(time: now, offset: value))
-        samples.removeAll { $0.time < now - 0.3 }
+        samples.removeAll { $0.time < now - 0.5 }
     }
 
     func begin() {
         let now = CACurrentMediaTime()
         isInteracting = true
-        samples = [WeekTrailSample(time: now - 0.2, offset: offset), WeekTrailSample(time: now, offset: offset)]
+        direction = 0
+        samples = [WeekTrailSample(time: now - 0.5, offset: offset), WeekTrailSample(time: now, offset: offset)]
         time = now
         guard displayLink == nil else { return }
         let target = ClockTarget(owner: self)
         let link = CADisplayLink(target: target, selector: #selector(ClockTarget.tick(_:)))
+        let maximumFrameRate = Float(UIScreen.main.maximumFramesPerSecond)
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: maximumFrameRate, preferred: maximumFrameRate)
         clockTarget = target
         displayLink = link
         link.add(to: .main, forMode: .common)
@@ -489,7 +511,7 @@ private final class WeekCapsuleTrail {
     func finish() {
         guard displayLink != nil else { return }
         isInteracting = false
-        settlingUntil = CACurrentMediaTime() + 0.18
+        settlingUntil = CACurrentMediaTime() + 0.4
         record(offset)
     }
 
@@ -498,6 +520,7 @@ private final class WeekCapsuleTrail {
         displayLink = nil
         clockTarget = nil
         isInteracting = false
+        direction = 0
         samples.removeAll(keepingCapacity: true)
         time = CACurrentMediaTime()
     }
@@ -522,7 +545,6 @@ private final class WeekCapsuleTrail {
         }
     }
 }
-
 private struct WeekTrailSample: Sendable {
     let time: CFTimeInterval
     let offset: CGFloat
@@ -534,13 +556,15 @@ private struct WeekTrailFrame: Sendable {
     let direction: CGFloat
     let samples: [WeekTrailSample]
 
-    func displacement(centerX: CGFloat, viewportWidth: CGFloat) -> CGFloat {
-        guard !samples.isEmpty else { return 0 }
-        let distance = direction > 0 ? centerX - 42 : viewportWidth - centerX - 42
-        let rank = min(max(distance / 92, 0), 5)
-        let limit = min(rank * 6, 28)
-        let lag = offset - historicalOffset(at: time - Double(rank) * 0.024)
-        return min(max(lag, -limit), limit)
+    func displacement(week: Int, selectedWeek: Int) -> CGFloat {
+        let weekDelta = week - selectedWeek
+        guard !samples.isEmpty, weekDelta != 0 else { return 0 }
+        guard (direction < 0 && weekDelta < 0) || (direction > 0 && weekDelta > 0) else { return 0 }
+
+        let rank = abs(weekDelta)
+        let delay = min(0.070 + Double(rank - 1) * 0.045, 0.300)
+        let lag = offset - historicalOffset(at: time - delay)
+        return min(max(lag, -40), 40)
     }
 
     private func historicalOffset(at target: CFTimeInterval) -> CGFloat {

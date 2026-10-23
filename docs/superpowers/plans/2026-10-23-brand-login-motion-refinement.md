@@ -10,7 +10,7 @@ animated seal ring from static core. Isolate week animation from timetable layou
 source/asset review and the Release build needed to produce an IPA. Preserve
 draft PR2 and existing failed/cancelled evidence. Do not change app icon assets.
 
-- [ ] WeekSelector: independent non-interactive glass chips, selected-week anchor,
+- [x] WeekSelector: independent non-interactive glass chips, selected-week anchor,
   right drag trails only left-hand chips with increasing delay; mirror on left
   drag. Bound displacement, no fusion, preserve default center/no added margins.
   Remove per-frame invalidation of the whole schedule and honor reduced motion.
@@ -50,3 +50,23 @@ root login page while its browser sheet is visible. Temporary sheet coverage
 preserves operations; session-driven root removal cancels outstanding timers.
 Existing CAS JS is unchanged. Native keyboard, sheet handoff and new motion
 have not been executed or accepted on-device, per the user's no-test request.
+
+Release preflight39944481253 at be96eaa compiled the brand/login/detail UI and
+merged exam model successfully, without running tests. This is an intermediate
+build, not the final package with the revised week selector.
+
+Enable the generated CADisableMinimumFrameDurationOnPhone boolean for Debug and
+Release so the week display link may request the device's supported refresh rate.
+Apple's ProMotion guidance requires this opt-in for preferredFrameRateRange hints:
+https://developer.apple.com/documentation/quartzcore/optimizing-iphone-and-ipad-apps-to-support-promotion-displays
+This config does not prove measured frame rate; no performance run is claimed.
+
+Week refinement source review: WeekSelector owns the observable display-link
+state, so the schedule no longer reads a changing per-frame time. Immutable
+Sendable frame snapshots remain the only visualEffect input. For rightward drag
+(decreasing native offset), only weeks before selectedWeek receive displacement;
+leftward drag mirrors this. Delay starts at70ms and adds45ms per following week,
+up to300ms, with40pt displacement cap. Native scroll continues on the other side
+without extra motion. Keep500ms history and stop the clock400ms after idle.
+Shared GlassEffectContainer and interactive glass are removed from week chips.
+The native reader/16pt margins and reduced-motion/reset paths remain in place.
