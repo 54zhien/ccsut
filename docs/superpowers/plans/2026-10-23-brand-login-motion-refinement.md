@@ -30,7 +30,7 @@ draft PR2 and existing failed/cancelled evidence. Do not change app icon assets.
   rotate only border/name ring, static core. Reduced motion stays static.
 - [x] Review DeepSeek exam branch's semester grouping changes and merge into the
   current packaging branch if sound. No main/PR2 merge is implied.
-- [ ] Compile Release, verify IPA ZIP/bundle/icon and deliver, without test runs.
+- [x] Compile Release, verify IPA ZIP/bundle/icon and deliver, without test runs.
 
 Design direction: retain native system typography/controls and school artwork,
 with plain semantic backgrounds and a grouped input surface matching the user's
@@ -78,3 +78,12 @@ INFOPLIST_KEY build setting was not emitted. Preserve that incomplete-config
 artifact as provenance; add an explicit minimal Info.plist merged with generated
 bundle metadata for both configurations, then rebuild the changed configuration.
 No tests were run; this was final artifact metadata inspection.
+
+Final production f459c4ebe66e7826162ad7b5326de7690fc4b6c3 passed Release
+39945640388. The downloaded IPA is4533258bytes; ZIP integrity, bundle
+com.imzhien.ccsut, primary iconAppIcon and the actual Boolean ProMotion opt-in
+all pass final artifact inspection. SHA256:
+3b4daacb6d218c9a3089b12b909a1c9de27f9fd91d34754bd455617a2e6554c9.
+No app tests or performance measurements were executed. Changes to session/API
+and AppIcon remain absent; the explicitly reviewed exam model change is included.
+Further commits only record this evidence; production sources stay identical.
