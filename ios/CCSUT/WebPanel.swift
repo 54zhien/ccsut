@@ -21,12 +21,42 @@ import WebKit
 
 struct WebPanel: UIViewRepresentable {
     let webView: WKWebView
+    var onRefresh: (() -> Void)? = nil
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> WKWebView {
-        webView
+        if let onRefresh {
+            let coordinator = context.coordinator
+            coordinator.onRefresh = onRefresh
+            coordinator.control.addTarget(coordinator, action: #selector(Coordinator.refresh), for: .valueChanged)
+            webView.scrollView.refreshControl = coordinator.control
+            webView.scrollView.alwaysBounceVertical = true
+            coordinator.observation = webView.observe(\.isLoading, options: [.new]) { [weak coordinator] _, change in
+                guard change.newValue == false else { return }
+                Task { @MainActor in coordinator?.control.endRefreshing() }
+            }
+        }
+        return webView
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        context.coordinator.onRefresh = onRefresh
+    }
+
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        if uiView.scrollView.refreshControl === coordinator.control {
+            uiView.scrollView.refreshControl = nil
+        }
+        coordinator.observation?.invalidate()
+    }
+
+    final class Coordinator: NSObject {
+        let control = UIRefreshControl()
+        var onRefresh: (() -> Void)?
+        var observation: NSKeyValueObservation?
+        @objc func refresh() { onRefresh?() }
+    }
 }
 
 // MARK: - 工厂

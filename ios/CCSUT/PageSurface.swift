@@ -55,26 +55,22 @@ struct ScreenCornerReader: UIViewRepresentable {
     }
 }
 
-struct NagiRefreshButton: View {
-    let isLoading: Bool
-    let action: () -> Void
+/// Empty/loading/error states must still have a scroll surface to pull down.
+/// Loaded pages already own their ScrollView and keep it without nesting.
+struct RefreshablePlaceholder: ViewModifier {
+    let needed: Bool
 
-    var body: some View {
-        Button(action: action) {
-            ZStack {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 20, weight: .medium))
-                    .opacity(isLoading ? 0 : 1)
-                ProgressView().controlSize(.small).opacity(isLoading ? 1 : 0)
+    func body(content: Content) -> some View {
+        if needed {
+            GeometryReader { viewport in
+                ScrollView {
+                    content.frame(maxWidth: .infinity, minHeight: viewport.size.height)
+                }
+                .scrollBounceBehavior(.always, axes: .vertical)
             }
-            .frame(width: 48, height: 48)
-            .contentShape(Circle())
+        } else {
+            content
         }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: Circle())
-        .accessibilityLabel("刷新")
-        .accessibilityIdentifier("page-refresh")
-        .disabled(isLoading)
     }
 }
 

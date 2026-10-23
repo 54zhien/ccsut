@@ -22,6 +22,8 @@ struct ScheduleView: View {
     private let railWidth: CGFloat = 44
     private let headerHeight: CGFloat = 52
     private let weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    private let classTimes = [("8:20", "10:00"), ("10:20", "12:00"),
+                              ("14:00", "15:40"), ("16:00", "17:40")]
 
     var body: some View {
         NavigationStack {
@@ -93,10 +95,7 @@ struct ScheduleView: View {
             .accessibilityIdentifier("schedule-surface")
             .background(Color(.systemGroupedBackground))
             .nagiPageChrome(title: "课表", scrollOffset: headerScrollOffset) {
-                HStack(spacing: 8) {
-                    NagiRefreshButton(isLoading: isLoading) { Task { await load(force: true) } }
-                    AccountButton()
-                }
+                AccountButton()
             }
             .task { if bundle == nil { await load() } }
             .overlay(alignment: .bottomTrailing) {
@@ -179,7 +178,7 @@ struct ScheduleView: View {
                     HStack(spacing: 8) {
                         ForEach(1...maxWeek, id: \.self) { week in
                             Button { selectWeek(week) } label: {
-                                Text("第 \(week) 周")
+                                Text(week == currentWeek ? "本周" : "第 \(week) 周")
                                     .font(.subheadline.weight(week == selectedWeek ? .semibold : .medium))
                                     .monospacedDigit()
                                     .padding(.horizontal, 14)
@@ -193,7 +192,7 @@ struct ScheduleView: View {
                                     Circle().fill(Color.accentColor).frame(width: 4, height: 4).padding(.bottom, 4)
                                 }
                             }
-                            .accessibilityLabel("第 \(week) 周\(week == currentWeek ? "，本周" : "")")
+                            .accessibilityLabel(week == currentWeek ? "本周" : "第 \(week) 周")
                             .accessibilityAddTraits(week == selectedWeek ? [.isSelected] : [])
                             .id(week)
                         }
@@ -274,6 +273,13 @@ struct ScheduleView: View {
                 .foregroundStyle(.secondary)
             Text("\(section * 2 - 1)–\(section * 2)节")
                 .font(.system(size: 10, weight: .medium)).foregroundStyle(Color.primary.opacity(0.6))
+            VStack(spacing: 2) {
+                Text(classTimes[section - 1].0)
+                Text(classTimes[section - 1].1)
+            }
+            .font(.system(size: 10).monospacedDigit())
+            .foregroundStyle(.secondary)
+            .padding(.top, 3)
             if section == 1 || section == 3 {
                 Text(section == 1 ? "上午" : "下午")
                     .font(.system(size: 9)).foregroundStyle(.tertiary).padding(.top, 2)
@@ -281,7 +287,9 @@ struct ScheduleView: View {
         }
         .padding(.top, 13)
         .frame(width: railWidth, height: height, alignment: .top)
-        .accessibilityLabel("第 \(section * 2 - 1) 至 \(section * 2) 节")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("第 \(section * 2 - 1) 至 \(section * 2) 节，\(classTimes[section - 1].0) 至 \(classTimes[section - 1].1)")
+        .accessibilityIdentifier("schedule-period-\(section)")
     }
 
     private func timetableCell(day: Int, section: Int, width: CGFloat, height: CGFloat) -> some View {

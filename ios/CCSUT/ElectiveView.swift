@@ -55,8 +55,6 @@ struct ElectiveView: View {
                     Label("当前没有可选课程", systemImage: "tray")
                 } description: {
                     Text(initData.map { "选课学期 \(SchedulePresentation.termTitle($0.xkxnxq ?? "—"))" } ?? "")
-                } actions: {
-                    Button("刷新") { Task { await load(force: true) } }
                 }
             } else {
                 list
@@ -64,10 +62,8 @@ struct ElectiveView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
-        .academicDetailChrome(title: "选课") {
-            NagiRefreshButton(isLoading: isLoading) { Task { await load(force: true) } }
-        }
-        .refreshable { await load(force: true) }
+        .modifier(RefreshablePlaceholder(needed: classes.isEmpty))
+        .academicDetailChrome(title: "选课") { await load(force: true) }
         .task {
             if classes.isEmpty { await load() }
         }
@@ -263,7 +259,7 @@ struct ElectiveView: View {
             isLoading = true
             defer { isLoading = false }
             try? await Task.sleep(for: .milliseconds(250))
-            classes = InterfacePreview.classes
+            classes = InterfacePreview.emptyPage ? [] : InterfacePreview.classes
             initData = InterfacePreview.electiveInit
             return
         }

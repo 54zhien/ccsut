@@ -3,12 +3,15 @@ import XCTest
 final class PageInteractionUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
-    private func launch(_ page: String, longList: Bool = false, transition: Bool = false, withoutUpcoming: Bool = false) -> XCUIApplication {
+    private func launch(_ page: String, longList: Bool = false, transition: Bool = false, withoutUpcoming: Bool = false,
+                        refresh: Bool = false, empty: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", page]
         if longList { app.launchArguments.append("--preview-long-list") }
         if transition { app.launchArguments.append("--preview-transition") }
         if withoutUpcoming { app.launchArguments.append("--preview-no-upcoming") }
+        if refresh { app.launchArguments.append("--preview-refresh") }
+        if empty { app.launchArguments.append("--preview-empty") }
         app.launch()
         return app
     }
@@ -44,6 +47,13 @@ final class PageInteractionUITests: XCTestCase {
         let app = launch("interactions")
         let semester = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "2026")).firstMatch
         XCTAssertTrue(semester.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["本周"].exists)
+        XCTAssertEqual(app.buttons["本周"].frame.midX, app.frame.midX, accuracy: 2)
+        XCTAssertFalse(app.buttons["page-refresh"].exists)
+        for (index, times) in ["8:20 至 10:00", "10:20 至 12:00", "14:00 至 15:40", "16:00 至 17:40"].enumerated() {
+            let period = app.descendants(matching: .any).matching(identifier: "schedule-period-\(index + 1)").firstMatch
+            XCTAssertTrue(period.label.contains(times))
+        }
         let weekday = app.staticTexts.matching(NSPredicate(format: "label == %@", "周一")).firstMatch
         let originalTermY = semester.frame.minY
         let originalDayY = weekday.frame.minY
@@ -94,7 +104,7 @@ final class PageInteractionUITests: XCTestCase {
             let entry = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
             XCTAssertTrue(entry.waitForExistence(timeout: 5))
             entry.tap()
-            XCTAssertTrue(app.buttons["page-refresh"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["返回教务"].waitForExistence(timeout: 5))
             let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.45))
             let destination = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.45))
             edge.press(forDuration: 0.05, thenDragTo: destination)
@@ -109,10 +119,13 @@ final class PageInteractionUITests: XCTestCase {
 
     func testAcademicCancelledSwipeKeepsHeaderAttachedToPage() {
         for page in ["scores", "exams", "electives"] {
-            let app = launch(page, transition: true)
-            let refresh = app.buttons["page-refresh"]
-            XCTAssertTrue(refresh.waitForExistence(timeout: 5))
-            let before = refresh.frame
+            let app = launch("academic", transition: true)
+            let entry = app.buttons["academic-\(page)"]
+            XCTAssertTrue(entry.waitForExistence(timeout: 5))
+            entry.tap()
+            let back = app.buttons["返回教务"]
+            XCTAssertTrue(back.waitForExistence(timeout: 5))
+            let before = back.frame
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.45))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.45))
             start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 1.5)
@@ -122,8 +135,8 @@ final class PageInteractionUITests: XCTestCase {
             add(XCTAttachment(string: "\(page): \(sampleCount) interactive samples, maximum local title drift \(drift)pt"))
             XCTAssertGreaterThan(sampleCount, 3, "Must measure actual in-flight interactive frames")
             XCTAssertLessThanOrEqual(drift, 2, "Title must travel with the detail page during a cancelled swipe")
-            XCTAssertTrue(refresh.isHittable)
-            XCTAssertEqual(refresh.frame.midX, before.midX, accuracy: 2)
+            XCTAssertTrue(back.isHittable)
+            XCTAssertEqual(back.frame.midX, before.midX, accuracy: 2)
             app.terminate()
         }
     }
@@ -148,13 +161,13 @@ final class PageInteractionUITests: XCTestCase {
 
     func testAcademicDetailSupportsContentSwipeBack() {
         let app = launch("scores", longList: true)
-        XCTAssertTrue(app.buttons["page-refresh"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["返回教务"].waitForExistence(timeout: 5))
         let header = app.descendants(matching: .any).matching(identifier: "term-header-2026-2027-1").firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 5))
         app.swipeUp()
         XCTAssertTrue(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value == 'floating'"), evaluatedWith: header)], timeout: 5) == .completed,
                       "Native content-pop recognition must not steal a vertical scroll")
-        XCTAssertTrue(app.buttons["page-refresh"].isHittable)
+        XCTAssertTrue(app.buttons["返回教务"].isHittable)
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: 0.45))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.45))
         start.press(forDuration: 0.1, thenDragTo: end)
@@ -162,6 +175,26 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(app.buttons["账号"].isHittable)
         XCTAssertFalse(app.buttons["page-refresh"].exists)
         capture(app, "content-swipe-back")
+    }
+
+    func testAcademicPagesPullToRefreshIncludingEmptyStates() {
+        for empty in [false, true] {
+            for page in ["scores", "exams", "electives"] {
+                let app = launch(page, refresh: true, empty: empty)
+                let counter = app.staticTexts["academic-refresh-count"]
+                XCTAssertTrue(counter.waitForExistence(timeout: 5))
+                XCTAssertEqual(counter.label, "0")
+                XCTAssertFalse(app.buttons["page-refresh"].exists)
+                XCTAssertFalse(app.buttons["刷新"].exists)
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.35))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.85))
+                start.press(forDuration: 0.1, thenDragTo: end)
+                XCTAssertTrue(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5) == .completed,
+                              "\(page) must refresh via its scroll surface even when empty=\(empty)")
+                capture(app, "pull-refresh-\(page)-empty-\(empty)")
+                app.terminate()
+            }
+        }
     }
 
     func testAcademicTitlesAndTermStripsRemainStableWhenPinned() {

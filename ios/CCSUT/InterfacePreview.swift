@@ -22,6 +22,10 @@ enum InterfacePreview {
         ProcessInfo.processInfo.arguments.contains("--preview-long-list")
     }
 
+    static var emptyPage: Bool {
+        ProcessInfo.processInfo.arguments.contains("--preview-empty")
+    }
+
     static var electiveInit: ElectiveInit {
         decode("""
         {"xsxm":"预览同学","xkxnxq":"2026-2027-1"}

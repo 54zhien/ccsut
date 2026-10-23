@@ -27,6 +27,7 @@ jobs:
             -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/UIPreview" \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-build.log"
       - name: Prepare native simulator
+        id: simulator
         timeout-minutes: 10
         run: bash ios/Tests/render-preview.sh --boot-only
       - name: Preserve simulator boot state
@@ -49,6 +50,7 @@ jobs:
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-tests.xcresult" --output-path "$RUNNER_TEMP/ui-test-attachments"
           fi
       - name: Render preview screens
+        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' }}
         run: bash ios/Tests/render-preview.sh
       - uses: actions/upload-artifact@v4
         if: always()

@@ -47,8 +47,6 @@ struct ExamView: View {
                     Label("暂无考试安排", systemImage: "calendar.badge.clock")
                 } description: {
                     Text("这个学期的考试还没排出来。")
-                } actions: {
-                    Button("刷新") { Task { await load(force: true) } }
                 }
             } else {
                 content
@@ -56,10 +54,8 @@ struct ExamView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
-        .academicDetailChrome(title: "考试") {
-            NagiRefreshButton(isLoading: isLoading) { Task { await load(force: true) } }
-        }
-        .refreshable { await load(force: true) }
+        .modifier(RefreshablePlaceholder(needed: items.isEmpty))
+        .academicDetailChrome(title: "考试") { await load(force: true) }
         .task { if items.isEmpty { await load() } }
     }
 
@@ -213,7 +209,7 @@ struct ExamView: View {
             isLoading = true
             defer { isLoading = false }
             try? await Task.sleep(for: .milliseconds(250))
-            items = InterfacePreview.exams
+            items = InterfacePreview.emptyPage ? [] : InterfacePreview.exams
             return
         }
         #endif

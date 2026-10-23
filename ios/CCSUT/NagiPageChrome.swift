@@ -238,12 +238,13 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
 
 /// Inline chrome belongs to the child, so a cancelled pop cannot interpolate its
 /// title/buttons independently of the moving page. UIKit still owns the gesture.
-private struct AcademicDetailChrome<Actions: View>: ViewModifier {
+private struct AcademicDetailChrome: ViewModifier {
     let title: String
-    @ViewBuilder let actions: () -> Actions
+    let refresh: () async -> Void
     #if DEBUG
     @State private var transitionDrift: CGFloat = 0
     @State private var transitionSamples = 0
+    @State private var refreshCount = 0
     #endif
 
     func body(content: Content) -> some View {
@@ -252,11 +253,17 @@ private struct AcademicDetailChrome<Actions: View>: ViewModifier {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .toolbar(.hidden, for: .navigationBar)
                 .scrollEdgeEffectHidden(true, for: .top)
+                .refreshable {
+                    await refresh()
+                    #if DEBUG
+                    refreshCount += 1
+                    #endif
+                }
+                .scrollBounceBehavior(.always, axes: .vertical)
                 .safeAreaInset(edge: .top, spacing: 0) {
                     HStack {
                         NagiBackButton()
                         Spacer(minLength: 12)
-                        actions()
                     }
                     .overlay {
                         Text(title)
@@ -288,7 +295,7 @@ private struct AcademicDetailChrome<Actions: View>: ViewModifier {
             .background {
                 #if DEBUG
                 if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-transition") {
-                    AcademicTransitionProbe(title: title) { drift, samples in
+                    AcademicTransitionProbe() { drift, samples in
                         transitionDrift = drift
                         transitionSamples = samples
                     }
@@ -304,14 +311,19 @@ private struct AcademicDetailChrome<Actions: View>: ViewModifier {
                     }
                     .font(.caption2).allowsHitTesting(false)
                 }
+                if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh") {
+                    Text("\(refreshCount)").font(.caption2)
+                        .accessibilityIdentifier("academic-refresh-count")
+                        .allowsHitTesting(false)
+                }
                 #endif
             }
     }
 }
 
 extension View {
-    func academicDetailChrome<Actions: View>(title: String, @ViewBuilder actions: @escaping () -> Actions) -> some View {
-        modifier(AcademicDetailChrome(title: title, actions: actions))
+    func academicDetailChrome(title: String, refresh: @escaping () async -> Void) -> some View {
+        modifier(AcademicDetailChrome(title: title, refresh: refresh))
     }
 
     func nagiPageChrome<Actions: View>(title: String, scrollOffset: CGFloat, showsBackButton: Bool = false, @ViewBuilder actions: @escaping () -> Actions) -> some View {

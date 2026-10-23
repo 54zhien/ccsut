@@ -58,7 +58,10 @@ struct WebLoginSheet: View {
 
     var body: some View {
         NavigationStack {
-            WebPanel(webView: webView)
+            WebPanel(webView: webView, onRefresh: {
+                status = "加载认证页…"
+                webView.reload()
+            })
                 .ignoresSafeArea(edges: .bottom)
                 .overlay(alignment: .top) {
                     if !status.isEmpty { statusBar }
@@ -68,13 +71,6 @@ struct WebLoginSheet: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("取消") { dismiss() }
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            webView.reload()
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
                     }
                 }
                 .onAppear(perform: start)
@@ -151,9 +147,9 @@ struct WebLoginSheet: View {
             case "no-code":
                 status = "账号已填好 · 点「获取验证码」，收到短信后填进去再点登录"
             case "no-tab":
-                status = "认证页没渲染出页签，点右上角刷新"
+                status = "认证页没渲染出页签，请下拉刷新"
             case "no-form":
-                status = "没找到验证码登录表单，点右上角刷新"
+                status = "没找到验证码登录表单，请下拉刷新"
             case "no-account":
                 status = "账号框是空的，请手动填一下"
             case "send-failed":

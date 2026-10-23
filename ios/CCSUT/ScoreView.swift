@@ -46,10 +46,8 @@ struct ScoreView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
-        .academicDetailChrome(title: "成绩单") {
-            NagiRefreshButton(isLoading: isLoading) { Task { await load(force: true) } }
-        }
-        .refreshable { await load(force: true) }
+        .modifier(RefreshablePlaceholder(needed: items.isEmpty))
+        .academicDetailChrome(title: "成绩单") { await load(force: true) }
         .task { if items.isEmpty { await load() } }
     }
 
@@ -162,7 +160,7 @@ struct ScoreView: View {
             isLoading = true
             defer { isLoading = false }
             try? await Task.sleep(for: .milliseconds(250))
-            items = InterfacePreview.scores
+            items = InterfacePreview.emptyPage ? [] : InterfacePreview.scores
             return
         }
         #endif

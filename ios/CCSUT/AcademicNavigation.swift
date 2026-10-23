@@ -83,54 +83,45 @@ struct AcademicTitleMarker: UIViewRepresentable {
     func updateUIView(_ view: UIView, context: Context) {}
 }
 
-/// Observe presentation geometry during a real UIKit interactive transition.
-struct AcademicTransitionProbe: UIViewControllerRepresentable {
-    let title: String
+/// Sample the page's presentation layer while it translates, including the held
+/// portion of a cancelled native pop. Do not depend on SwiftUI child-controller
+/// forwarding of UINavigationController.transitionCoordinator.
+struct AcademicTransitionProbe: UIViewRepresentable {
     let report: (CGFloat, Int) -> Void
 
-    func makeUIViewController(context: Context) -> ProbeController {
-        ProbeController(title: title, report: report)
-    }
-    func updateUIViewController(_ controller: ProbeController, context: Context) {
-        controller.report = report
-    }
+    func makeUIView(context: Context) -> ProbeView { ProbeView(report: report) }
+    func updateUIView(_ view: ProbeView, context: Context) { view.report = report }
 
-    final class ProbeController: UIViewController {
-        let titleText: String
+    final class ProbeView: UIView {
         var report: (CGFloat, Int) -> Void
         private var displayLink: CADisplayLink?
         private var baseline: CGFloat?
         private var maximum: CGFloat = 0
         private var samples = 0
 
-        init(title: String, report: @escaping (CGFloat, Int) -> Void) {
-            titleText = title
+        init(report: @escaping (CGFloat, Int) -> Void) {
             self.report = report
-            super.init(nibName: nil, bundle: nil)
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+            backgroundColor = .clear
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-        override func loadView() {
-            view = UIView()
-            view.backgroundColor = .clear
-            view.isUserInteractionEnabled = false
-        }
-        override func viewDidAppear(_ animated: Bool) {
-            super.viewDidAppear(animated)
-            let link = CADisplayLink(target: self, selector: #selector(sample))
-            link.add(to: .main, forMode: .common)
-            displayLink = link
-        }
-        override func viewDidDisappear(_ animated: Bool) {
-            super.viewDidDisappear(animated)
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
             displayLink?.invalidate()
             displayLink = nil
+            if window != nil {
+                let link = CADisplayLink(target: self, selector: #selector(sample))
+                link.add(to: .main, forMode: .common)
+                displayLink = link
+            }
         }
         deinit { displayLink?.invalidate() }
 
-        private func find(_ root: UIView, matching predicate: (UIView) -> Bool) -> UIView? {
-            if predicate(root) { return root }
+        private func findMarker(_ root: UIView) -> UIView? {
+            if root.accessibilityIdentifier == "academic-title-anchor" { return root }
             for child in root.subviews {
-                if let result = find(child, matching: predicate) { return result }
+                if let result = findMarker(child) { return result }
             }
             return nil
         }
@@ -138,21 +129,25 @@ struct AcademicTransitionProbe: UIViewControllerRepresentable {
             let layer = view.layer.presentation() ?? view.layer
             return layer.convert(view.bounds, to: window.layer.presentation() ?? window.layer)
         }
-        @objc private func sample() {
-            guard let window = view.window else { return }
-            let marker = find(window) { $0.accessibilityIdentifier == "academic-title-anchor" }
-            let label = navigationController.flatMap { nav in
-                find(nav.navigationBar) { ($0 as? UILabel)?.text == self.titleText && !$0.isHidden }
+        private func isPopActive(in controller: UIViewController) -> Bool {
+            if let nav = controller as? UINavigationController,
+               [nav.interactivePopGestureRecognizer, nav.interactiveContentPopGestureRecognizer]
+                .compactMap({ $0 }).contains(where: { $0.state == .began || $0.state == .changed }) {
+                return true
             }
-            guard let titleView = marker ?? label else { return }
-            let localTitleX = frame(titleView, in: window).midX - frame(view, in: window).minX
-            if let transition = navigationController?.transitionCoordinator {
-                guard transition.isInteractive, let baseline else { return }
+            if let presented = controller.presentedViewController, isPopActive(in: presented) { return true }
+            return controller.children.contains { isPopActive(in: $0) }
+        }
+        @objc private func sample() {
+            guard let window, let root = window.rootViewController, let marker = findMarker(window) else { return }
+            let pageX = frame(self, in: window).minX
+            let localTitleX = frame(marker, in: window).midX - pageX
+            if isPopActive(in: root), abs(pageX) > 2, let baseline {
                 samples += 1
                 maximum = max(maximum, abs(localTitleX - baseline))
                 if samples % 8 == 0 { report(maximum, samples) }
-            } else {
-                baseline = localTitleX
+            } else if abs(pageX) <= 2 {
+                self.baseline = localTitleX
             }
         }
     }
