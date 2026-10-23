@@ -20,6 +20,12 @@ struct ElectiveView: View {
     @State private var isLoading = false
     @State private var errorText: String?
     @State private var detail: TeachingClass?
+    @State private var pending: PendingAction?
+    @State private var workingId: String?
+    @State private var actionMessage: String?
+
+    /// jxbid → pcid，选课/退课时必须带对批次
+    @State private var batchMap: [String: String] = [:]
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "全部"
@@ -80,12 +86,13 @@ struct ElectiveView: View {
                 }
 
                 ForEach(filtered) { item in
-                    Button {
-                        detail = item
-                    } label: {
-                        ClassCard(item: item)
-                    }
-                    .buttonStyle(.plain)
+                    ClassCard(
+                        item: item,
+                        onAction: { pending = PendingAction(item: item, enrolling: !item.isSelected) },
+                        isWorking: workingId == item.id
+                    )
+                    .contentShape(.rect)
+                    .onTapGesture { detail = item }
                 }
             }
             .padding(.horizontal, 16)
@@ -93,6 +100,27 @@ struct ElectiveView: View {
         }
         .scrollDismissesKeyboard(.immediately)
         .background(Color(.systemGroupedBackground))
+        .confirmationDialog(
+            pending.map { $0.enrolling ? "确认选课？" : "确认退课？" } ?? "",
+            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+            titleVisibility: .visible,
+            presenting: pending
+        ) { action in
+            Button(action.enrolling ? "选课" : "退课", role: action.enrolling ? nil : .destructive) {
+                Task { await perform(action) }
+            }
+            Button("取消", role: .cancel) { pending = nil }
+        } message: { action in
+            Text(action.item.kcmc ?? "")
+        }
+        .alert("操作结果", isPresented: Binding(
+            get: { actionMessage != nil },
+            set: { if !$0 { actionMessage = nil } }
+        )) {
+            Button("好", role: .cancel) { actionMessage = nil }
+        } message: {
+            Text(actionMessage ?? "")
+        }
     }
 
     private func header(_ data: ElectiveInit) -> some View {
@@ -115,6 +143,35 @@ struct ElectiveView: View {
     }
 
     private var selectedCount: Int { classes.filter(\.isSelected).count }
+
+    /// 执行选课/退课
+    private func perform(_ action: PendingAction) async {
+        pending = nil
+        guard let pcid = batchMap[action.item.id] else {
+            actionMessage = "找不到这条课程所属的选课批次，请下拉刷新后重试"
+            return
+        }
+
+        workingId = action.item.id
+        defer { workingId = nil }
+
+        do {
+            let msg = action.enrolling
+                ? try await APIClient.shared.enroll(jxbid: action.item.id, pcid: pcid)
+                : try await APIClient.shared.dropClass(jxbid: action.item.id, pcid: pcid)
+            actionMessage = msg
+            await load(force: true)
+        } catch let e as APIError {
+            if case .business(_, let text) = e {
+                // 服务端把业务限制（超门数、时间冲突、已满）放在 msg 里，直接展示
+                actionMessage = text
+            } else {
+                actionMessage = e.localizedDescription
+            }
+        } catch {
+            actionMessage = error.localizedDescription
+        }
+    }
 
     private var filterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -197,6 +254,7 @@ struct ElectiveView: View {
                         for item in page.initData ?? [] where !seen.contains(item.id) {
                             seen.insert(item.id)
                             merged.append(item)
+                            batchMap[item.id] = pcid
                         }
                     } catch {
                         lastError = error
@@ -228,8 +286,16 @@ struct ElectiveView: View {
 
 // MARK: - 课程卡片
 
+struct PendingAction: Identifiable {
+    let id = UUID()
+    let item: TeachingClass
+    let enrolling: Bool
+}
+
 struct ClassCard: View {
     let item: TeachingClass
+    var onAction: (() -> Void)? = nil
+    var isWorking: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -267,14 +333,38 @@ struct ClassCard: View {
             HStack(spacing: 10) {
                 CapacityBar(item: item)
 
-                if item.isFull {
+                if item.isFull && !item.isSelected {
                     Text("已满")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.orange)
-                } else if item.canSelect {
+                } else if item.canSelect && !item.isSelected {
                     Text("可选")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.green)
+                }
+
+                Spacer(minLength: 4)
+
+                if let onAction {
+                    Button(action: onAction) {
+                        HStack(spacing: 4) {
+                            if isWorking {
+                                ProgressView().controlSize(.mini)
+                            }
+                            Text(item.isSelected ? "退课" : "选课")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(
+                            item.isSelected ? Color.red.opacity(0.12) : Color.accentColor.opacity(0.14),
+                            in: .capsule
+                        )
+                        .foregroundStyle(item.isSelected ? Color.red : Color.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isWorking || (!item.isSelected && item.isFull))
+                    .opacity((!item.isSelected && item.isFull) ? 0.45 : 1)
                 }
             }
             .padding(.top, 2)

@@ -251,6 +251,39 @@ extension APIClient {
         return payload.xscjList ?? []
     }
 
+    /// 选课
+    ///
+    /// POST /admin/xsd/xk/xsdXkV2  { jxbid, pcid, sfqc }
+    /// 实测：ret=0 "选课成功"；超限时 ret=-1 "当前批次已选门数超过【4门】"
+    @discardableResult
+    func enroll(jxbid: String, pcid: String) async throws -> String {
+        struct Resp: Decodable { let ret: Int; let msg: String? }
+        let (data, _) = try await send(makeRequest(
+            "/admin/xsd/xk/xsdXkV2",
+            method: "POST",
+            form: ["jxbid": jxbid, "pcid": pcid, "sfqc": ""]
+        ))
+        let r = try JSONDecoder().decode(Resp.self, from: data)
+        guard r.ret == 0 else { throw APIError.business(r.ret, r.msg ?? "选课失败") }
+        return r.msg ?? "选课成功"
+    }
+
+    /// 退课
+    ///
+    /// POST /admin/xsd/xk/xsdTkV2  { jxbid, pcid }
+    @discardableResult
+    func dropClass(jxbid: String, pcid: String) async throws -> String {
+        struct Resp: Decodable { let ret: Int; let msg: String? }
+        let (data, _) = try await send(makeRequest(
+            "/admin/xsd/xk/xsdTkV2",
+            method: "POST",
+            form: ["jxbid": jxbid, "pcid": pcid]
+        ))
+        let r = try JSONDecoder().decode(Resp.self, from: data)
+        guard r.ret == 0 else { throw APIError.business(r.ret, r.msg ?? "退课失败") }
+        return r.msg ?? "退课成功"
+    }
+
     /// 当前教学周（校历接口，实测返回 {"xlzc":"7"}）
     func currentTeachingWeek() async throws -> Int {
         struct WeekInfo: Decodable { let xlzc: String? }

@@ -1,0 +1,17 @@
+﻿feat(ios): 选课/退课可提交
+
+前端接口是从 xkPage 的 xsdXkV2 / xsdTkV2 里挖出来的：
+  POST /admin/xsd/xk/xsdXkV2  { jxbid, pcid, sfqc }
+  POST /admin/xsd/xk/xsdTkV2  { jxbid, pcid }
+
+已用「合声实验室」做过完整闭环验证：
+  退课 → ret=0 退课成功，status 0，39/40
+  重选 → ret=0 选课成功，status 1，39/40
+课程已恢复，无损失。
+
+改动：
+- API 增加 enroll / dropClass
+- ClassCard 右下角加「选课」/「退课」按钮，满员时禁用
+- 记录 jxbid → pcid 映射，提交时带对批次
+- confirmationDialog 二次确认，结果用 alert 展示
+- 服务端业务限制（超门数、冲突、已满）直接显示原文
