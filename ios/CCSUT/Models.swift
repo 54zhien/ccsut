@@ -73,6 +73,7 @@ struct TeachingClass: Decodable, Identifiable, Hashable {
     let status: String?      // "1" = 已选
     let bmzt: String?        // 报名状态
     let ksxs: String?        // 考核方式
+    let jxbbh: String?       // 教学班编号
     let bz: String?          // 备注
 
     var creditValue: Double { Double(xf ?? "") ?? 0 }

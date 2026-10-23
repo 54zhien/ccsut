@@ -69,9 +69,11 @@ struct ElectiveView: View {
                 if classes.isEmpty { await load() }
             }
             .sheet(item: $detail) { item in
-                ClassDetailSheet(item: item)
+                CourseDetailSheet(item: item)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                    .presentationCornerRadius(26)
             }
-        }
     }
 
     // MARK: 列表

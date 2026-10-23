@@ -1,17 +1,15 @@
-﻿feat(ios): 选课/退课可提交
+﻿feat(ios): 课程详情页
 
-前端接口是从 xkPage 的 xsdXkV2 / xsdTkV2 里挖出来的：
-  POST /admin/xsd/xk/xsdXkV2  { jxbid, pcid, sfqc }
-  POST /admin/xsd/xk/xsdTkV2  { jxbid, pcid }
+探测结论：教务系统没有课程简介和教师简介接口。
+  getKcjj  返回的是「冲突课程详情」提示页，不是简介
+  getJsxx  只回 {"ret":0,"msg":"查询成功"}，没有 data
+  列表数据里的 kcjj / jsjj 实测全是空字符串
 
-已用「合声实验室」做过完整闭环验证：
-  退课 → ret=0 退课成功，status 0，39/40
-  重选 → ret=0 选课成功，status 1，39/40
-课程已恢复，无损失。
+所以详情页改用 listjxbDataV2 已带回的字段组织：
+课程名、学分、课程类别、课程性质、教学方式、考核方式、
+校区、容量、任课教师、上课时间地点、教学班名称、课程与教学班编号。
 
-改动：
-- API 增加 enroll / dropClass
-- ClassCard 右下角加「选课」/「退课」按钮，满员时禁用
-- 记录 jxbid → pcid 映射，提交时带对批次
-- confirmationDialog 二次确认，结果用 alert 展示
-- 服务端业务限制（超门数、冲突、已满）直接显示原文
+其中 sksjdd 是服务端直接给的可读文本（如「第8-15周 星期四 第3-4节【7-南102】」），
+不需要自己解析 sksjddstr 的时间编码。
+
+点击课程卡片弹出，medium/large 两档高度，可拖动。
