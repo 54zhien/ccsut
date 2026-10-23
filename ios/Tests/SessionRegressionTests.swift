@@ -32,9 +32,10 @@ struct SessionRegressionTests {
             print("\(condition ? "PASS" : "FAIL") \(name)")
             if !condition { failures += 1 }
         }
-        func cookie(_ name: String, _ value: String, expires: Date? = nil, httpOnly: Bool = false) -> HTTPCookie {
+        func cookie(_ name: String, _ value: String, expires: Date? = nil, httpOnly: Bool = false,
+                    domain: String = "tls.ccsut.cn", path: String = "/") -> HTTPCookie {
             var properties: [HTTPCookiePropertyKey: Any] = [
-                .name: name, .value: value, .domain: "tls.ccsut.cn", .path: "/", .secure: "TRUE"
+                .name: name, .value: value, .domain: domain, .path: path, .secure: "TRUE"
             ]
             if let expires { properties[.expires] = expires }
             if httpOnly { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
@@ -96,6 +97,84 @@ struct SessionRegressionTests {
         let saved = Keychain.load("ccsut.cookies.v2").flatMap { try? JSONDecoder().decode([StoredCookie].self, from: $0) }
         check(saved?.contains(where: { $0.name == "jw_uf" && $0.value == "rotated" }) == true,
               "rotated response Cookie is persisted for the next launch")
+
+        CookieJar.shared = [cookie("jw_uf", "previous")]
+        let webCookies = WebStore.dataStore.httpCookieStore
+        for c in await webCookies.allCookies() { await webCookies.remove(c) }
+        await webCookies.set(cookie("jw_uf", "unverified"))
+        SchoolProtocol.response = { (503, $0.url!, [:], "unavailable") }
+        let failedAdoption = SessionStore(api: api)
+        check(!(await failedAdoption.adoptCookies()), "failed business probe rejects WebKit adoption")
+        check(CookieJar.shared.first(where: { $0.name == "jw_uf" })?.value == "previous",
+              "failed WebKit adoption preserves the previous credentials")
+        let afterFailure = Keychain.load("ccsut.cookies.v2").flatMap { try? JSONDecoder().decode([StoredCookie].self, from: $0) }
+        check(afterFailure?.first(where: { $0.name == "jw_uf" })?.value == "previous",
+              "unverified WebKit credentials do not overwrite Keychain")
+
+        CookieJar.shared = [cookie("jw_uf", "old"), cookie("TGC", "fixture-tgc", domain: "auth.ccsut.cn")]
+        SchoolProtocol.response = { _ in throw URLError(.timedOut) }
+        let bootstrap = SessionStore(api: api)
+        await bootstrap.bootstrap()
+        check(bootstrap.phase == .loggedOut, "actual cold bootstrap exits after probe and renewal timeouts")
+        check(Keychain.load("ccsut.cookies.v2") != nil, "transient bootstrap failure retains credentials for retry")
+
+        CookieJar.shared = [cookie("jw_uf", "old"), cookie("TGC", "fixture-tgc", domain: "auth.ccsut.cn")]
+        var casStarts = 0
+        var correctAuthCookies = false
+        SchoolProtocol.response = { req in
+            let url = req.url!
+            if url.host == "auth.ccsut.cn" {
+                correctAuthCookies = req.value(forHTTPHeaderField: "Cookie") == "TGC=fixture-tgc"
+                return (302, url, ["Location": "https://tls.ccsut.cn/admin/caslogin?ticket=fixture"], "")
+            }
+            if url.path == "/admin/caslogin" {
+                if url.query == nil {
+                    casStarts += 1
+                    return (302, url, ["Location": "https://auth.ccsut.cn/backstage/cas/login"], "")
+                }
+                return (302, url, ["Location": "/frontend/student", "Set-Cookie": "jw_uf=renewed; Path=/; Secure; HttpOnly"], "")
+            }
+            return (200, url, [:], "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}")
+        }
+        let renewal = SessionStore(api: api)
+        async let one: Void = renewal.refresh()
+        async let two: Void = renewal.refresh()
+        _ = await (one, two)
+        check(renewal.phase == .loggedIn, "CAS cross-host redirect chain establishes a verified session")
+        check(correctAuthCookies, "CAS receives its TGC without leaking the teaching-system Cookie")
+        check(casStarts == 1, "concurrent renewal callers share one CAS request")
+        check(CookieJar.header(for: "tls.ccsut.cn") == "jw_uf=renewed", "CAS callback rotation is retained")
+
+        CookieJar.shared = [cookie("scoped", "yes", path: "/admin"), cookie("TGC", "private", domain: "auth.ccsut.cn")]
+        check(CookieJar.header(for: URL(string: "https://tls.ccsut.cn/admin/courses")!) == "scoped=yes",
+              "path-scoped Cookie reaches its permitted endpoint")
+        check(CookieJar.header(for: URL(string: "https://tls.ccsut.cn/administrator")!) == nil,
+              "Cookie path boundary prevents accidental prefix matches")
+        check(CookieJar.header(for: URL(string: "http://tls.ccsut.cn/admin")!) == nil,
+              "Secure Cookies are not sent over HTTP")
+        SchoolProtocol.response = { (302, $0.url!, ["Location": "/loop"], "") }
+        do { _ = try await api.html("/loop"); check(false, "redirect loops terminate") }
+        catch { check((error as? URLError)?.code == .httpTooManyRedirects, "redirect loops terminate") }
+
+        // Hold a real request at the HTTP boundary, invalidate credentials, then release
+        // a successful response with Set-Cookie. Its stale generation must be rejected.
+        CookieJar.shared = [cookie("jw_uf", "before-logout")]
+        let gate = DispatchSemaphore(value: 0)
+        let (started, continuation) = AsyncStream<Void>.makeStream()
+        SchoolProtocol.response = { req in
+            continuation.yield(())
+            _ = gate.wait(timeout: .now() + 5)
+            return (200, req.url!, ["Set-Cookie": "jw_uf=late; Path=/; Secure"], "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}")
+        }
+        let late = Task { try await api.electiveInit() }
+        for await _ in started { break }
+        CookieJar.shared = []
+        gate.signal()
+        do { _ = try await late.value; check(false, "late response after logout is cancelled") }
+        catch { check(error is CancellationError, "late response after logout is cancelled") }
+        continuation.finish()
+        check(CookieJar.shared.isEmpty && Keychain.load("ccsut.cookies.v2") == nil,
+              "late response cannot restore logged-out credentials")
 
         let loggedOut = SessionStore(api: api)
         await loggedOut.logout()
