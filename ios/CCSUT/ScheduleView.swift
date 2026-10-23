@@ -142,8 +142,8 @@ struct ScheduleView: View {
 
     private func choiceLabel(_ slot: ScheduleSlot) -> String {
         let weeks = slot.weeks.isEmpty ? "周次未标注" : "第 \(WeekParser.compress(slot.weeks.sorted())) 周"
-        let info = [slot.teacher, slot.room, weeks].filter { !$0.isEmpty }.joined(separator: " · ")
-        return "\(slot.course) · 第 \(slot.startPeriod)–\(slot.endPeriod) 节\n\(info)"
+        let title = slot.teacher.isEmpty ? slot.course : "\(slot.course)（\(slot.teacher)）"
+        return "\(title) · \(slot.room) · 第 \(slot.startPeriod)–\(slot.endPeriod) 节 · \(weeks)"
     }
 
     private var timetable: some View {
