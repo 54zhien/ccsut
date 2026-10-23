@@ -84,6 +84,10 @@ struct SessionRegressionTests {
         let loginPage = SessionStore(api: api)
         check(!(await loginPage.probe()), "CAS login page with HTTP 200 is not a valid session")
 
+        SchoolProtocol.response = { (200, $0.url!, [:], "{\"ret\":-1,\"msg\":\"rejected\",\"data\":{\"xsxh\":\"fixture-student\"}}") }
+        let rejected = SessionStore(api: api)
+        check(!(await rejected.probe()), "authentication rejects a nonzero result even with identity data")
+
         SchoolProtocol.response = { _ in throw URLError(.timedOut) }
         let coldStart = SessionStore(api: api)
         await coldStart.refresh()

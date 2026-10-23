@@ -165,10 +165,10 @@ final class APIClient {
 
         // 先按统一壳解
         if let env = try? JSONDecoder().decode(APIEnvelope<T>.self, from: data) {
+            if let payload = env.data { return payload }
             if env.ret != 0 {
                 throw APIError.business(env.ret, env.msg ?? "")
             }
-            if let payload = env.data { return payload }
             throw APIError.empty
         }
         // 少数接口直接返回裸数据
@@ -191,6 +191,15 @@ final class APIClient {
 // MARK: - 业务接口
 
 extension APIClient {
+    /// 认证探测单独要求 ret=0；不改变其他业务接口现有的解码行为。
+    func authenticatedProfile() async throws -> ElectiveInit {
+        let (data, _) = try await send(makeRequest("/admin/xsd/xk/listV2", method: "POST", form: [:]))
+        let envelope = try JSONDecoder().decode(APIEnvelope<ElectiveInit>.self, from: data)
+        guard envelope.ret == 0 else { throw APIError.business(envelope.ret, envelope.msg ?? "") }
+        guard let profile = envelope.data else { throw APIError.empty }
+        return profile
+    }
+
     /// 选课页初始化：学生信息、字典、批次加密串
     func electiveInit() async throws -> ElectiveInit {
         try await post("/admin/xsd/xk/listV2")

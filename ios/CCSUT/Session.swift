@@ -295,7 +295,7 @@ final class SessionStore {
     }
 
     private func verifySession() async throws {
-        let profile = try await api.electiveInit()
+        let profile = try await api.authenticatedProfile()
         guard profile.xsxh?.isEmpty == false else { throw APIError.notLoggedIn }
     }
 
