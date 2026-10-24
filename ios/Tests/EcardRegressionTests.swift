@@ -229,6 +229,15 @@ final class EcardProtocol: URLProtocol {
         check((try? await logoutTask.value) == nil && EcardTokenBridge.cachedToken(forAccount: "student-B") == nil,
               "logout invalidates in-flight token and prevents cache resurrection")
 
+        let (deliveredLogin, deliveredView) = bridge()
+        let deliveredTask = Task { try await deliveredLogin.fetchToken(forAccount: "student-B") }
+        await pause()
+        deliver(deliveredLogin, deliveredView, navigation: deliveredView.navigations.last!, token: jwt())
+        // The continuation is resumed, but its caller has not run yet.
+        EcardTokenBridge.clearCachedToken()
+        check((try? await deliveredTask.value) == nil,
+              "logout also fences a token already resumed but not yet returned")
+
         for location in ["http://ecard.ccsut.cn/charge-app/", "https://ecard.ccsut.cn/plat/login",
                          "https://ecard.ccsut.cn/charge-app-other/"] {
             let (restricted, restrictedView) = bridge()

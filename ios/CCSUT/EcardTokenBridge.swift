@@ -71,7 +71,12 @@ final class EcardTokenBridge: NSObject {
     func fetchToken(forAccount account: String?) async throws -> String {
         guard !Task.isCancelled else { throw EcardError.canceled }
         if let cached = Self.cachedToken(forAccount: account) { return cached }
-        return try await startRequest(account: account)
+        let revision = Self.cacheRevision
+        let token = try await startRequest(account: account)
+        // Logout/cancellation may happen after finish resumes the continuation
+        // but before this caller is scheduled to consume its result.
+        guard revision == Self.cacheRevision, !Task.isCancelled else { throw EcardError.canceled }
+        return token
     }
 
     // MARK: 缓存
