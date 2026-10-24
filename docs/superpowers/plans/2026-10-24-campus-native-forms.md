@@ -64,6 +64,18 @@
 **Files:** Update `ios/README.md` and this plan checklist; review artifacts remain ignored.
 
 - [x] Run one fresh independent review across this feature's commit range. Fix important findings once, with targeted RED→GREEN evidence.
-- [ ] Push the isolated branch; run exact-SHA session/UI and Release IPA workflows. Inspect any failure before changing or rerunning.
-- [ ] Download IPA, verify ZIP/arm64/bundle/minimum OS and no embedded tests; verify payment files match `2483a48`.
-- [ ] Report proven checks separately from real-school submission/device acceptance; deliver unsigned IPA. No merge into main.
+- [x] Push the isolated branch; run exact-SHA session/UI and Release IPA workflows. Inspect any failure before changing or rerunning.
+- [x] Download IPA, verify ZIP/arm64/bundle/minimum OS and no embedded tests; verify payment files match `2483a48`.
+- [x] Report proven checks separately from real-school submission/device acceptance; deliver unsigned IPA. No merge into main.
+
+## Verification record
+
+Code and IPA source: `6d845286defdb1ca68b97a3ba4ad02d300107769`. This closeout only updates documentation.
+
+- Local checks: 150 passed, including 78 native form rules/API/lifecycle assertions. The six Important review findings were reproduced and fixed in one pass; the drag-export regression is a source guard, not a physical-device drag test.
+- [macOS session regressions](https://github.com/54zhien/ccsut/actions/runs/40069769456): success at the exact code commit.
+- [Native campus UI](https://github.com/54zhien/ccsut/actions/runs/40069769465): six tests, zero failures; light/dark and confirmation screenshots inspected.
+- [Release IPA](https://github.com/54zhien/ccsut/actions/runs/40069775082): success; ZIP/arm64/bundle/iOS 26.0/no embedded tests checks passed. SHA256 `74acab86be2d35979089087a8c77e9dc7d41a0222389274db8c12035eb965be4`.
+- Four payment files remain identical to `2483a48`. The isolated worktree and branch are preserved, without merging main.
+- Development and automation did not submit real school applications or upload real attachments. Real submission, device location and detailed VoiceOver/drag behavior require user/device acceptance.
+- Deferred minor: the keyboard does not automatically scroll the current free-text input into view; manual scrolling is available.
