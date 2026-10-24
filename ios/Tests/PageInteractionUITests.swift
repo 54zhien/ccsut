@@ -46,6 +46,46 @@ final class PageInteractionUITests: XCTestCase {
         capture(app, "campus-web-privacy")
     }
 
+    func testCampusNativeLeaveForm() {
+        let app = launch("campus-form-leave")
+        XCTAssertTrue(app.secureTextFields["campus-form-contact"].waitForExistence(timeout: 8))
+        app.segmentedControls.buttons["不离校"].tap()
+        app.buttons["campus-form-review"].tap()
+        XCTAssertTrue(app.staticTexts["campus-form-error"].waitForExistence(timeout: 5))
+        let reason = app.textViews["campus-form-reason"]
+        reason.tap(); reason.typeText("reason 18000000000")
+        let visible = reason.value as? String ?? ""
+        XCTAssertTrue(visible.contains("reason"))
+        XCTAssertFalse(visible.contains("18000000000"))
+        capture(app, "campus-native-masked-input")
+        app.buttons["campus-form-review"].tap()
+        XCTAssertTrue(app.buttons["campus-form-confirm"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "18000000000")).firstMatch.exists)
+        capture(app, "campus-native-confirmation")
+        app.buttons["campus-form-confirm"].tap()
+        XCTAssertTrue(app.staticTexts["已提交，等待审核"].waitForExistence(timeout: 5))
+    }
+
+    func testCampusNativeDepartureForm() {
+        let app = launch("campus-form-departure")
+        XCTAssertTrue(app.secureTextFields["campus-form-phone"].waitForExistence(timeout: 8))
+        app.segmentedControls.buttons["留校"].tap()
+        app.buttons["campus-form-review"].tap()
+        XCTAssertTrue(app.buttons["campus-form-confirm"].waitForExistence(timeout: 5))
+        capture(app, "campus-native-stay-confirmation")
+        app.buttons["campus-form-confirm"].tap()
+        XCTAssertTrue(app.staticTexts["已提交，等待审核"].waitForExistence(timeout: 5))
+    }
+
+    func testCampusNativeFormLargeText() {
+        let app = launch("campus-form-leave", largeText: true)
+        let review = app.buttons["campus-form-review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 8))
+        XCTAssertGreaterThanOrEqual(review.frame.height, 44)
+        app.swipeUp()
+        capture(app, "campus-native-accessibility-form")
+    }
+
     private func launch(_ page: String, longList: Bool = false, transition: Bool = false, withoutUpcoming: Bool = false,
                         refresh: Bool = false, empty: Bool = false, largeText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()

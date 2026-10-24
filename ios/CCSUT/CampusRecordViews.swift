@@ -52,6 +52,7 @@ private struct CampusRecordContent: View {
     @Binding var selected: CampusTravelKind
     let reconnect: () -> Void
     @State private var officialPage: CampusWebDestination?
+    @State private var nativeForm: CampusFormKind?
 
     var body: some View {
         ScrollView {
@@ -64,7 +65,9 @@ private struct CampusRecordContent: View {
                     .accessibilityIdentifier("campus-travel-kind")
                 }
                 Button {
-                    officialPage = mode == .leave ? .leaveForm : (selected == .departure ? .departure : .returning)
+                    if mode == .leave { nativeForm = .leave }
+                    else if selected == .departure { nativeForm = .departure }
+                    else { officialPage = .returning }
                 } label: {
                     Label(mode == .leave ? "申请请假" : "办理\(selected == .departure ? "离校" : "返校")登记", systemImage: "arrow.up.right.square")
                         .frame(maxWidth: .infinity, minHeight: 44)
@@ -87,6 +90,9 @@ private struct CampusRecordContent: View {
         }
         .sheet(item: $officialPage, onDismiss: reconnect) { destination in
             CampusWebView(destination: destination, account: account)
+        }
+        .sheet(item: $nativeForm, onDismiss: reconnect) { kind in
+            CampusFormView(kind: kind, account: account)
         }
     }
 

@@ -64,6 +64,14 @@ import Foundation
         departure.leaving = nil
         check(rejected(departure, travel, nil), "leaving or staying must be explicitly chosen")
         check(!CampusFormError.unknownOutcome.localizedDescription.contains("private"), "submission errors use safe fixed copy")
+        let edited = "reason 18000000000 end"
+        let visible = CampusFormPrivacy.masked(edited)
+        check(!visible.contains("18000000000") && visible.utf16.count == edited.utf16.count && visible.hasPrefix("reason "),
+              "editable masks preserve text positions while hiding only sensitive ranges")
+        let point = CampusCoordinates.gcj02(latitude:39.915,longitude:116.404)
+        check(abs(point.latitude - 39.916404) < 0.00001 && abs(point.longitude - 116.410244) < 0.00001, "GPS converts to the coordinate system expected by school geocoder")
+        let outside = CampusCoordinates.gcj02(latitude:51.5,longitude:-0.1)
+        check(outside.latitude == 51.5 && outside.longitude == -0.1, "locations outside conversion region are not shifted")
         if failures > 0 { exit(1) }
     }
 }

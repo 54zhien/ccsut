@@ -31,12 +31,15 @@ jobs:
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusEntryAndRecords \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusLargeTextEntries \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusOfficialWebPrivacy \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeLeaveForm \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeDepartureForm \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeFormLargeText \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/campus-tests.log"
       - name: Capture campus light and dark screens
         run: |
           for appearance in light dark; do
             xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance "$appearance"
-            for page in campus campus-leave campus-travel; do
+            for page in campus campus-leave campus-travel campus-form-leave campus-form-departure; do
               xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$page"
               sleep 3
               xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$RUNNER_TEMP/ui-screenshots/$page-$appearance.png"

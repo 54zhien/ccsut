@@ -22,6 +22,8 @@ struct CCSUTApp: App {
                     case "launch": LaunchView()
                     #if DEBUG
                     case "campus-privacy": CampusPrivacyPreview()
+                    case "campus-form-leave": CampusFormView(kind: .leave, account: "preview-account")
+                    case "campus-form-departure": CampusFormView(kind: .departure, account: "preview-account")
                     #endif
                     default: MainTabs()
                     }

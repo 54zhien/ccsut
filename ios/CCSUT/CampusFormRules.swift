@@ -1,6 +1,40 @@
 import Foundation
 
-enum CampusFormKind: String, Sendable { case leave, departure
+enum CampusFormPrivacy {
+    static func ranges(_ text: String) -> [NSRange] {
+        let pattern = #"(?<![0-9])[0-9](?:[ \t-]?[0-9]){10,24}[Xx]?(?![0-9])"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        return regex.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length)).map(\.range)
+    }
+    static func masked(_ text: String) -> String {
+        let result = NSMutableString(string: text)
+        for range in ranges(text).reversed() { result.replaceCharacters(in: range, with: String(repeating: "•", count: range.length)) }
+        return result as String
+    }
+}
+
+enum CampusCoordinates {
+    /// Forward conversion for the school's GCJ-02 address lookup; Core Location supplies GPS coordinates.
+    static func gcj02(latitude lat: Double, longitude lon: Double) -> (latitude: Double, longitude: Double) {
+        guard lon >= 72.004, lon <= 137.8347, lat >= 0.8293, lat <= 55.8271 else { return (lat, lon) }
+        let x = lon - 105, y = lat - 35, pi = Double.pi
+        var dy = -100 + 2*x + 3*y + 0.2*y*y + 0.1*x*y + 0.2*sqrt(abs(x))
+        dy += (20*sin(6*x*pi) + 20*sin(2*x*pi)) * 2/3
+        dy += (20*sin(y*pi) + 40*sin(y*pi/3)) * 2/3
+        dy += (160*sin(y*pi/12) + 320*sin(y*pi/30)) * 2/3
+        var dx = 300 + x + 2*y + 0.1*x*x + 0.1*x*y + 0.1*sqrt(abs(x))
+        dx += (20*sin(6*x*pi) + 20*sin(2*x*pi)) * 2/3
+        dx += (20*sin(x*pi) + 40*sin(x*pi/3)) * 2/3
+        dx += (150*sin(x*pi/12) + 300*sin(x*pi/30)) * 2/3
+        let radians = lat / 180 * pi, magic = 1 - 0.00669342162296594323 * pow(sin(radians), 2)
+        dy = dy * 180 / ((6378245 * (1 - 0.00669342162296594323)) / pow(magic, 1.5) * pi)
+        dx = dx * 180 / (6378245 / sqrt(magic) * cos(radians) * pi)
+        return (lat + dy, lon + dx)
+    }
+}
+
+enum CampusFormKind: String, Sendable, Identifiable { case leave, departure
+    var id: String { rawValue }
     var title: String { self == .leave ? "申请请假" : "离校登记" }
 }
 
