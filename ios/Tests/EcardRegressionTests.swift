@@ -176,7 +176,9 @@ final class EcardProtocol: URLProtocol {
         await pause()
         let followingToken = jwt()
         deliver(cancelLogin, cancelView, navigation: cancelView.navigations.last!, token: followingToken)
-        check((try? await canceled.value) == nil && (try? await following.value) == followingToken,
+        let canceledValue = try? await canceled.value
+        let followingValue = try? await following.value
+        check(canceledValue == nil && followingValue == followingToken,
               "canceling an older task leaves the following request usable")
         check(EcardTokenBridge.cachedToken(forAccount: "student-B") == followingToken &&
               EcardTokenBridge.cachedToken(forAccount: "student-A") == nil &&
