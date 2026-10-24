@@ -31,6 +31,14 @@ struct EcardPaymentView: View {
                     .padding(.horizontal, 4)
                     .accessibilityElement(children: .contain)
                 }
+                if model.receipt != nil, model.isStarting {
+                    ProgressView("正在连接一卡通…").font(.footnote).foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                }
+                if model.canOpenLogin {
+                    Button("打开认证页面", action: model.openLogin)
+                        .font(.subheadline.weight(.semibold)).padding(.horizontal, 4)
+                }
             }
             .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 24)
             .frame(maxWidth: 720).frame(maxWidth: .infinity)
@@ -43,7 +51,7 @@ struct EcardPaymentView: View {
         .background(Color(.systemGroupedBackground))
         .academicDetailChrome(title: "电费缴费")
         .sheet(item: $model.loginRequest, onDismiss: model.loginDismissed) { request in
-            EcardLoginSheet(request: request, success: model.acceptToken, failure: model.loginFailed)
+            EcardLoginSheet(request: request)
         }
         .sheet(item: $model.confirmation) { confirmed in
             confirmation(confirmed)
@@ -281,8 +289,6 @@ struct EcardPaymentView: View {
 
 private struct EcardLoginSheet: View {
     let request: EcardPaymentModel.LoginRequest
-    let success: (String) -> Void
-    let failure: (Error) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.deviceCornerRadius) private var cornerRadius
     @State private var isLoading = true
@@ -318,9 +324,5 @@ private struct EcardLoginSheet: View {
             .presentationDetents([.large]).presentationDragIndicator(.visible)
             .presentationCornerRadius(SheetLayout.cornerRadius(cornerRadius))
             .onReceive(request.bridge.webView.publisher(for: \.isLoading)) { isLoading = $0 }
-            .task {
-                do { success(try await request.bridge.fetchToken(forAccount: request.account)) }
-                catch { if !Task.isCancelled { failure(error) } }
-            }
     }
 }

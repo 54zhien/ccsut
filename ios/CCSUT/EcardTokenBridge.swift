@@ -14,8 +14,8 @@
 //    history.replaceState 把参数抹掉，所以不能等页面加载完再看地址栏）。
 //
 //  使用方式（重要）：
-//    bridge 自己不弹任何界面。调用方必须把 `bridge.webView` 放进视图层级
-//    （sheet / 容器），再 `await bridge.fetchToken(forAccount: sno)`。
+//    bridge 不弹界面，可先在后台 `await fetchToken(forAccount: sno)`。
+//    onNeedsInteraction 通知调用方把同一个 webView 放进 sheet；不要重启请求。
 //
 //  凭证安全：
 //    - token 只在内存缓存，绑定 `sno`，并校验 JWT `exp` 未过期
@@ -32,6 +32,7 @@ final class EcardTokenBridge: NSObject {
 
     /// 展示给用户的 WebView（调用方负责放进视图层级）
     let webView: WKWebView
+    var onNeedsInteraction: (() -> Void)?
 
     private let feeitemID: String
     private let timeout: TimeInterval
@@ -49,6 +50,7 @@ final class EcardTokenBridge: NSObject {
     private var pendingAccount: String?
     private var attemptedPortalActions: Set<String> = []
     private var advancingPortal = false
+    private var reportedInteraction = false
 
     init(feeitemID: String = EcardClient.electricityFeeItemID,
          timeout: TimeInterval = 120,
@@ -60,7 +62,9 @@ final class EcardTokenBridge: NSObject {
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = dataStore ?? .default()
 
-        let wv = webView ?? WKWebView(frame: .zero, configuration: cfg)
+        // Give the invisible page a real viewport for responsive login/portal
+        // layouts. WebPanel supplies its actual size if interaction is needed.
+        let wv = webView ?? WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: cfg)
         wv.allowsBackForwardNavigationGestures = false
         wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
         self.webView = wv
@@ -157,6 +161,7 @@ final class EcardTokenBridge: NSObject {
         pendingAccount = account
         attemptedPortalActions = []
         advancingPortal = false
+        reportedInteraction = false
         requestCacheRevision = Self.cacheRevision
 
         return try await withTaskCancellationHandler {
@@ -290,6 +295,42 @@ final class EcardTokenBridge: NSObject {
         }
     }
 
+    private func reportInteractionIfNeeded(pageURL: URL?, navigation: WKNavigation, generation gen: Int) async {
+        guard onNeedsInteraction != nil, !reportedInteraction, let pageURL,
+              pageURL.scheme?.lowercased() == "https", pageURL.port == nil || pageURL.port == 443,
+              let host = pageURL.host?.lowercased(),
+              host == "auth.ccsut.cn" || host == "zts.ccsut.cn" || Self.isPortalPage(pageURL),
+              gen == generation, continuation != nil, webView.url == pageURL,
+              currentNavigation === navigation else { return }
+        // Inspect controls only, never their values or authentication payloads.
+        // A network delay alone is not proof that a login window is necessary.
+        let script = """
+        const selector = portalOnly ? 'input[type="password"]' :
+          'input[type="password"], input[autocomplete="one-time-code"], input[name*="code" i], ' +
+          'input[placeholder*="验证码"], canvas, img[src*="qrcode" i], img[alt*="二维码"], ' +
+          '[id*="qrcode" i], [class*="qrcode" i], [class*="qr-code" i]';
+        const visibleControl = () => [...document.querySelectorAll(selector)].some(el =>
+          el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden');
+        for (let attempt = 0; attempt < 15; attempt++) {
+          if (location.href !== expectedURL) return false;
+          if (visibleControl()) {
+            await new Promise(resolve => setTimeout(resolve, 800));
+            return location.href === expectedURL && visibleControl();
+          }
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
+        return false;
+        """
+        let needsInteraction = try? await webView.callAsyncJavaScript(script, arguments: [
+            "portalOnly": Self.isPortalPage(pageURL), "expectedURL": pageURL.absoluteString
+        ], in: nil, in: .page)
+        guard gen == generation, continuation != nil, webView.url == pageURL,
+              currentNavigation === navigation, !webView.isLoading,
+              needsInteraction as? Bool == true else { return }
+        reportedInteraction = true
+        onNeedsInteraction?()
+    }
+
     /// 结构 + 过期 + 账号一致性
     private func validate(_ token: String, account: String?) -> String? {
         guard let claims = JWT.claims(token), let exp = claims.expiresAt,
@@ -352,11 +393,15 @@ extension EcardTokenBridge: WKNavigationDelegate {
 
             if Self.isPortalPage(pageURL), let pageURL, webView.url == pageURL {
                 await self.advancePortal(pageURL: pageURL, generation: gen)
+                await self.reportInteractionIfNeeded(pageURL: pageURL, navigation: navigation, generation: gen)
                 return
             }
 
             // 兜底只读固定键，且必须确认还在缴费域名下
-            guard Self.isPaymentPage(pageURL), webView.url == pageURL else { return }
+            guard Self.isPaymentPage(pageURL), webView.url == pageURL else {
+                await self.reportInteractionIfNeeded(pageURL: pageURL, navigation: navigation, generation: gen)
+                return
+            }
 
             let js = """
             (function () {

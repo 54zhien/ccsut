@@ -39,6 +39,7 @@ final class EcardPaymentModel {
     var isStarting = false
     var isSubmitting = false
     var isChecking = false
+    var canOpenLogin = false
     var loginRequest: LoginRequest?
     var confirmation: Confirmation?
     var receipt: Receipt?
@@ -48,6 +49,9 @@ final class EcardPaymentModel {
     @ObservationIgnored private var revision = 0
     @ObservationIgnored private var queryTask: Task<Void, Never>?
     @ObservationIgnored private var initialTask: Task<Void, Never>?
+    @ObservationIgnored private var loginTask: Task<Void, Never>?
+    @ObservationIgnored private var loginPromptTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingLogin: LoginRequest?
 
     var amount: Decimal? {
         let value = amountText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -91,14 +95,54 @@ final class EcardPaymentModel {
         if let token = EcardTokenBridge.cachedToken(forAccount: account) {
             acceptToken(token)
         } else {
-            loginRequest = LoginRequest(bridge: EcardTokenBridge(dataStore: WebStore.dataStore), account: account)
+            beginBackgroundLogin(account: account)
         }
     }
 
-    func acceptToken(_ token: String) {
+    private func beginBackgroundLogin(account: String) {
         let current = revision
         let generation = CookieJar.generation
-        let store = loginRequest?.bridge.webView.configuration.websiteDataStore ?? WebStore.dataStore
+        let request = LoginRequest(bridge: EcardTokenBridge(dataStore: WebStore.dataStore), account: account)
+        let requestID = request.id
+        pendingLogin = request
+        request.bridge.onNeedsInteraction = { [weak self] in
+            guard let self, current == self.revision, CookieJar.generation == generation,
+                  self.pendingLogin?.id == requestID else { return }
+            self.openLogin()
+        }
+        loginPromptTask = Task {
+            do { try await Task.sleep(for: .seconds(8)) } catch { return }
+            guard current == revision, CookieJar.generation == generation, pendingLogin?.id == request.id else { return }
+            canOpenLogin = true
+        }
+        loginTask = Task {
+            defer {
+                if current == revision {
+                    loginTask = nil
+                    loginPromptTask?.cancel(); loginPromptTask = nil
+                    pendingLogin = nil; canOpenLogin = false
+                }
+                request.bridge.onNeedsInteraction = nil
+            }
+            do {
+                let token = try await request.bridge.fetchToken(forAccount: account)
+                guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
+                acceptToken(token, store: request.bridge.webView.configuration.websiteDataStore)
+            } catch {
+                if current == revision, CookieJar.generation == generation, !Task.isCancelled { loginFailed(error) }
+            }
+        }
+    }
+
+    func openLogin() {
+        guard isStarting, let pendingLogin else { return }
+        loginRequest = pendingLogin
+    }
+
+    private func acceptToken(_ token: String, store: WKWebsiteDataStore? = nil) {
+        let current = revision
+        let generation = CookieJar.generation
+        let store = store ?? WebStore.dataStore
         initialTask = Task {
             defer { if current == revision { isStarting = false } }
             do {
@@ -190,7 +234,7 @@ final class EcardPaymentModel {
         }
     }
 
-    func loginFailed(_ error: Error) {
+    private func loginFailed(_ error: Error) {
         errorText = error.localizedDescription
         loginRequest = nil; isStarting = false
     }
@@ -207,6 +251,10 @@ final class EcardPaymentModel {
     func stopQueries() {
         revision &+= 1
         queryTask?.cancel(); initialTask?.cancel()
+        loginTask?.cancel(); loginTask = nil
+        loginPromptTask?.cancel(); loginPromptTask = nil
+        pendingLogin?.bridge.onNeedsInteraction = nil
+        pendingLogin = nil; loginRequest = nil; canOpenLogin = false
         loadingText = nil; isStarting = false
     }
 
