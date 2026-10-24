@@ -78,15 +78,15 @@ private struct CampusRecordContent: View {
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("campus-travel-kind")
                 }
-                Button {
+                CampusServiceAction(title: mode == .leave ? "申请请假" : "办理\(selected == .departure ? "离校" : "返校")登记",
+                                    subtitle: mode == .leave ? "填写请假信息，提交学校审核" : "登记假期安排，查看办理进度",
+                                    symbol: mode == .leave ? "doc.text" : "figure.walk.departure") {
                     if mode == .leave { nativeForm = .leave }
                     else if selected == .departure { nativeForm = .departure }
                     else { officialPage = .returning }
-                } label: {
-                    Label(mode == .leave ? "申请请假" : "办理\(selected == .departure ? "离校" : "返校")登记", systemImage: "arrow.up.right.square")
-                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.glass)
+                Text(mode == .leave ? "申请记录" : selected.title).font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary).padding(.horizontal, 4).padding(.top, 8).accessibilityAddTraits(.isHeader)
                 if mode == .leave { leaveContent } else { travelContent }
             }
             .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 28)
@@ -122,12 +122,16 @@ private struct CampusRecordContent: View {
             ContentUnavailableView("暂无请假记录", systemImage: "doc.text.magnifyingglass")
         }
         ForEach(model.leave.items) { record in
-            recordCard(title: record.typeName ?? "请假记录", status: record.statusText) {
-                detail("开始", record.beginTime)
-                detail("结束", record.endTime)
-                if let days = record.days { detail("时长", "\(NSDecimalNumber(decimal: days).stringValue) 天") }
-                detail("事由", record.reason)
-                detail("申请时间", record.applyTime)
+            recordCard(title: record.typeName ?? "请假记录", status: record.statusText, pending: record.status == 0) {
+                CampusDateRange(start: record.beginTime, end: record.endTime)
+                if let days = record.days {
+                    Label("\(NSDecimalNumber(decimal: days).stringValue) 天", systemImage: "clock")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                if let reason = record.reason, !reason.isEmpty {
+                    Divider(); Text(reason).font(.subheadline).fixedSize(horizontal: false, vertical: true).privacySensitive()
+                }
+                if let applied = record.applyTime { timestamp("申请于", applied) }
             }
         }
         if !model.leave.items.isEmpty && model.leave.hasMore {
@@ -152,13 +156,13 @@ private struct CampusRecordContent: View {
             ContentUnavailableView("暂无\(selected.title)", systemImage: "calendar.badge.checkmark")
         }
         ForEach(records) { record in
-            recordCard(title: record.title, status: record.statusText) {
-                detail("开始", record.startDate)
-                detail("结束", record.endDate)
-                detail("去向", record.destination)
-                detail("交通", record.transport)
-                detail("事由", record.reason)
-                detail("登记时间", record.applyDate)
+            recordCard(title: record.title, status: record.statusText, pending: record.statusText == "待审核") {
+                CampusDateRange(start: record.startDate, end: record.endDate)
+                if record.destination != nil || record.transport != nil { Divider() }
+                if let destination = record.destination { detail("去向", destination) }
+                if let transport = record.transport { detail("交通", transport) }
+                if let reason = record.reason, !reason.isEmpty { Text(reason).font(.subheadline).fixedSize(horizontal: false, vertical: true).privacySensitive() }
+                if let applied = record.applyDate { timestamp("登记于", applied) }
             }
         }
     }
@@ -175,10 +179,15 @@ private struct CampusRecordContent: View {
         }
     }
 
-    private func recordCard<Content: View>(title: String, status: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.headline).accessibilityAddTraits(.isHeader)
-            Text(status).font(.subheadline.weight(.medium)).foregroundStyle(Color.accentColor)
+    private func recordCard<Content: View>(title: String, status: String, pending: Bool, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(title).font(.headline).fixedSize(horizontal: false, vertical: true); Spacer(minLength: 0)
+                    CampusStatusBadge(text: status, pending: pending)
+                }
+                VStack(alignment: .leading, spacing: 10) { Text(title).font(.headline); CampusStatusBadge(text: status, pending: pending) }
+            }
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(20)
@@ -187,12 +196,17 @@ private struct CampusRecordContent: View {
 
     @ViewBuilder private func detail(_ label: String, _ value: String?) -> some View {
         if let value, !value.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(label).font(.caption).foregroundStyle(.secondary)
-                Text(value).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(label).font(.subheadline).foregroundStyle(.secondary)
+                Text(value).font(.subheadline).fixedSize(horizontal: false, vertical: true).privacySensitive()
             }
             .accessibilityElement(children: .combine)
         }
+    }
+
+    private func timestamp(_ label: String, _ raw: String) -> some View {
+        Text(label + " " + CampusDisplayDate.timestamp(raw)).font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true).privacySensitive()
     }
 }
 

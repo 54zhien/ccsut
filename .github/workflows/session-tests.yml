@@ -47,6 +47,8 @@ jobs:
           "$RUNNER_TEMP/campus-form-api"
           xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusFormRules.swift ios/CCSUT/CampusAPI.swift ios/CCSUT/CampusFormsAPI.swift ios/CCSUT/CampusFormModel.swift ios/Tests/CampusFormModelTests.swift -o "$RUNNER_TEMP/campus-form-model"
           "$RUNNER_TEMP/campus-form-model"
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusPresentation.swift ios/Tests/CampusPresentationTests.swift -o "$RUNNER_TEMP/campus-presentation"
+          "$RUNNER_TEMP/campus-presentation"
       - name: Run protocol and academic integrity regressions
         if: always()
         run: |
