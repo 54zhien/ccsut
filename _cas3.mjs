@@ -5,7 +5,8 @@ const page = await ctx.newPage();
 await page.goto("https://auth.ccsut.cn/backstage/cas/login?service=https%3A%2F%2Ftls.ccsut.cn%2Fadmin%2Fcaslogin", { waitUntil:"networkidle", timeout:40000 }).catch(()=>{});
 
 // 模拟 App 注入脚本（新版本：先等 tab 渲染）
-const result = await page.evaluate(async () => {
+const studentNumber = process.env.CCSUT_SNO ?? "";
+const result = await page.evaluate(async (studentNumber) => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const setVal = (el, v) => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
@@ -41,7 +42,7 @@ const result = await page.evaluate(async () => {
   // 4. 填表
   const user = [...document.querySelectorAll("input")].find(el => /用户名|手机号|账号/.test(el.placeholder||""));
   [(user ? {ok:true} : null)].filter(Boolean);
-  if (user) setVal(user, "202402040417");
+  if (user) setVal(user, studentNumber);
 
   // 5. 验证码检测
   const captcha = [...document.querySelectorAll("input")].find(el => /验证码/.test(el.placeholder||"") && el.offsetWidth > 0);
@@ -58,6 +59,6 @@ const result = await page.evaluate(async () => {
     buttonText: btn?.textContent?.trim(),
     allInputs: [...document.querySelectorAll("input")].map(e => `${e.type}:${e.placeholder||"-"}`),
   };
-});
+}, studentNumber);
 console.log(JSON.stringify(result, null, 2));
 await browser.close();
