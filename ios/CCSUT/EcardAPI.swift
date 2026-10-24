@@ -33,6 +33,7 @@ enum EcardError: LocalizedError {
     case transport(String)
     case noToken
     case authenticationRequired
+    case sessionSynchronization
     case canceled
     /// 建单被拒（code 非 200 或 success=false）
     case orderRejected(String)
@@ -53,6 +54,7 @@ enum EcardError: LocalizedError {
         case .transport(let what):         return "网络异常：\(what)"
         case .noToken:                     return "未获取到缴费凭证，请重新登录"
         case .authenticationRequired:      return "一卡通或学校访问网关登录已失效，请重新认证"
+        case .sessionSynchronization:      return "同步一卡通登录状态失败，请重新认证后再试"
         case .canceled:                    return "操作已取消"
         case .orderRejected(let msg):      return "建单失败：\(msg)"
         case .paymentChannelUnavailable:   return "当前没有可用的余额支付方式"
@@ -813,7 +815,7 @@ final class EcardClient {
             _ = try await pay(orderID: orderID, payTypeID: payTypeID, payTypeCode: payTypeCode)
         } catch let error as EcardError {
             switch error {
-            case .transport, .http, .decoding, .canceled, .authenticationRequired:
+            case .transport, .http, .decoding, .canceled, .authenticationRequired, .sessionSynchronization:
                 // 支付可能已被服务端处理（超时 / 网关 5xx）。
                 // 先查单；查不到也把订单号交给 UI 显示「结果待确认」，
                 // 绝不直接抛错，否则用户会再缴一次。

@@ -165,7 +165,11 @@ final class EcardPaymentModel {
                 // after the native request has received a rotated session.
                 for cookie in cookies {
                     guard CookieJar.generation == generation else { throw EcardError.canceled }
-                    try? await store.httpCookieStore.set(cookie)
+                    do { try await store.httpCookieStore.set(cookie) }
+                    catch {
+                        guard CookieJar.generation == generation, !Task.isCancelled else { throw EcardError.canceled }
+                        throw EcardError.sessionSynchronization
+                    }
                 }
             }
             guard CookieJar.generation == generation else { throw EcardError.canceled }
@@ -177,7 +181,7 @@ final class EcardPaymentModel {
         errorText = error.localizedDescription
         if let error = error as? EcardError {
             switch error {
-            case .authenticationRequired, .noToken, .business(401, _):
+            case .authenticationRequired, .sessionSynchronization, .noToken, .business(401, _):
                 EcardTokenBridge.clearCachedToken()
                 client = nil
                 fee = nil
