@@ -2,10 +2,11 @@
 //  EcardTokenBridge.swift
 //  CCSUT
 //
-//  用 WKWebView 拿一卡通缴费的 access_token
+//  原生 SSO 优先获取缴费 access_token，保留官方 WKWebView 认证兜底。
 //
 //  原理：
-//    先打开官方 /plat/login，用户完成一卡通登录并进入电费项目。
+//    先使用当前 CAS 会话逐跳换取缴费 token；需要交互或部署变化时，
+//    打开官方 /plat/login，用户完成一卡通登录并进入电费项目。
 //    /charge/feeitem/toAppitem 是需要令牌的换票接口，不能作为未登录入口：
 //    实际会直接返回「缺失令牌，鉴权失败」，并不会自动重定向到登录页。
 //    由官方门户带着它自己的认证上下文进入电费项目后，跳转到：
@@ -33,9 +34,11 @@ final class EcardTokenBridge: NSObject {
     /// 展示给用户的 WebView（调用方负责放进视图层级）
     let webView: WKWebView
     var onNeedsInteraction: (() -> Void)?
+    private(set) var usesNativeCookies = false
 
     private let feeitemID: String
     private let timeout: TimeInterval
+    private let nativeTokenProvider: @MainActor (String, TimeInterval) async throws -> String
 
     /// 请求代数：每次新请求自增，用于丢弃迟到回调
     private var generation = 0
@@ -55,9 +58,14 @@ final class EcardTokenBridge: NSObject {
     init(feeitemID: String = EcardClient.electricityFeeItemID,
          timeout: TimeInterval = 120,
          dataStore: WKWebsiteDataStore? = nil,
-         webView: WKWebView? = nil) {
+         webView: WKWebView? = nil,
+         nativeTokenProvider: (@MainActor (String, TimeInterval) async throws -> String)? = nil) {
         self.feeitemID = feeitemID
         self.timeout = timeout
+        self.nativeTokenProvider = nativeTokenProvider ?? { account, timeout in
+            try await EcardSSOClient(account: account, credentials: EcardCookieCredentials(),
+                timeout: timeout, feeItemAuthorization: EcardClient.basicAuth).fetchPaymentToken()
+        }
 
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = dataStore ?? .default()
@@ -79,8 +87,38 @@ final class EcardTokenBridge: NSObject {
     /// - Parameter account: 当前登录学号。传了就只在同学号缓存上复用；传 nil 不复用缓存。
     func fetchToken(forAccount account: String?) async throws -> String {
         guard !Task.isCancelled else { throw EcardError.canceled }
-        if let cached = Self.cachedToken(forAccount: account) { return cached }
+        if let cached = Self.cachedToken(forAccount: account) {
+            usesNativeCookies = Self.cachedTokenUsesNativeCookies(forAccount: account)
+            return cached
+        }
         let revision = Self.cacheRevision
+        let cookieGeneration = CookieJar.generation
+        if let account, !account.isEmpty {
+            do {
+                let token = try await nativeTokenProvider(account, min(timeout, 30))
+                guard revision == Self.cacheRevision, CookieJar.generation == cookieGeneration,
+                      !Task.isCancelled else { throw CancellationError() }
+                if let returnedAccount = JWT.claims(token)?.studentNumber, returnedAccount != account {
+                    throw EcardSSOError.identityMismatch
+                }
+                guard validate(token, account: account) != nil else { throw EcardSSOError.invalidResponse }
+                usesNativeCookies = true
+                Self.store(token: token, nativeCookies: true)
+                return token
+            } catch is CancellationError {
+                throw EcardError.canceled
+            } catch EcardSSOError.identityMismatch {
+                throw EcardSSOError.identityMismatch
+            } catch EcardSSOError.untrustedRedirect {
+                throw EcardSSOError.untrustedRedirect
+            } catch {
+                guard revision == Self.cacheRevision, CookieJar.generation == cookieGeneration,
+                      !Task.isCancelled else { throw EcardError.canceled }
+                // No native credential is persisted here. The official browser
+                // can handle interactive authentication or a changed deployment.
+            }
+        }
+        usesNativeCookies = false
         // A prior cold-start injection may have failed. Fill gaps before SSO,
         // preserving cookies already rotated by the official WebView flow.
         do {
@@ -91,11 +129,13 @@ final class EcardTokenBridge: NSObject {
         } catch {
             throw EcardError.sessionSynchronization
         }
-        guard revision == Self.cacheRevision, !Task.isCancelled else { throw EcardError.canceled }
+        guard revision == Self.cacheRevision, CookieJar.generation == cookieGeneration,
+              !Task.isCancelled else { throw EcardError.canceled }
         let token = try await startRequest(account: account)
         // Logout/cancellation may happen after finish resumes the continuation
         // but before this caller is scheduled to consume its result.
-        guard revision == Self.cacheRevision, !Task.isCancelled else { throw EcardError.canceled }
+        guard revision == Self.cacheRevision, CookieJar.generation == cookieGeneration,
+              !Task.isCancelled else { throw EcardError.canceled }
         return token
     }
 
@@ -105,6 +145,7 @@ final class EcardTokenBridge: NSObject {
         let token: String
         let sno: String?
         let expiresAt: Date
+        let nativeCookies: Bool
     }
 
     private static var cache: CacheEntry?
@@ -125,6 +166,7 @@ final class EcardTokenBridge: NSObject {
             let bridge = EcardTokenBridge(timeout: 20, dataStore: dataStore)
             do {
                 _ = try await bridge.fetchToken(forAccount: account)
+                guard !bridge.usesNativeCookies else { return }
                 let cookies = try await dataStore.httpCookieStore.cookieSnapshot()
                 guard CookieJar.generation == generation, !Task.isCancelled else { return }
                 CookieJar.upsert(cookies, generation: generation)
@@ -172,11 +214,15 @@ final class EcardTokenBridge: NSObject {
         cacheRevision &+= 1
     }
 
+    static func cachedTokenUsesNativeCookies(forAccount account: String?) -> Bool {
+        cachedToken(forAccount: account) != nil && cache?.nativeCookies == true
+    }
+
     /// 只有「结构合法 + 未过期」才入缓存
-    private static func store(token: String) {
+    private static func store(token: String, nativeCookies: Bool = false) {
         guard let claims = JWT.claims(token), let exp = claims.expiresAt,
               exp.timeIntervalSinceNow > 60 else { return }
-        cache = CacheEntry(token: token, sno: claims.studentNumber, expiresAt: exp)
+        cache = CacheEntry(token: token, sno: claims.studentNumber, expiresAt: exp, nativeCookies: nativeCookies)
     }
 
     // MARK: 请求生命周期

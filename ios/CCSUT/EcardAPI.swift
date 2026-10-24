@@ -510,7 +510,7 @@ enum RechargeOutcome {
 final class EcardClient {
 
     static let base = URL(string: "https://ecard.ccsut.cn")!
-    private static let basicAuth = "Basic Y2hhcmdlOmNoYXJnZV9zZWNyZXQ="
+    static let basicAuth = "Basic Y2hhcmdlOmNoYXJnZV9zZWNyZXQ="
     static let electricityFeeItemID = "408"
 
     private let token: String

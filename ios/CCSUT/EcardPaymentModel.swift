@@ -93,7 +93,7 @@ final class EcardPaymentModel {
         client = nil
         amountText = ""; errorText = nil; isStarting = true
         if let token = EcardTokenBridge.cachedToken(forAccount: account) {
-            acceptToken(token)
+            acceptToken(token, nativeCookies: EcardTokenBridge.cachedTokenUsesNativeCookies(forAccount: account))
         } else {
             beginBackgroundLogin(account: account)
         }
@@ -127,7 +127,8 @@ final class EcardPaymentModel {
             do {
                 let token = try await request.bridge.fetchToken(forAccount: account)
                 guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
-                acceptToken(token, store: request.bridge.webView.configuration.websiteDataStore)
+                acceptToken(token, store: request.bridge.webView.configuration.websiteDataStore,
+                            nativeCookies: request.bridge.usesNativeCookies)
             } catch {
                 if current == revision, CookieJar.generation == generation, !Task.isCancelled { loginFailed(error) }
             }
@@ -139,7 +140,7 @@ final class EcardPaymentModel {
         loginRequest = pendingLogin
     }
 
-    private func acceptToken(_ token: String, store: WKWebsiteDataStore? = nil) {
+    private func acceptToken(_ token: String, store: WKWebsiteDataStore? = nil, nativeCookies: Bool = false) {
         let current = revision
         let generation = CookieJar.generation
         let store = store ?? WebStore.dataStore
@@ -150,10 +151,14 @@ final class EcardPaymentModel {
                 // cookie store is separate from URLSession's default store.
                 var loaded: (FeeItem, [ThirdOption])?
                 for attempt in 0..<4 {
-                    let cookies = try await store.httpCookieStore.cookieSnapshot()
+                    if !nativeCookies {
+                        let cookies = try await store.httpCookieStore.cookieSnapshot()
+                        guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
+                        CookieJar.upsert(cookies, generation: generation)
+                    }
                     guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
-                    CookieJar.upsert(cookies, generation: generation)
-                    let client = Self.authenticatedClient(token: token, generation: generation, store: store)
+                    let client = Self.authenticatedClient(token: token, generation: generation,
+                                                          store: nativeCookies ? nil : store)
                     self.client = client
                     loginRequest = nil
                     do {
@@ -183,7 +188,7 @@ final class EcardPaymentModel {
         }
     }
 
-    private static func authenticatedClient(token: String, generation: UInt64, store: WKWebsiteDataStore) -> EcardClient {
+    private static func authenticatedClient(token: String, generation: UInt64, store: WKWebsiteDataStore?) -> EcardClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
@@ -208,6 +213,7 @@ final class EcardPaymentModel {
                 // Keep the next WebKit handoff from restoring a stale cookie
                 // after the native request has received a rotated session.
                 for cookie in cookies {
+                    guard let store else { continue }
                     guard CookieJar.generation == generation else { throw EcardError.canceled }
                     do { try await store.httpCookieStore.set(cookie) }
                     catch {

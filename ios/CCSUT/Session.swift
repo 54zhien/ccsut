@@ -218,11 +218,18 @@ final class SessionStore {
     }
 
     private let api: APIClient
+    private let prepareEcardSession: @MainActor (String, WKWebsiteDataStore) -> Void
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var adoptionTask: Task<Bool, Never>?
     @ObservationIgnored private var isLoggingOut = false
 
-    init(api: APIClient = .shared) { self.api = api }
+    init(api: APIClient = .shared,
+         prepareEcardSession: @escaping @MainActor (String, WKWebsiteDataStore) -> Void = {
+             EcardTokenBridge.prepareSession(forAccount: $0, dataStore: $1)
+         }) {
+        self.api = api
+        self.prepareEcardSession = prepareEcardSession
+    }
 
     private let cookieKey = "ccsut.cookies.v2"
     private let nameKey = "ccsut.student.name"
@@ -329,7 +336,7 @@ final class SessionStore {
             EcardTokenBridge.resumePreparation()
             if CookieJar.generation == generation, !Task.isCancelled, !isLoggingOut,
                phase == .loggedIn, let account = studentId, !account.isEmpty {
-                EcardTokenBridge.prepareSession(forAccount: account, dataStore: WebStore.dataStore)
+                prepareEcardSession(account, WebStore.dataStore)
             }
         }
         guard CookieJar.generation == generation, !Task.isCancelled, !isLoggingOut else { return }
@@ -466,7 +473,7 @@ final class SessionStore {
             if let sid = initData.xsxh, !sid.isEmpty {
                 studentId = sid
                 UserDefaults.standard.set(sid, forKey: sidKey)
-                EcardTokenBridge.prepareSession(forAccount: sid, dataStore: WebStore.dataStore)
+                prepareEcardSession(sid, WebStore.dataStore)
             }
         } catch {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
@@ -682,7 +689,11 @@ enum CookieJar {
     static func upsert(_ incoming: [HTTPCookie], generation: UInt64? = nil) {
         lock.lock(); defer { lock.unlock() }
         if let generation, generation != revision { return }
-        let key: (HTTPCookie) -> String = { "\($0.name)|\($0.domain)|\($0.path)" }
+        let key: (HTTPCookie) -> String = {
+            let domain = $0.domain.lowercased()
+            let normalized = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+            return "\($0.name)|\(normalized)|\($0.path)"
+        }
         for cookie in incoming where isSchoolCookie(cookie) {
             cookies.removeAll { key($0) == key(cookie) }
             if (cookie.expiresDate ?? .distantFuture) > Date() { cookies.append(cookie) }

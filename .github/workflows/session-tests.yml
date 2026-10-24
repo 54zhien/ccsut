@@ -20,6 +20,7 @@ jobs:
             ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift \
             ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift \
             ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift \
+            ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift \
             ios/Tests/SessionRegressionTests.swift \
             -o "$RUNNER_TEMP/session-tests"
       - name: Run Swift session regressions
@@ -30,6 +31,12 @@ jobs:
           set -e
           xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/WebSessionCookies.swift ios/Tests/WebSessionCookieTests.swift -o "$RUNNER_TEMP/web-session-cookies"
           "$RUNNER_TEMP/web-session-cookies"
+      - name: Run native ecard SSO protocol regressions
+        if: always()
+        run: |
+          set -e
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/EcardSSOClient.swift ios/Tests/EcardSSOClientTests.swift -o "$RUNNER_TEMP/ecard-sso"
+          "$RUNNER_TEMP/ecard-sso"
       - name: Run embedded login script regressions
         if: always()
         run: node --test ios/Tests/login-script.test.mjs ios/Tests/campus-web-privacy.test.mjs ios/Tests/cas-script.test.mjs

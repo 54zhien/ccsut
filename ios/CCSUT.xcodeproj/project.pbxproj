@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		000000000000000000EC2006 /* EcardSSOClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1006; };
+		000000000000000000EC2007 /* EcardSSOSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1007; };
 		000000000000000000EC2005 /* WebSessionCookies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1005; };
 		000000000000000000CE2002 /* CampusComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CE1002; };
 		000000000000000000CE2001 /* CampusPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CE1001; };
@@ -71,6 +73,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		000000000000000000EC1006 /* EcardSSOClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardSSOClient.swift; sourceTree = "<group>"; };
+		000000000000000000EC1007 /* EcardSSOSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardSSOSession.swift; sourceTree = "<group>"; };
 		000000000000000000EC1005 /* WebSessionCookies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSessionCookies.swift; sourceTree = "<group>"; };
 		000000000000000000CE1002 /* CampusComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusComponents.swift; sourceTree = "<group>"; };
 		000000000000000000CE1001 /* CampusPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusPresentation.swift; sourceTree = "<group>"; };
@@ -163,6 +167,8 @@
 				000000000000000000CF1007 /* CampusAreas.json */,
 				000000000000000000EC1001 /* EcardAPI.swift */,
 				000000000000000000EC1002 /* EcardTokenBridge.swift */,
+				000000000000000000EC1006 /* EcardSSOClient.swift */,
+				000000000000000000EC1007 /* EcardSSOSession.swift */,
 				000000000000000000EC1005 /* WebSessionCookies.swift */,
 				000000000000000000EC1003 /* EcardPaymentModel.swift */,
 				000000000000000000EC1004 /* EcardPaymentView.swift */,
@@ -295,6 +301,8 @@
 				000000000000000000CF2006 /* CampusLocation.swift in Sources */,
 				000000000000000000EC2001 /* EcardAPI.swift in Sources */,
 				000000000000000000EC2002 /* EcardTokenBridge.swift in Sources */,
+				000000000000000000EC2006 /* EcardSSOClient.swift in Sources */,
+				000000000000000000EC2007 /* EcardSSOSession.swift in Sources */,
 				000000000000000000EC2005 /* WebSessionCookies.swift in Sources */,
 				000000000000000000EC2003 /* EcardPaymentModel.swift in Sources */,
 				000000000000000000EC2004 /* EcardPaymentView.swift in Sources */,

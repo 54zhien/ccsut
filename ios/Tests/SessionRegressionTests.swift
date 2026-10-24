@@ -1,6 +1,15 @@
 import Foundation
 import WebKit
 
+/// Captures the fallback entry without making a real school request.
+@MainActor private final class InertEcardWebView: WKWebView {
+    var loadedRequests: [URLRequest] = []
+    override func load(_ request: URLRequest) -> WKNavigation? {
+        loadedRequests.append(request)
+        return nil
+    }
+}
+
 // Runs the production Session.swift/API.swift/APIResponse.swift/Models.swift on macOS without a device
 // or school credentials. The only fake is the external HTTP boundary.
 final class SchoolProtocol: URLProtocol {
@@ -47,6 +56,9 @@ struct SessionRegressionTests {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [SchoolProtocol.self]
         let api = APIClient(configuration: configuration)
+        func sessionStore() -> SessionStore {
+            SessionStore(api: api, prepareEcardSession: { _, _ in })
+        }
         var failures = 0
         func check(_ condition: Bool, _ name: String) {
             print("\(condition ? "PASS" : "FAIL") \(name)")
@@ -68,6 +80,14 @@ struct SessionRegressionTests {
         CookieJar.shared = [cookie("jw_uf", "expired", expires: Date(timeIntervalSinceNow: -60))]
         check(CookieJar.header(for: "tls.ccsut.cn") == nil, "expired authentication Cookie is never sent")
 
+        CookieJar.shared = [cookie("TGC", "fixture-old", domain: "auth.ccsut.cn")]
+        CookieJar.upsert([cookie("TGC", "fixture-new", domain: ".auth.ccsut.cn")], generation: CookieJar.generation)
+        check(CookieJar.shared.count == 1 && CookieJar.shared.first?.value == "fixture-new",
+              "native cookie rotation replaces the normalized domain identity")
+        CookieJar.upsert([cookie("TGC", "", expires: Date(timeIntervalSinceNow: -60), domain: "auth.ccsut.cn")],
+                         generation: CookieJar.generation)
+        check(CookieJar.shared.isEmpty, "native cookie deletion removes the normalized domain identity")
+
         let protected = cookie("jw_uf", "protected", httpOnly: true)
         check(protected.isHTTPOnly && StoredCookie(protected).asHTTPCookie?.isHTTPOnly == true,
               "Keychain roundtrip preserves HttpOnly")
@@ -88,7 +108,7 @@ struct SessionRegressionTests {
             let body = coldStartReads == 1 ? "{\"ret\":0,\"data\":{\"xsxh\":\"fixture\"}}" : "{\"ret\":0,\"data\":{}}"
             return (200, request.url!, ["Set-Cookie": "jw_uf=cold-rotated; Path=/; Secure; HttpOnly"], body)
         }
-        let restoredSession = SessionStore(api: api)
+        let restoredSession = sessionStore()
         await restoredSession.bootstrap()
         let restoredWebCookies = (try? await WebStore.dataStore.httpCookieStore.cookieSnapshot()) ?? []
         check(restoredSession.phase == .loggedIn, "cold bootstrap retains the verified native login")
@@ -135,6 +155,102 @@ struct SessionRegressionTests {
             }
         } catch { check(false, "payment restoration test completes using the real WebKit cookie store") }
 
+        func fixtureJWT(_ account: String) -> String {
+            let claims: [String: Any] = ["sno": account, "exp": Date().addingTimeInterval(3600).timeIntervalSince1970]
+            let body = try! JSONSerialization.data(withJSONObject: claims)
+            let encoded = body.base64EncodedString().replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+            return "e30.\(encoded).fixture-signature"
+        }
+        func inertWebView() -> InertEcardWebView {
+            let configuration = WKWebViewConfiguration()
+            configuration.websiteDataStore = .nonPersistent()
+            return InertEcardWebView(frame: .zero, configuration: configuration)
+        }
+        EcardTokenBridge.clearCachedToken()
+        let expectedNativeToken = fixtureJWT("fixture-native")
+        let nativeWebView = inertWebView()
+        let nativeBridge = EcardTokenBridge(webView: nativeWebView, nativeTokenProvider: { _, _ in expectedNativeToken })
+        do {
+            let actualToken = try await nativeBridge.fetchToken(forAccount: "fixture-native")
+            check(actualToken == expectedNativeToken && nativeBridge.usesNativeCookies && nativeWebView.loadedRequests.isEmpty,
+                  "native SSO succeeds without loading any WebView page")
+            check(EcardTokenBridge.cachedTokenUsesNativeCookies(forAccount: "fixture-native"),
+                  "cached native token retains its authoritative cookie source")
+        } catch { check(false, "native SSO result is accepted") }
+
+        EcardTokenBridge.clearCachedToken()
+        let fallbackWebView = inertWebView()
+        let fallbackBridge = EcardTokenBridge(timeout: 0.01, webView: fallbackWebView, nativeTokenProvider: { _, _ in
+            throw EcardSSOError.requiresInteraction
+        })
+        do { _ = try await fallbackBridge.fetchToken(forAccount: "fixture-native"); check(false, "inert fallback must terminate") }
+        catch {
+            check(fallbackWebView.loadedRequests.count == 1 &&
+                  fallbackWebView.loadedRequests.first?.url == URL(string: "https://ecard.ccsut.cn/plat/login") &&
+                  !fallbackBridge.usesNativeCookies, "native interaction requirement falls back to the official WebView entry")
+        }
+
+        EcardTokenBridge.clearCachedToken()
+        let mismatchWebView = inertWebView()
+        let mismatchBridge = EcardTokenBridge(webView: mismatchWebView, nativeTokenProvider: { _, _ in
+            throw EcardSSOError.identityMismatch
+        })
+        do { _ = try await mismatchBridge.fetchToken(forAccount: "fixture-native"); check(false, "wrong-account native response must fail") }
+        catch { check(error as? EcardSSOError == .identityMismatch && mismatchWebView.loadedRequests.isEmpty,
+                      "native account mismatch never launches a fallback login") }
+
+        EcardTokenBridge.clearCachedToken()
+        let wrongTokenWebView = inertWebView()
+        let wrongTokenBridge = EcardTokenBridge(webView: wrongTokenWebView, nativeTokenProvider: { _, _ in
+            fixtureJWT("fixture-other")
+        })
+        do { _ = try await wrongTokenBridge.fetchToken(forAccount: "fixture-native"); check(false, "wrong-account JWT must fail") }
+        catch { check(error as? EcardSSOError == .identityMismatch && wrongTokenWebView.loadedRequests.isEmpty &&
+                      EcardTokenBridge.cachedToken(forAccount: "fixture-other") == nil,
+                      "returned wrong-account JWT is terminal and never cached") }
+
+        EcardTokenBridge.clearCachedToken()
+        let untrustedWebView = inertWebView()
+        let untrustedBridge = EcardTokenBridge(webView: untrustedWebView, nativeTokenProvider: { _, _ in
+            throw EcardSSOError.untrustedRedirect
+        })
+        do { _ = try await untrustedBridge.fetchToken(forAccount: "fixture-native"); check(false, "untrusted native redirect must fail") }
+        catch { check(error as? EcardSSOError == .untrustedRedirect && untrustedWebView.loadedRequests.isEmpty,
+                      "untrusted native redirect never launches a fallback login") }
+
+        EcardTokenBridge.clearCachedToken()
+        let clearedWebView = inertWebView()
+        let clearedBridge = EcardTokenBridge(webView: clearedWebView, nativeTokenProvider: { _, _ in
+            EcardTokenBridge.clearCachedToken()
+            return expectedNativeToken
+        })
+        do { _ = try await clearedBridge.fetchToken(forAccount: "fixture-native"); check(false, "late native result after cache clear must fail") }
+        catch { check(clearedWebView.loadedRequests.isEmpty && EcardTokenBridge.cachedToken(forAccount: "fixture-native") == nil,
+                      "cache clear discards a late native result without fallback or caching") }
+
+        EcardTokenBridge.clearCachedToken()
+        let canceledWebView = inertWebView()
+        let canceledBridge = EcardTokenBridge(webView: canceledWebView, nativeTokenProvider: { _, _ in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return expectedNativeToken
+        })
+        let canceledFetch = Task { @MainActor in try await canceledBridge.fetchToken(forAccount: "fixture-native") }
+        do { _ = try await canceledFetch.value; check(false, "canceled native request must fail") }
+        catch { check(canceledWebView.loadedRequests.isEmpty && EcardTokenBridge.cachedToken(forAccount: "fixture-native") == nil,
+                      "caller cancellation discards a late native token without fallback or caching") }
+
+        EcardTokenBridge.clearCachedToken()
+        let switchedWebView = inertWebView()
+        let switchedBridge = EcardTokenBridge(webView: switchedWebView, nativeTokenProvider: { _, _ in
+            CookieJar.shared = []
+            return expectedNativeToken
+        })
+        do { _ = try await switchedBridge.fetchToken(forAccount: "fixture-native"); check(false, "late native result after account change must fail") }
+        catch { check(switchedWebView.loadedRequests.isEmpty && EcardTokenBridge.cachedToken(forAccount: "fixture-native") == nil,
+                      "account change discards a late native token without fallback or caching") }
+        EcardTokenBridge.clearCachedToken()
+
         CookieJar.shared = [cookie("jw_uf", "native-only")]
         for c in HTTPCookieStorage.shared.cookies ?? [] { HTTPCookieStorage.shared.deleteCookie(c) }
         SchoolProtocol.response = { req in
@@ -160,19 +276,19 @@ struct SessionRegressionTests {
         } catch { check(false, "redirect response rotation is used on the next hop: \(error)") }
 
         SchoolProtocol.response = { (503, $0.url!, [:], "unavailable") }
-        let unavailable = SessionStore(api: api)
+        let unavailable = sessionStore()
         check(!(await unavailable.probe()), "HTTP 503 is not a valid session")
 
         SchoolProtocol.response = { _ in (200, URL(string: "https://auth.ccsut.cn/backstage/cas/login")!, [:], "login form") }
-        let loginPage = SessionStore(api: api)
+        let loginPage = sessionStore()
         check(!(await loginPage.probe()), "CAS login page with HTTP 200 is not a valid session")
 
         SchoolProtocol.response = { (200, $0.url!, [:], "{\"ret\":-1,\"msg\":\"rejected\",\"data\":{\"xsxh\":\"fixture-student\"}}") }
-        let rejected = SessionStore(api: api)
+        let rejected = sessionStore()
         check(!(await rejected.probe()), "authentication rejects a nonzero result even with identity data")
 
         SchoolProtocol.response = { _ in throw URLError(.timedOut) }
-        let coldStart = SessionStore(api: api)
+        let coldStart = sessionStore()
         await coldStart.refresh()
         check(coldStart.phase == .loggedOut, "failed renewal exits checking state")
         check(coldStart.lastError != nil, "failed renewal retains a user-visible reason")
@@ -190,7 +306,7 @@ struct SessionRegressionTests {
         for c in (try? await webCookies.cookieSnapshot()) ?? [] { try? await webCookies.remove(c) }
         try? await webCookies.set(cookie("jw_uf", "unverified"))
         SchoolProtocol.response = { (503, $0.url!, [:], "unavailable") }
-        let failedAdoption = SessionStore(api: api)
+        let failedAdoption = sessionStore()
         check(!(await failedAdoption.adoptCookies()), "failed business probe rejects WebKit adoption")
         check(CookieJar.shared.first(where: { $0.name == "jw_uf" })?.value == "previous",
               "failed WebKit adoption preserves the previous credentials")
@@ -200,7 +316,7 @@ struct SessionRegressionTests {
 
         SchoolProtocol.response = { (200, $0.url!, ["Set-Cookie": "jw_uf=verified; Path=/; Secure; HttpOnly"],
                                      "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}") }
-        let validAdoption = SessionStore(api: api)
+        let validAdoption = sessionStore()
         check(await validAdoption.adoptCookies(), "verified WebKit adoption succeeds")
         check(CookieJar.header(for: "tls.ccsut.cn") == "jw_uf=verified",
               "successful adoption keeps the probe's rotated Cookie")
@@ -211,7 +327,7 @@ struct SessionRegressionTests {
             if request.url?.path == "/admin/caslogin" { offlineCASRequests += 1 }
             throw URLError(.timedOut)
         }
-        let bootstrap = SessionStore(api: api)
+        let bootstrap = sessionStore()
         await bootstrap.bootstrap()
         check(bootstrap.phase == .loggedOut, "actual cold bootstrap exits after probe and renewal timeouts")
         check(Keychain.load("ccsut.cookies.v2") != nil, "transient bootstrap failure retains credentials for retry")
@@ -235,7 +351,7 @@ struct SessionRegressionTests {
             }
             return (200, url, [:], "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}")
         }
-        let renewal = SessionStore(api: api)
+        let renewal = sessionStore()
         async let one: Void = renewal.refresh()
         async let two: Void = renewal.refresh()
         _ = await (one, two)
@@ -309,7 +425,7 @@ struct SessionRegressionTests {
         check(CookieJar.shared.isEmpty && Keychain.load("ccsut.cookies.v2") == nil,
               "late response cannot restore logged-out credentials")
 
-        let loggedOut = SessionStore(api: api)
+        let loggedOut = sessionStore()
         await loggedOut.logout()
         check(CookieJar.shared.isEmpty, "logout clears the authoritative Cookie jar")
         check(Keychain.load("ccsut.cookies.v2") == nil, "logout removes persisted credentials")
