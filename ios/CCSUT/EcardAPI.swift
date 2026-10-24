@@ -100,6 +100,20 @@ struct FeeItem: Decodable {
         case feeitemImplBean
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        feeitemid = try c.ecardText(forKey: .feeitemid)
+        name = try c.decode(String.self, forKey: .name)
+        flag = try c.decode(String.self, forKey: .flag)
+        view = try c.decodeIfPresent(String.self, forKey: .view)
+        billingUnit = try c.decodeIfPresent(String.self, forKey: .billingUnit)
+        maxmoney = try c.ecardTextIfPresent(forKey: .maxmoney, allowsDecimal: true)
+        daymaxmoney = try c.ecardTextIfPresent(forKey: .daymaxmoney, allowsDecimal: true)
+        dayout = try c.decodeIfPresent(String.self, forKey: .dayout)
+        implInterface = try c.decodeIfPresent(String.self, forKey: .implInterface)
+        feeitemImplBean = try c.decodeIfPresent(FeeItemImpl.self, forKey: .feeitemImplBean)
+    }
+
     // flag[4] → 0 选择模式 / 1 输入模式 / 4 IEC 电表模式
     // flag[7] → 是否需要输入金额
     // flag[9] → "2" 表示需要先改密码
@@ -233,11 +247,49 @@ struct ThirdLevel: Decodable {
     let code: String
     let level: String
     let name: String
+
+    enum CodingKeys: String, CodingKey { case code, level, name }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        code = try c.ecardText(forKey: .code)
+        level = try c.ecardText(forKey: .level)
+        name = try c.decode(String.self, forKey: .name)
+    }
 }
 
 struct ThirdOption: Decodable {
     let name: String
     let value: String
+
+    enum CodingKeys: String, CodingKey { case name, value }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        value = try c.ecardText(forKey: .value)
+    }
+}
+
+// The backend can encode numeric IDs/limits as JSON numbers or strings.
+// Preserve strings (including leading zeroes); never pass IDs through Double,
+// or coerce booleans/objects/missing values into usable room selections.
+private extension KeyedDecodingContainer {
+    func ecardText(forKey key: Key, allowsDecimal: Bool = false) throws -> String {
+        if let value = try? decode(String.self, forKey: key) { return value }
+        if let value = try? decode(Int64.self, forKey: key) { return String(value) }
+        if let value = try? decode(UInt64.self, forKey: key) { return String(value) }
+        if allowsDecimal, let value = try? decode(Decimal.self, forKey: key) {
+            return NSDecimalNumber(decimal: value).stringValue
+        }
+        // Retain the decoder's precise missing/null/type error and coding path.
+        return try decode(String.self, forKey: key)
+    }
+
+    func ecardTextIfPresent(forKey key: Key, allowsDecimal: Bool = false) throws -> String? {
+        guard contains(key), try !decodeNil(forKey: key) else { return nil }
+        return try ecardText(forKey: key, allowsDecimal: allowsDecimal)
+    }
 }
 
 // MARK: - 房间 / 电表上下文
