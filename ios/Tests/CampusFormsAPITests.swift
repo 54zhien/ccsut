@@ -125,8 +125,8 @@ actor FormTransport: CampusTransport {
         let reconcileTransport = FormTransport { req, count in
             if req.url!.path.hasSuffix("submitLeaveApply") { throw URLError(.timedOut) }
             if req.url!.path.hasSuffix("queryListForPage") && count > 2 {
-                let record: [String:Any] = ["id":"new-id", "leaveType":"sick", "reason":savedDraft.reason,
-                    "beginTime":CampusSubmission.date(savedDraft.begin), "endTime":CampusSubmission.date(savedDraft.end), "applyTime":CampusSubmission.date(Date())]
+                var record = try CampusSubmission(kind: .leave, configuration: config, draft: savedDraft, approvers: role).payload(uploaded: [])
+                record["id"] = "new-id"; record["applyTime"] = CampusSubmission.date(Date())
                 return (200,String(data:try JSONSerialization.data(withJSONObject:["data":["list":[record],"hasNextPage":false]]),encoding:.utf8)!)
             }; return nil
         }
@@ -136,6 +136,65 @@ actor FormTransport: CampusTransport {
         do { try await reconcileAPI.submit(rs) } catch {}
         check(try await reconcileAPI.reconcile(rs), "unknown outcome confirms only a unique new matching record")
         check(await reconcileTransport.requests.filter { $0.url!.path.hasSuffix("submitLeaveApply") }.count == 1, "reconciliation performs reads without repeating submission")
+
+        let destinations = FormTransport { req,_ in
+            if req.url!.path.hasSuffix("querySysConfigItems") { return (200,#"{"data":[{"configKey":"leave_qxlx_config","configContent":"显示"}]}"#) }
+            if req.url!.path.hasSuffix("queryAreaLabel") { return (200,#"{"data":[{"value":"inside","label":"市内","children":[{"value":"home","label":"回家"}]}]}"#) }
+            return nil
+        }
+        let destinationAPI = CampusClient(account: "fixture-account", credentials: FormCredentials(), transport: destinations)
+        let dc = try await destinationAPI.loadForm(.leave)
+        var destinationDraft = draft; destinationDraft.destinationTypeID = "inside-home"; destinationDraft.destinationDetails = "示例地址"
+        do {
+            let ds = try destinationDraft.snapshot(configuration: dc, approvers: role)
+            check(try ds.payload(uploaded: [])["qxlx"] as? String == "inside-home" && dc.destinationTypes.first?.name == "市内 / 回家", "two-level destinations encode the official parent-child path")
+        } catch { check(false, "two-level destinations encode the official parent-child path") }
+        let defaults = FormTransport { req,_ in req.url!.path.hasSuffix("querySysConfigItems") ? (200,#"{"data":[]}"#) : nil }
+        let defaultsConfig = try await CampusClient(account:"fixture-account", credentials:FormCredentials(), transport:defaults).loadForm(.leave)
+        check(defaultsConfig.needsLeaveTime && !defaultsConfig.roleFallback, "missing optional flags preserve official required-time and narrow reviewer defaults")
+        let unknownWindow = FormTransport { req,_ in
+            req.url!.path.contains("LeaveType/") ? (200,#"{"data":{"list":[{"id":"sick","name":"病假","enableStatus":0,"isUploadFile":1,"timeConfig":"future-rule"}],"hasNextPage":false}}"#) : nil
+        }
+        do { _ = try await CampusClient(account:"fixture-account",credentials:FormCredentials(),transport:unknownWindow).loadForm(.leave); check(false,"unknown time rule blocks loading") }
+        catch { check(error as? CampusFormError == .invalidResponse,"unknown time rule blocks loading") }
+        let savedStay = stay
+        for complete in [false, true] {
+            let t = FormTransport { req,count in
+                if req.url!.path.hasSuffix("queryStuGqleaveInfo") && count > 1 {
+                    var row = try CampusSubmission(kind:.departure,configuration:departure,draft:savedStay,approvers:nil).payload(uploaded:[])
+                    row["openid"] = "new-stay"; row["applyDate"] = CampusSubmission.date(Date())
+                    row["phone"] = complete ? "" : "18000000009"
+                    return (200,String(data:try JSONSerialization.data(withJSONObject:["code":2000,"data":[row]]),encoding:.utf8)!)
+                }; return nil
+            }
+            let api = CampusClient(account:"fixture-account",credentials:FormCredentials(),transport:t)
+            let c = try await api.loadForm(.departure), s = try stay.snapshot(configuration:c,approvers:nil)
+            check(try await api.reconcile(s) == complete, "stay reconciliation requires complete matching submitted contact semantics")
+        }
+        var trip = savedStay
+        trip.leaving = true; trip.end = trip.begin.addingTimeInterval(3600)
+        trip.phone = "18000000000"; trip.parentPhone = "18000000001"
+        trip.area = ["示例省","示例市","示例区"]; trip.travelMethod = "火车"; trip.reason = "示例事由"
+        trip.tripNumber = "G1"; trip.detailAddress = "示例地址"
+        let savedTrip = trip
+        for changedField in ["phone", "jzPhone", "reason", "jtgj", "tjcs", "xxdz", "txdz", "startDate", "endDate", "none"] {
+            let t = FormTransport { req,count in
+                if req.url!.path.hasSuffix("queryStuGqleaveInfo") && count > 1 {
+                    var row = try CampusSubmission(kind:.departure,configuration:departure,draft:savedTrip,approvers:nil).payload(uploaded:[])
+                    row["openid"] = "new-trip"; row["applyDate"] = CampusSubmission.date(Date())
+                    if changedField != "none" { row[changedField] = "different" }
+                    return (200,String(data:try JSONSerialization.data(withJSONObject:["code":2000,"data":[row]]),encoding:.utf8)!)
+                }; return nil
+            }
+            let api = CampusClient(account:"fixture-account",credentials:FormCredentials(),transport:t)
+            let c = try await api.loadForm(.departure), s = try savedTrip.snapshot(configuration:c,approvers:nil)
+            check(try await api.reconcile(s) == (changedField == "none"), "departure reconciliation rejects a different submitted field: " + changedField)
+        }
+        let ambiguous = FormTransport { req,_ in req.url!.path.hasSuffix("applyGqleave") ? (200,#"{"code":200,"data":false}"#) : nil }
+        let ambiguousAPI = CampusClient(account:"fixture-account",credentials:FormCredentials(),transport:ambiguous)
+        let ac = try await ambiguousAPI.loadForm(.departure)
+        do { try await ambiguousAPI.submit(stay.snapshot(configuration:ac,approvers:nil)); check(false,"unproven departure success code stays unknown") }
+        catch { check(error as? CampusFormError == .unknownOutcome,"unproven departure success code stays unknown") }
         if failures > 0 { exit(1) }
     }
 }

@@ -13,6 +13,7 @@ final class CampusFormModel {
     private(set) var error: String?
     private(set) var isLoadingApprovers = false
     private(set) var isChecking = false
+    private(set) var needsReload = false
     var confirmation: CampusSubmission?
     private let api: any CampusFormServing
     private let currentGeneration: @Sendable () -> UInt64
@@ -34,9 +35,9 @@ final class CampusFormModel {
         draft = CampusFormDraft(begin: start, end: start.addingTimeInterval(14_400))
     }
     var candidateKey: String { "\(configurationRevision)|\(draft.typeID)|\(draft.begin.timeIntervalSince1970)|\(draft.end.timeIntervalSince1970)" }
-    var canReview: Bool { state == .editing && configuration?.choices.isEmpty == false && !isLoadingApprovers }
+    var canReview: Bool { state == .editing && configuration?.choices.isEmpty == false && !isLoadingApprovers && !needsReload }
 
-    func load() async {
+    func load(preservingDraft: Bool = false) async {
         guard verifyAccount(), state != .submitting, state != .unknown else { return }
         loadTask?.cancel(); candidateTask?.cancel(); revision &+= 1; candidateRevision &+= 1
         let rev = revision
@@ -48,11 +49,16 @@ final class CampusFormModel {
             guard verifyAccount(), rev == revision, !Task.isCancelled else { return }
             guard c.account == account, c.generation == generation else { throw CampusError.identityMismatch }
             configuration = c; state = .editing
-            var fresh = CampusFormDraft(begin: draft.begin, end: draft.end)
-            fresh.phone = c.phone; fresh.parentPhone = c.parentPhone; fresh.contactPhone = c.parentPhone
-            if c.choices.count == 1 { fresh.typeID = c.choices[0].id }
+            var fresh = preservingDraft ? draft : CampusFormDraft(begin: draft.begin, end: draft.end)
+            if !preservingDraft { fresh.phone = c.phone; fresh.parentPhone = c.parentPhone; fresh.contactPhone = c.parentPhone }
+            if !c.choices.contains(where: { $0.id == fresh.typeID }) {
+                fresh.typeID = c.choices.count == 1 ? c.choices[0].id : ""
+                fresh.attachments.removeAll()
+            }
+            if !c.destinationTypes.contains(where: { $0.id == fresh.destinationTypeID }) { fresh.destinationTypeID = "" }
+            fresh.approverID = ""
             if kind == .leave && !c.canLeaveSchool { fresh.leaving = false }
-            draft = fresh
+            draft = fresh; needsReload = false
             configurationRevision &+= 1
             if c.choices.isEmpty { error = "当前没有开放的可办理类型" }
         } catch {
@@ -120,7 +126,10 @@ final class CampusFormModel {
             guard verifyAccount(), rev == revision else { return }
             if error as? CampusFormError == .unknownOutcome {
                 state = .unknown; pending = approved
-            } else { state = .editing }
+            } else {
+                state = .editing
+                if error as? CampusFormError == .configurationChanged { needsReload = true; approvers = nil; draft.approverID = "" }
+            }
             report(error)
         }
         confirmation = nil; submitTask = nil
@@ -164,6 +173,7 @@ final class CampusFormModel {
     private func clear() {
         configuration = nil; approvers = nil; confirmation = nil; pending = nil; error = nil
         isLoadingApprovers = false
+        needsReload = false
         draft = CampusFormDraft(begin: Date(), end: Date())
     }
     @discardableResult private func verifyAccount() -> Bool {

@@ -92,7 +92,7 @@ import ImageIO
             else { departureFields }
         } else {
             ContentUnavailableView("暂时无法加载表单", systemImage: "exclamationmark.icloud")
-            Button("重新加载") { Task { await model.load() } }.buttonStyle(.glass)
+            Button("重新加载") { Task { await model.load(preservingDraft: true) } }.buttonStyle(.glass)
         }
     }
 
@@ -105,7 +105,11 @@ import ImageIO
                 LabeledContent("请假天数", value: model.draft.duration.formatted() + " 天")
                     .foregroundStyle(.secondary)
                 if c.needsLeaveTime && model.draft.leaving == true {
-                    DatePicker("离校时间", selection: Binding(get: { model.draft.actualLeaveTime ?? model.draft.begin }, set: { date in model.update { $0.actualLeaveTime = date } }), displayedComponents: [.date,.hourAndMinute])
+                    if model.draft.actualLeaveTime == nil {
+                        Button("选择离校时间") { model.update { $0.actualLeaveTime = $0.begin } }
+                    } else {
+                        DatePicker("离校时间", selection: Binding(get: { model.draft.actualLeaveTime ?? model.draft.begin }, set: { date in model.update { $0.actualLeaveTime = date } }), displayedComponents: [.date,.hourAndMinute])
+                    }
                 }
             }
         }
@@ -205,6 +209,10 @@ import ImageIO
                 if error == CampusError.authentication.localizedDescription {
                     Button("重新认证") { Task { await session.refresh(); await model.load() } }
                 }
+            }
+            if model.needsReload && model.state == .editing {
+                Button("刷新配置并保留填写内容") { Task { await model.load(preservingDraft: true) } }
+                    .accessibilityIdentifier("campus-form-reload")
             }
             if model.state == .unknown {
                 Button { Task { await model.checkResult() } } label: {
@@ -382,6 +390,7 @@ private actor CampusFormPreviewAPI: CampusFormServing {
         var c = CampusFormConfiguration(kind:kind,account:account,userId:"preview-user",generation:generation)
         c.choices = [.init(id:"preview-type",name:kind == .leave ? "病假" : "示例假期")]
         c.phone = "18000000000"; c.parentPhone = "18000000001"; c.displayName = "示例学生"
+        c.needsLeaveTime = kind == .leave
         return c
     }
     func approvers(type: String, days: Double) async throws -> CampusApprovers { .init(roleID:"preview-role",roleName:"辅导员",users:[.init(id:"preview-reviewer",name:"示例审批人")]) }

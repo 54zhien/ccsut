@@ -39,7 +39,7 @@ enum CampusFormKind: String, Sendable, Identifiable { case leave, departure
 }
 
 enum CampusFormError: Error, LocalizedError, Equatable, Sendable {
-    case validation(String), unavailable, invalidResponse, rejected, unknownOutcome
+    case validation(String), unavailable, invalidResponse, rejected, unknownOutcome, configurationChanged
     var errorDescription: String? {
         switch self {
         case .validation(let field): return CampusPrivacy.redact(field)
@@ -47,6 +47,7 @@ enum CampusFormError: Error, LocalizedError, Equatable, Sendable {
         case .invalidResponse: return "学校表单配置无法识别，请稍后重新加载"
         case .rejected: return "学校未接受此次申请，请检查填写内容与现有记录"
         case .unknownOutcome: return "提交结果待确认，请先查询记录，勿重复提交"
+        case .configurationChanged: return "学校配置或记录已变化，请刷新配置后重新核对"
         }
     }
 }

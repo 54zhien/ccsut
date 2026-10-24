@@ -17,6 +17,8 @@ struct CampusMaskedEditor: UIViewRepresentable {
         view.autocorrectionType = .no; view.spellCheckingType = .no
         view.textContentType = nil; view.dataDetectorTypes = []
         view.writingToolsBehavior = .none
+        view.textDragInteraction?.isEnabled = false
+        view.textDragDelegate = context.coordinator
         view.smartQuotesType = .no; view.smartDashesType = .no
         view.textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         view.textContainer.lineFragmentPadding = 0
@@ -34,9 +36,10 @@ struct CampusMaskedEditor: UIViewRepresentable {
         }
         view.font = .preferredFont(forTextStyle: .body)
     }
-    final class Coordinator: NSObject, UITextViewDelegate, NSLayoutManagerDelegate {
+    final class Coordinator: NSObject, UITextViewDelegate, NSLayoutManagerDelegate, UITextDragDelegate {
         var parent: CampusMaskedEditor
         init(_ parent: CampusMaskedEditor) { self.parent = parent }
+        func textDraggableView(_ textDraggableView: any UIView & UITextDraggable, itemsForDrag dragRequest: any UITextDragRequest) -> [UIDragItem] { return [] }
         func textViewDidChange(_ textView: UITextView) { parent.text = textView.text; refresh(textView) }
         func refresh(_ textView: UITextView) {
             let all = NSRange(location: 0, length: (textView.text as NSString).length)

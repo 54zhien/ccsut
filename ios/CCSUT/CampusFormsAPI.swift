@@ -50,7 +50,10 @@ extension CampusClient: CampusFormServing {
             let configs = try Self.formArray(formReadData: await formRead(kind, path: "/backstage/baseinfo/sysConfig/querySysConfigItems", json: { _ in ["configKeys": keys] }))
             var values: [String: String] = [:]
             for item in configs {
-                guard let key = item["configKey"] as? String, let value = item["configContent"] as? String else { continue }
+                guard let key = item["configKey"] as? String else { throw CampusFormError.invalidResponse }
+                // Null/omitted optional values retain the public component's constructor defaults.
+                guard let raw = item["configContent"], !(raw is NSNull) else { continue }
+                guard let value = raw as? String, values[key] == nil else { throw CampusFormError.invalidResponse }
                 values[key] = value
             }
             func flag(_ key: String, fallback: Bool = false) throws -> Bool {
@@ -63,8 +66,8 @@ extension CampusClient: CampusFormServing {
             c.needsDestination = try flag("leave_qxlx_config")
             c.needsFiles = try flag("leaveadmin_show_files")
             c.canLeaveSchool = try flag("leaveadmin_sflx", fallback: true)
-            c.needsLeaveTime = try flag("leaveSchoolTimeSelect")
-            c.roleFallback = try !flag("leaveadminApplyPowerUser")
+            c.needsLeaveTime = try flag("leaveSchoolTimeSelect", fallback: true)
+            c.roleFallback = try !flag("leaveadminApplyPowerUser", fallback: true)
             if let count = values["fileNum"] { guard let count = Int(count), (1...100).contains(count) else { throw CampusFormError.invalidResponse }; c.photoLimit = count }
             for page in 1...50 {
                 let data = try await formRead(kind, path: "/backstage/leaveadmin/LeaveType/queryListForPage", json: {
@@ -72,11 +75,19 @@ extension CampusClient: CampusFormServing {
                 })
                 let list = try Self.formDictionary(data)
                 guard let rows = list["list"] as? [[String: Any]] else { throw CampusFormError.invalidResponse }
-                for row in rows where Self.integer(row["enableStatus"]) == 0 {
+                for row in rows {
+                    guard let enabled = Self.integer(row["enableStatus"]), [0,1].contains(enabled) else { throw CampusFormError.invalidResponse }
+                    if enabled != 0 { continue }
                     guard let id = Self.text(row["id"]), let name = Self.text(row["name"]),
                           let upload = Self.integer(row["isUploadFile"]), [0,1].contains(upload) else { throw CampusFormError.invalidResponse }
                     var option = CampusFormChoice(id: id, name: name, requiresImage: upload == 0)
-                    if Self.integer(row["timeConfig"]) == 1 {
+                    let timeRule: Int
+                    if row["timeConfig"] == nil || row["timeConfig"] is NSNull { timeRule = 0 }
+                    else {
+                        guard let value = Self.integer(row["timeConfig"]), [0,1].contains(value) else { throw CampusFormError.invalidResponse }
+                        timeRule = value
+                    }
+                    if timeRule == 1 {
                         guard let start = Self.minute(row["timeConfigStartTime"]), let end = Self.minute(row["timeConfigEndTime"]), end > start else { throw CampusFormError.invalidResponse }
                         option.window = CampusTimeWindow(startMinute: start, endMinute: end)
                     }
@@ -94,10 +105,15 @@ extension CampusClient: CampusFormServing {
             }
             if c.needsDestination {
                 let rows = try Self.formArray(formReadData: await formRead(kind, path: "/backstage/baseinfo/common/queryAreaLabel", json: { _ in ["level": 2] }))
-                c.destinationTypes = try rows.map { row in
-                    guard let id = Self.text(row["value"]), let name = Self.text(row["label"]) else { throw CampusFormError.invalidResponse }
-                    return .init(id: id, name: name)
+                c.destinationTypes = try rows.flatMap { row -> [CampusFormChoice] in
+                    guard let parent = Self.text(row["value"]), let label = Self.text(row["label"]),
+                          let children = row["children"] as? [[String: Any]], !children.isEmpty else { throw CampusFormError.invalidResponse }
+                    return try children.map { child in
+                        guard let id = Self.text(child["value"]), let name = Self.text(child["label"]) else { throw CampusFormError.invalidResponse }
+                        return .init(id: parent + "-" + id, name: label + " / " + name)
+                    }
                 }
+                guard !c.destinationTypes.isEmpty, Set(c.destinationTypes.map(\.id)).count == c.destinationTypes.count else { throw CampusFormError.invalidResponse }
             }
         } else {
             for page in 1...50 {
@@ -143,7 +159,7 @@ extension CampusClient: CampusFormServing {
         guard submission.configuration.account == account, submission.configuration.generation == generation,
               formAttemptIDs.insert(submission.id).inserted else { throw CampusFormError.validation("此确认已使用，请重新核对表单") }
         let fresh = try await loadForm(submission.kind)
-        guard fresh == submission.configuration else { throw CampusFormError.validation("学校配置或记录已变化，请重新加载后核对") }
+        guard fresh == submission.configuration else { throw CampusFormError.configurationChanged }
         _ = try submission.draft.snapshot(configuration: fresh, approvers: submission.approvers)
         if submission.kind == .leave {
             var reviewers = try await approvers(type: submission.draft.typeID, days: submission.draft.duration)
@@ -216,17 +232,34 @@ extension CampusClient: CampusFormServing {
         guard submission.configuration.generation == generation, submission.configuration.account == account else { throw CancellationError() }
         let rows = try await formRecords(submission.kind)
         let d = submission.draft, c = submission.configuration
+        // Without the server upload identifiers in this immutable snapshot, records cannot prove
+        // which exact attachment set was accepted. Keep the outcome pending rather than guess.
+        guard d.attachments.isEmpty else { return false }
+        let expected = try submission.payload(uploaded: [])
         let matching = rows.filter { row in
             guard let id = Self.text(row[submission.kind == .leave ? "id" : "openid"]), !c.baselineRecordIDs.contains(id),
                   let time = Self.parseDate(row[submission.kind == .leave ? "applyTime" : "applyDate"] as? String),
                   time >= submission.createdAt.addingTimeInterval(-2) else { return false }
+            let fields: [String]
+            let dateFields: [String]
             if submission.kind == .leave {
-                return row["leaveType"] as? String == d.typeID && row["reason"] as? String == d.reason
-                    && Self.sameTime(row["beginTime"], d.begin) && Self.sameTime(row["endTime"], d.end)
+                fields = ["leaveType", "reason", "linkmanPhone", "approver", "roleId", "leaveSchool", "address", "qxlx", "qxmx"]
+                dateFields = ["beginTime", "endTime", "leaveTime"]
+                guard let days = row["leaveDay"] as? NSNumber, abs(days.doubleValue - d.duration) < 0.0001,
+                      let files = row["applyFiles"] as? [Any], files.isEmpty,
+                      let fileList = row["fileList"], (fileList is NSNull || fileList as? String == "" || fileList as? String == "[]") else { return false }
+            } else {
+                fields = ["type", "isLeave", "phone", "jzPhone", "reason", "jtgj", "tjcs", "xxdz", "txdz"]
+                dateFields = ["startDate", "endDate"]
             }
-            guard row["type"] as? String == d.typeID, row["isLeave"] as? String == (d.leaving == true ? "是" : "否") else { return false }
-            return d.leaving != true || (Self.sameTime(row["startDate"], d.begin) && Self.sameTime(row["endDate"], d.end)
-                && row["txdz"] as? String == d.area.joined(separator: "-") && row["phone"] as? String == CampusFormDraft.phone(d.phone))
+            return fields.allSatisfy { Self.sameField(row[$0], expected[$0]) }
+                && dateFields.allSatisfy { key in
+                    if let text = expected[key] as? String, !text.isEmpty {
+                        guard let date = Self.parseDate(text) else { return false }
+                        return Self.sameTime(row[key], date)
+                    }
+                    return Self.sameField(row[key], expected[key])
+                }
         }
         return matching.count == 1
     }
@@ -264,6 +297,10 @@ extension CampusClient: CampusFormServing {
         do { value = try root(data) }
         catch let error as CampusFormError where error == .invalidResponse { throw CampusFormError.unknownOutcome }
         let code = integer(value["code"])
+        if kind == .departure {
+            guard code == 2000, value["data"] as? Bool != false else { throw CampusFormError.unknownOutcome }
+            return
+        }
         if [200,2000].contains(code ?? 0) { return }
         if kind == .leave, let text = value["message"] as? String,
            ["success","提交成功","申请成功","操作成功","保存成功","请假申请成功","请假成功"].contains(text.trimmingCharacters(in: CharacterSet(charactersIn: " !！。\n\r"))) { return }
@@ -305,6 +342,11 @@ extension CampusClient: CampusFormServing {
     }
     private static func sameTime(_ value: Any?, _ expected: Date) -> Bool {
         guard let date = parseDate(value as? String) else { return false }; return abs(date.timeIntervalSince(expected)) < 1
+    }
+    private static func sameField(_ actual: Any?, _ expected: Any?) -> Bool {
+        guard let actual, let expected else { return false }
+        if expected is NSNull || expected as? String == "" { return actual is NSNull || actual as? String == "" }
+        return actual as? String == expected as? String
     }
 }
 

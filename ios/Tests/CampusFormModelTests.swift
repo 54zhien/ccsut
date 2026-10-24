@@ -1,9 +1,10 @@
 import Foundation
 
 actor FormModelServer: CampusFormServing {
-    var unknown = false, found = false, delayedLoad = false
+    var unknown = false, found = false, delayedLoad = false, changedConfig = false
     var writes = 0, checks = 0
     func configure(unknown: Bool = false, found: Bool = false, delayedLoad: Bool = false) { self.unknown = unknown; self.found = found; self.delayedLoad = delayedLoad }
+    func changeConfiguration(_ value: Bool) { changedConfig = value }
     func loadForm(_ kind: CampusFormKind) async throws -> CampusFormConfiguration {
         if delayedLoad { try? await Task.sleep(for: .milliseconds(100)) }
         var c = CampusFormConfiguration(kind: kind, account: "fixture-account", userId: "fixture-user", generation: 1)
@@ -18,6 +19,7 @@ actor FormModelServer: CampusFormServing {
     func locate(latitude: Double, longitude: Double) async throws -> String { "示例地址" }
     func submit(_ submission: CampusSubmission) async throws {
         writes += 1; try? await Task.sleep(for: .milliseconds(30))
+        if changedConfig { throw CampusFormError.configurationChanged }
         if unknown { throw CampusFormError.unknownOutcome }
     }
     func reconcile(_ submission: CampusSubmission) async throws -> Bool { checks += 1; return found }
@@ -68,6 +70,16 @@ final class FormEpoch: @unchecked Sendable {
         let changed = CampusFormModel(kind:.leave,account:"fixture-account",api:FormModelServer(),currentGeneration:{epoch.current()})
         await changed.load(); epoch.change(); changed.update { $0.reason = "must not apply" }
         check(changed.configuration == nil && changed.draft.contactPhone.isEmpty && changed.confirmation == nil, "account change clears draft and pending confirmation")
+        let changingAPI = FormModelServer()
+        let reload = CampusFormModel(kind:.leave,account:"fixture-account",api:changingAPI,currentGeneration:{1})
+        await reload.load(); reload.update { $0.typeID = "sick"; $0.leaving = false; $0.reason = "retained draft" }
+        await reload.refreshApprovers(); reload.prepareConfirmation()
+        await changingAPI.changeConfiguration(true); await reload.submit(reload.confirmation!)
+        check(reload.needsReload && !reload.canReview, "changed configuration requires reload before another confirmation")
+        await changingAPI.changeConfiguration(false); await reload.load(preservingDraft:true); await reload.refreshApprovers()
+        check(!reload.needsReload && reload.draft.reason == "retained draft" && reload.confirmation == nil, "reload keeps user input but invalidates prior approval and confirmation")
+        reload.prepareConfirmation(); await reload.submit(reload.confirmation!)
+        check(reload.state == .submitted, "freshly reloaded draft can be reviewed and submitted")
         if failures > 0 { exit(1) }
     }
 }

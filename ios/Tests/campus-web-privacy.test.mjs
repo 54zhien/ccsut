@@ -63,3 +63,10 @@ test('programmatic value assignment is masked before any input event',()=>{
   assert.equal(state.field.style.webkitTextSecurity,'disc');
   assert.equal(state.field.value,'18000000000');
 });
+
+test('native private editors disable the UIKit raw-text drag export path',()=>{
+  const native = fs.readFileSync(new URL('../CCSUT/CampusFormInputs.swift', import.meta.url), 'utf8');
+  assert.match(native, /textDragInteraction\?\.isEnabled\s*=\s*false/);
+  assert.match(native, /textDragDelegate\s*=\s*context\.coordinator/);
+  assert.match(native, /itemsForDrag[^}]*return\s*\[\]/s);
+});

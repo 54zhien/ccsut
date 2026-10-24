@@ -1,6 +1,6 @@
 # Campus Native Forms Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 在原生界面填写并由用户确认提交请假与节假日离校/留校登记，提供新 IPA。
 
@@ -33,10 +33,10 @@
 
 **Interfaces:** `CampusFormKind`, `CampusFormDraft`, `CampusFormConfiguration`, `CampusFormChoice`, `CampusApprovers`, `CampusSubmission`, `CampusFormError`; draft validates and creates an immutable submission payload with account/userId/generation.
 
-- [ ] Write tests: half-day rounding, invalid dates, official time windows, contact validation, required attachments/location, approver eligibility, retained raw sensitive values, leaveSchool mapping, stay-at-school null fields, immutable snapshot.
-- [ ] Compile/run before implementation; expect missing types or failing rules.
-- [ ] Implement minimal Codable/Sendable data and pure rules; no network or persistence.
-- [ ] Run Foundation tests; expect all assertions pass. Commit scoped files.
+- [x] Write tests: half-day rounding, invalid dates, official time windows, contact validation, required attachments/location, approver eligibility, retained raw sensitive values, leaveSchool mapping, stay-at-school null fields, immutable snapshot.
+- [x] Compile/run before implementation; expect missing types or failing rules.
+- [x] Implement minimal Codable/Sendable data and pure rules; no network or persistence.
+- [x] Run Foundation tests; expect all assertions pass. Commit scoped files.
 
 ### Task 2: Form metadata, uploads and single-attempt writes
 
@@ -44,9 +44,9 @@
 
 **Interfaces:** `CampusFormServing.loadForm(_:) async throws -> CampusFormConfiguration`, `approvers(type:days:)`, `locate(latitude:longitude:)`, `submit(_:) async throws`, `reconcile(_:) async throws -> Bool`; implemented by the existing `CampusClient` actor. No default retry for mutations.
 
-- [ ] Write tests with synthetic transports: decoded configs/types/prefill, account-derived IDs, multipart approver query/upload, 401 read renewal, no bearer leakage, one write on timeout/redirect/401, safe error decoding, explicit success validation, generation switch.
-- [ ] Run to RED; implement strict minimal envelopes, allowlisted reads, stable JSON/multipart payloads, uploads only during confirmed submission.
-- [ ] Run new and existing API regressions to GREEN. Commit scoped files.
+- [x] Write tests with synthetic transports: decoded configs/types/prefill, account-derived IDs, multipart approver query/upload, 401 read renewal, no bearer leakage, one write on timeout/redirect/401, safe error decoding, explicit success validation, generation switch.
+- [x] Run to RED; implement strict minimal envelopes, allowlisted reads, stable JSON/multipart payloads, uploads only during confirmed submission.
+- [x] Run new and existing API regressions to GREEN. Commit scoped files.
 
 ### Task 3: Native form lifecycle and UI
 
@@ -54,16 +54,16 @@
 
 **Interfaces:** MainActor `CampusFormModel` owns draft/config/approvers/confirmation/state; immutable submission passed only after confirmation. `CampusFormView(kind:account:onSubmitted:)` replaces the two official-form buttons. Returning registration remains existing behavior.
 
-- [ ] Write and run lifecycle tests to RED: stale metadata/candidates, changing drafts invalidates confirmation, one submit, unknown outcome queries without resubmission, cancellation and account changes clear data.
-- [ ] Implement model, masked UIKit editing with separate raw values and redacted AX, conditional SwiftUI inputs, scoped attachment import, real location, minimal resources.
-- [ ] Add synthetic preview forms and native UI checks for required-field errors, masked contacts/free text and confirmation. Never run write endpoints from fixtures.
-- [ ] Run Foundation suites and Node privacy suites, wire macOS compilation/UI verification; expect green. Commit scoped files.
+- [x] Write and run lifecycle tests to RED: stale metadata/candidates, changing drafts invalidates confirmation, one submit, unknown outcome queries without resubmission, cancellation and account changes clear data.
+- [x] Implement model, masked UIKit editing with separate raw values and redacted AX, conditional SwiftUI inputs, scoped attachment import, real location, minimal resources.
+- [x] Add synthetic preview forms and native UI checks for required-field errors, masked contacts/free text and confirmation. Never run write endpoints from fixtures.
+- [x] Run Foundation suites and Node privacy suites, wire macOS compilation/UI verification; expect green. Commit scoped files.
 
 ### Task 4: Review and IPA
 
 **Files:** Update `ios/README.md` and this plan checklist; review artifacts remain ignored.
 
-- [ ] Run one fresh independent review across this feature's commit range. Fix important findings once, with targeted RED→GREEN evidence.
+- [x] Run one fresh independent review across this feature's commit range. Fix important findings once, with targeted RED→GREEN evidence.
 - [ ] Push the isolated branch; run exact-SHA session/UI and Release IPA workflows. Inspect any failure before changing or rerunning.
 - [ ] Download IPA, verify ZIP/arm64/bundle/minimum OS and no embedded tests; verify payment files match `2483a48`.
 - [ ] Report proven checks separately from real-school submission/device acceptance; deliver unsigned IPA. No merge into main.
