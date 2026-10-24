@@ -1,0 +1,60 @@
+name: Campus preview
+
+on:
+  push:
+    branches: [codex/zhixiao-services]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/campus-preview.yml'
+  workflow_dispatch:
+
+jobs:
+  campus:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build simulator app
+        run: |
+          set -o pipefail
+          xcodebuild build -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/UIPreview" \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/campus-build.log"
+      - name: Boot native simulator
+        run: bash ios/Tests/render-preview.sh --boot-only
+      - name: Check campus navigation and accessibility
+        run: |
+          set -o pipefail
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/campus-tests.xcresult" \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusEntryAndRecords \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusLargeTextEntries \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/campus-tests.log"
+      - name: Capture campus light and dark screens
+        run: |
+          for appearance in light dark; do
+            xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance "$appearance"
+            for page in campus campus-leave campus-travel; do
+              xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$page"
+              sleep 3
+              xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$RUNNER_TEMP/ui-screenshots/$page-$appearance.png"
+            done
+          done
+      - name: Export test screenshots
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/campus-tests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/campus-tests.xcresult" --output-path "$RUNNER_TEMP/campus-attachments"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CCSUT-campus-preview
+          path: |
+            ${{ runner.temp }}/campus-build.log
+            ${{ runner.temp }}/campus-tests.log
+            ${{ runner.temp }}/ui-screenshots/
+            ${{ runner.temp }}/campus-attachments/
+          if-no-files-found: error
+          retention-days: 14

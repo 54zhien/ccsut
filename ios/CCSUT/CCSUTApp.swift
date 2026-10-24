@@ -131,13 +131,15 @@ struct MainTabs: View {
     @Environment(SessionStore.self) private var session
 
     enum AppTab: Hashable {
-        case schedule, academic
+        case schedule, academic, campus
     }
 
     @State private var selection: AppTab = .schedule
 
     init() {
-        _selection = State(initialValue: ["academic", "scores", "exams", "electives"].contains(InterfacePreview.page) ? .academic : .schedule)
+        let page = InterfacePreview.page
+        _selection = State(initialValue: page.hasPrefix("campus") ? .campus :
+            (["academic", "scores", "exams", "electives"].contains(page) ? .academic : .schedule))
     }
 
     var body: some View {
@@ -148,6 +150,10 @@ struct MainTabs: View {
 
             Tab("教务", systemImage: "square.grid.2x2", value: AppTab.academic) {
                 AcademicView()
+            }
+
+            Tab("校园", systemImage: "building.2", value: AppTab.campus) {
+                CampusView()
             }
         }
         .tabBarMinimizeBehavior(.never)

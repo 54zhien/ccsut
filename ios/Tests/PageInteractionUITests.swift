@@ -3,6 +3,41 @@ import XCTest
 final class PageInteractionUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
+    func testCampusEntryAndRecords() {
+        var app = launch("campus")
+        for id in ["campus-leave", "campus-travel", "campus-electricity"] {
+            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5))
+        }
+        capture(app, "campus-home")
+        app.buttons["campus-leave"].tap()
+        XCTAssertTrue(app.staticTexts["示例请假记录"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["申请请假"].exists)
+        capture(app, "campus-leave-records")
+        app.terminate()
+        app = launch("campus")
+        app.buttons["campus-travel"].tap()
+        XCTAssertTrue(app.staticTexts["示例区县"].waitForExistence(timeout: 5))
+        app.segmentedControls.buttons["返校记录"].tap()
+        XCTAssertTrue(app.buttons["办理返校登记"].waitForExistence(timeout: 5))
+        capture(app, "campus-return-records")
+        app.terminate()
+        app = launch("academic")
+        XCTAssertTrue(app.buttons["academic-scores"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["academic-electricity"].exists)
+    }
+
+    func testCampusLargeTextEntries() {
+        let app = launch("campus", largeText: true)
+        let leave = app.buttons["campus-leave"]
+        XCTAssertTrue(leave.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(leave.frame.height, 44)
+        app.swipeUp()
+        let electricity = app.buttons["campus-electricity"]
+        XCTAssertTrue(electricity.isHittable)
+        XCTAssertGreaterThanOrEqual(electricity.frame.height, 44)
+        capture(app, "campus-accessibility-text")
+    }
+
     private func launch(_ page: String, longList: Bool = false, transition: Bool = false, withoutUpcoming: Bool = false,
                         refresh: Bool = false, empty: Bool = false, largeText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()

@@ -51,7 +51,12 @@ enum CampusTravelKind: String, CaseIterable, Sendable {
     }
 }
 
-actor CampusClient {
+protocol CampusReading: Sendable {
+    func leaveRecords(page: Int, size: Int) async throws -> CampusLeavePage
+    func travelRecords(kind: CampusTravelKind) async throws -> [CampusTravelRecord]
+}
+
+actor CampusClient: CampusReading {
     private enum Subsystem: Hashable { case leave, travel }
     private enum Failure: Error { case unauthorized }
     private struct Identity: Decodable, Sendable {

@@ -7,6 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		000000000000000000CA2001 /* CampusModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1001; };
+		000000000000000000CA2002 /* CampusAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1002; };
+		000000000000000000CA2003 /* CampusSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1003; };
+		000000000000000000CA2004 /* CampusRecordsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1004; };
+		000000000000000000CA2005 /* CampusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1005; };
+		000000000000000000CA2006 /* CampusRecordViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1006; };
+		000000000000000000CA2007 /* CampusWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1007; };
+		000000000000000000CA2008 /* CampusWebPrivacy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1008; };
 		000000000000000000EC2001 /* EcardAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1001 /* EcardAPI.swift */; };
 		000000000000000000EC2002 /* EcardTokenBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1002 /* EcardTokenBridge.swift */; };
 		000000000000000000EC2003 /* EcardPaymentModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1003 /* EcardPaymentModel.swift */; };
@@ -53,6 +61,14 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		000000000000000000CA1001 /* CampusModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusModels.swift; sourceTree = "<group>"; };
+		000000000000000000CA1002 /* CampusAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusAPI.swift; sourceTree = "<group>"; };
+		000000000000000000CA1003 /* CampusSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusSession.swift; sourceTree = "<group>"; };
+		000000000000000000CA1004 /* CampusRecordsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusRecordsModel.swift; sourceTree = "<group>"; };
+		000000000000000000CA1005 /* CampusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusView.swift; sourceTree = "<group>"; };
+		000000000000000000CA1006 /* CampusRecordViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusRecordViews.swift; sourceTree = "<group>"; };
+		000000000000000000CA1007 /* CampusWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusWebView.swift; sourceTree = "<group>"; };
+		000000000000000000CA1008 /* CampusWebPrivacy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusWebPrivacy.swift; sourceTree = "<group>"; };
 		000000000000000000EC1001 /* EcardAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardAPI.swift; sourceTree = "<group>"; };
 		000000000000000000EC1002 /* EcardTokenBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardTokenBridge.swift; sourceTree = "<group>"; };
 		000000000000000000EC1003 /* EcardPaymentModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardPaymentModel.swift; sourceTree = "<group>"; };
@@ -108,6 +124,14 @@
 		C00000000000000000000002 /* CCSUT */ = {
 			isa = PBXGroup;
 			children = (
+				000000000000000000CA1001 /* CampusModels.swift */,
+				000000000000000000CA1002 /* CampusAPI.swift */,
+				000000000000000000CA1003 /* CampusSession.swift */,
+				000000000000000000CA1004 /* CampusRecordsModel.swift */,
+				000000000000000000CA1005 /* CampusView.swift */,
+				000000000000000000CA1006 /* CampusRecordViews.swift */,
+				000000000000000000CA1007 /* CampusWebView.swift */,
+				000000000000000000CA1008 /* CampusWebPrivacy.swift */,
 				000000000000000000EC1001 /* EcardAPI.swift */,
 				000000000000000000EC1002 /* EcardTokenBridge.swift */,
 				000000000000000000EC1003 /* EcardPaymentModel.swift */,
@@ -222,6 +246,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				000000000000000000CA2001 /* CampusModels.swift in Sources */,
+				000000000000000000CA2002 /* CampusAPI.swift in Sources */,
+				000000000000000000CA2003 /* CampusSession.swift in Sources */,
+				000000000000000000CA2004 /* CampusRecordsModel.swift in Sources */,
+				000000000000000000CA2005 /* CampusView.swift in Sources */,
+				000000000000000000CA2006 /* CampusRecordViews.swift in Sources */,
+				000000000000000000CA2007 /* CampusWebView.swift in Sources */,
+				000000000000000000CA2008 /* CampusWebPrivacy.swift in Sources */,
 				000000000000000000EC2001 /* EcardAPI.swift in Sources */,
 				000000000000000000EC2002 /* EcardTokenBridge.swift in Sources */,
 				000000000000000000EC2003 /* EcardPaymentModel.swift in Sources */,
