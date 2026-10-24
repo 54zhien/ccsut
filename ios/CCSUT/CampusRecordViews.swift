@@ -183,10 +183,10 @@ private struct CampusRecordContent: View {
         VStack(alignment: .leading, spacing: 16) {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(title).font(.headline).fixedSize(horizontal: false, vertical: true); Spacer(minLength: 0)
+                    Text(title).font(.headline).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader); Spacer(minLength: 0)
                     CampusStatusBadge(text: status, pending: pending)
                 }
-                VStack(alignment: .leading, spacing: 10) { Text(title).font(.headline); CampusStatusBadge(text: status, pending: pending) }
+                VStack(alignment: .leading, spacing: 10) { Text(title).font(.headline).accessibilityAddTraits(.isHeader); CampusStatusBadge(text: status, pending: pending) }
             }
             content()
         }

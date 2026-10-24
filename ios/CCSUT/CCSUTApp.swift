@@ -32,9 +32,9 @@ struct CCSUTApp: App {
                 } else { RootView() }
             }
                 .environment(session)
-                .transformEnvironment(\.accessibilityReduceMotion) { reduced in
+                .overlay(alignment: .bottomTrailing) {
                     #if DEBUG
-                    if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-reduce-motion") { reduced = true }
+                    if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-reduce-motion") { CampusMotionPreviewProbe() }
                     #endif
                 }
                 .tint(.accentColor)
@@ -54,6 +54,17 @@ struct CCSUTApp: App {
 }
 
 // MARK: - 根视图
+
+#if DEBUG
+private struct CampusMotionPreviewProbe: View {
+    @Environment(\.accessibilityReduceMotion) private var reduced
+    var body: some View {
+        Text(reduced ? "reduce-motion-on" : "reduce-motion-off")
+            .font(.caption2).padding(4).background(.background)
+            .accessibilityIdentifier("campus-reduce-motion")
+    }
+}
+#endif
 
 struct RootView: View {
     @Environment(SessionStore.self) private var session

@@ -132,6 +132,19 @@ final class PageInteractionUITests: XCTestCase {
         }
     }
 
+    func testCampusReducedMotion() {
+        for page in ["campus-form-leave", "campus-form-departure", "campus-electricity"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--preview-ui", "--preview-page", page, "--preview-reduce-motion"]
+            app.launch()
+            let probe = app.staticTexts["campus-reduce-motion"]
+            XCTAssertTrue(probe.waitForExistence(timeout: 8))
+            XCTAssertEqual(probe.label, "reduce-motion-on", "Verify the real simulator preference reaches SwiftUI")
+            capture(app, "campus-reduce-motion-\(page)")
+            app.terminate()
+        }
+    }
+
     func testCampusRecordsSurviveFormDismissal() {
         for page in ["campus-leave", "campus-travel"] {
             let app = launch(page)

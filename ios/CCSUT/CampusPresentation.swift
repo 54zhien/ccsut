@@ -4,14 +4,22 @@ enum CampusDisplayDate {
     private static func parsed(_ raw: String?) -> (Date, Bool)? {
         guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
         let iso = ISO8601DateFormatter()
-        for options: ISO8601DateFormatter.Options in [[.withInternetDateTime, .withFractionalSeconds], [.withInternetDateTime]] {
-            iso.formatOptions = options
-            if let date = iso.date(from: raw) { return (date, true) }
+        // ISO8601DateFormatter normalizes impossible days and accepts suffixes.
+        // Validate the complete input and calendar day before allowing conversion.
+        let isoPattern = #"^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$"#
+        let day = String(raw.prefix(10))
+        let dayParser = formatter("yyyy-MM-dd")
+        if raw.range(of: isoPattern, options: .regularExpression) != nil,
+           let validDay = dayParser.date(from: day), dayParser.string(from: validDay) == day {
+            for options: ISO8601DateFormatter.Options in [[.withInternetDateTime, .withFractionalSeconds], [.withInternetDateTime]] {
+                iso.formatOptions = options
+                if let date = iso.date(from: raw) { return (date, true) }
+            }
         }
         let parser = formatter("")
         for pattern in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd"] {
             parser.dateFormat = pattern
-            if let date = parser.date(from: raw) { return (date, pattern != "yyyy-MM-dd") }
+            if let date = parser.date(from: raw), parser.string(from: date) == raw { return (date, pattern != "yyyy-MM-dd") }
         }
         return nil
     }
