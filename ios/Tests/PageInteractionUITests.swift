@@ -86,6 +86,31 @@ final class PageInteractionUITests: XCTestCase {
         capture(app, "campus-native-accessibility-form")
     }
 
+    func testCampusFormKeyboardKeepsEditorVisible() {
+        let app = launch("campus-form-leave")
+        let reason = app.textViews["campus-form-reason"]
+        XCTAssertTrue(reason.waitForExistence(timeout: 8))
+        reason.tap()
+        reason.typeText("A short reason")
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        let visible = NSPredicate { _, _ in reason.frame.maxY <= keyboard.frame.minY + 2 }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: visible, evaluatedWith: reason)], timeout: 5), .completed,
+                       "The active editor must remain above the keyboard")
+        capture(app, "campus-form-keyboard")
+    }
+
+    func testCampusElectricityAmountSelection() {
+        let app = launch("campus-electricity")
+        let amount = app.textFields["缴费金额，单位元"]
+        XCTAssertTrue(amount.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["剩余金额"].exists)
+        app.buttons["50 元"].tap()
+        XCTAssertEqual(amount.value as? String, "50")
+        XCTAssertFalse(app.buttons["立即缴费"].isEnabled, "Synthetic previews must never enable a real payment")
+        capture(app, "campus-electricity-amount")
+    }
+
     func testCampusRecordsSurviveFormDismissal() {
         for page in ["campus-leave", "campus-travel"] {
             let app = launch(page)
