@@ -35,6 +35,6 @@ with tempfile.TemporaryDirectory(prefix="ccsut-ecard-tests-") as directory:
     result = subprocess.run([str(binary)], timeout=60)
     if result.returncode < 0 and sys.platform == "darwin":
         # Preserve the failing run and obtain a stack for native-only failures.
-        subprocess.run(["lldb", "--batch", "-o", "run", "-o", "bt", "-o", "quit", "--", str(binary)],
+        subprocess.run(["lldb", "--batch", "-o", "run", "-k", "thread backtrace all", "--", str(binary)],
                        timeout=45)
     sys.exit(result.returncode)

@@ -38,13 +38,19 @@ import Foundation
 import WebKit
 
 @MainActor final class OfflineEcardWebView: WKWebView {
+    // WKNavigation must come from a real load. The factory has no delegate and
+    // loads only a local empty document; school URLs never reach WebKit.
+    private static let navigationFactory = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
     var navigations: [WKNavigation] = []
     var pageURL: URL?
     var scriptCompletion: (@MainActor @Sendable (Any?, Error?) -> Void)?
     var stopped = false
     override var url: URL? { pageURL }
     override func load(_ request: URLRequest) -> WKNavigation? {
-        let nav = WKNavigation()
+        Self.navigationFactory.stopLoading()
+        guard let nav = Self.navigationFactory.loadHTMLString("<html></html>", baseURL: nil) else {
+            preconditionFailure("WebKit did not return a local navigation handle")
+        }
         navigations.append(nav)
         return nav
     }

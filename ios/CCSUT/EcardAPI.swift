@@ -517,14 +517,16 @@ final class EcardClient {
             throw EcardError.transport(error.localizedDescription)
         }
 
+        // A gateway may return JSON with code=500 after forwarding a payment.
+        // Preserve its HTTP failure so recharge can reconcile the existing order.
+        guard let http = resp as? HTTPURLResponse else { throw EcardError.http(-1) }
+        guard (200..<300).contains(http.statusCode) else { throw EcardError.http(http.statusCode) }
+
         // 业务异常时后端仍返回 200，错误在 body 的 code 里
         if let probe = try? JSONDecoder().decode(CodeProbe.self, from: data),
            let code = probe.code, code != 200, code != 0 {
             throw EcardError.business(code, probe.msg ?? "未知错误")
         }
-        guard let http = resp as? HTTPURLResponse else { throw EcardError.http(-1) }
-        guard (200..<300).contains(http.statusCode) else { throw EcardError.http(http.statusCode) }
-
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch let error as DecodingError {

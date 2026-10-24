@@ -98,7 +98,7 @@ final class EcardProtocol: URLProtocol {
         configuration.protocolClasses = [EcardProtocol.self]
         let client = EcardClient(token: "fixture-token", configuration: configuration)
         let ready = #"{"code":200,"success":true,"data":{"orderid":"fixture-order","payList":[{"id":"69","code":"CARDTSM","nopassword":"0"}]}}"#
-        for failure in ["timeout", "malformed", "canceled", "http"] {
+        for failure in ["timeout", "malformed", "canceled", "http", "httpJSON"] {
             var payments = 0
             var queries = 0
             EcardProtocol.respond = { request in
@@ -113,6 +113,7 @@ final class EcardProtocol: URLProtocol {
                 case "timeout": throw URLError(.timedOut)
                 case "canceled": throw URLError(.cancelled)
                 case "http": return (502, "bad gateway")
+                case "httpJSON": return (502, #"{"code":500,"msg":"upstream timeout"}"#)
                 default: return (200, "truncated JSON")
                 }
             }
