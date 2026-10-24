@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Stable, independently spaced entry cards; optional reminders follow the entries.
 struct AcademicView: View {
-    private enum Destination: Hashable { case scores, exams, electives }
+    private enum Destination: Hashable { case scores, exams, electives, electricity }
     @Environment(\.scenePhase) private var scenePhase
     @State private var nextExam: ExamItem?
     @State private var upcomingError: String?
@@ -33,6 +33,10 @@ struct AcademicView: View {
                             service("选课", subtitle: electiveSummary ?? "浏览课程与管理已选课程", symbol: "list.bullet.rectangle.portrait", tint: .accentColor, height: cardHeight)
                         }
                         .accessibilityIdentifier("academic-electives")
+                        NavigationLink(value: Destination.electricity) {
+                            service("电费缴费", subtitle: "查询宿舍电表余额与充值", symbol: "bolt.fill", tint: .accentColor, height: cardHeight)
+                        }
+                        .accessibilityIdentifier("academic-electricity")
                         if let nextExam {
                             if let upcomingError {
                                 PageStatusNotice(message: upcomingError) { Task { await loadUpcomingExam() } }
@@ -71,6 +75,7 @@ struct AcademicView: View {
                     resetSummariesIfNeeded()
                     electiveSummary = "已选 \(count) 门 · \(SchedulePresentation.termTitle(term))"
                 }
+                case .electricity: EcardPaymentView()
                 }
             }
             .task {

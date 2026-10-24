@@ -485,6 +485,7 @@ final class SessionStore {
         refreshTask?.cancel()
         adoptionTask?.cancel()
         CookieJar.shared = []
+        EcardTokenBridge.clearCachedToken()
         Keychain.delete(cookieKey)
         UserDefaults.standard.removeObject(forKey: nameKey)
         UserDefaults.standard.removeObject(forKey: sidKey)
