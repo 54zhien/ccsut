@@ -96,13 +96,43 @@ struct SessionRegressionTests {
               "cold bootstrap restores a session-only TGC into the non-persistent WebStore")
         check(restoredWebCookies.contains(where: { $0.name == "jw_uf" && $0.value == "cold-rotated" }),
               "cold bootstrap injects the validation response's rotated credentials")
+
+        func normalizedCookieDomain(_ domain: String) -> String {
+            let lowercased = domain.lowercased()
+            return lowercased.hasPrefix(".") ? String(lowercased.dropFirst()) : lowercased
+        }
+        func sameCookieIdentity(_ lhs: HTTPCookie, _ rhs: HTTPCookie) -> Bool {
+            lhs.name == rhs.name && lhs.path == rhs.path &&
+                normalizedCookieDomain(lhs.domain) == normalizedCookieDomain(rhs.domain)
+        }
         do {
-            try await WebStore.dataStore.httpCookieStore.set(cookie("TGC", "new-web-value", domain: "auth.ccsut.cn"))
-            try await WebStore.restoreCookies(CookieJar.shared, to: WebStore.dataStore, policy: .fillMissing)
-            let currentCookies = try await WebStore.dataStore.httpCookieStore.cookieSnapshot()
-            check(currentCookies.contains(where: { $0.name == "TGC" && $0.value == "new-web-value" }),
-                  "payment restoration preserves a newer live WebKit credential")
-        } catch { check(false, "payment restoration completes using the real WebKit cookie store") }
+            let replacement = cookie("TGC", "new-web-value", domain: "auth.ccsut.cn")
+            let beforeReplacement = try await WebStore.dataStore.httpCookieStore.cookieSnapshot()
+            let priorCookie = beforeReplacement.first(where: { sameCookieIdentity($0, replacement) })
+            try await WebStore.dataStore.httpCookieStore.set(replacement)
+            let afterReplacement = try await WebStore.dataStore.httpCookieStore.cookieSnapshot()
+            let exactReplacementVisible = afterReplacement.contains {
+                sameCookieIdentity($0, replacement) && $0.domain == replacement.domain && $0.value == replacement.value
+            }
+            let normalizedReplacementVisible = afterReplacement.contains {
+                sameCookieIdentity($0, replacement) && $0.value == replacement.value
+            }
+            let storedCookie = afterReplacement.first(where: { sameCookieIdentity($0, replacement) })
+            print("WebKit cookie setup metadata: exactReplacement=\(exactReplacementVisible), " +
+                  "normalizedReplacement=\(normalizedReplacementVisible), " +
+                  "priorHTTPOnly=\(priorCookie?.isHTTPOnly ?? false), " +
+                  "incomingHTTPOnly=\(replacement.isHTTPOnly), " +
+                  "storedHTTPOnly=\(storedCookie?.isHTTPOnly ?? false), " +
+                  "cookiesBefore=\(beforeReplacement.count), cookiesAfter=\(afterReplacement.count)")
+            check(normalizedReplacementVisible, "WebKit replacement setup succeeds before fillMissing")
+            if normalizedReplacementVisible {
+                try await WebStore.restoreCookies(CookieJar.shared, to: WebStore.dataStore, policy: .fillMissing)
+                let currentCookies = try await WebStore.dataStore.httpCookieStore.cookieSnapshot()
+                check(currentCookies.contains {
+                    sameCookieIdentity($0, replacement) && $0.value == replacement.value
+                }, "payment restoration preserves a newer live WebKit credential")
+            }
+        } catch { check(false, "payment restoration test completes using the real WebKit cookie store") }
 
         CookieJar.shared = [cookie("jw_uf", "native-only")]
         for c in HTTPCookieStorage.shared.cookies ?? [] { HTTPCookieStorage.shared.deleteCookie(c) }

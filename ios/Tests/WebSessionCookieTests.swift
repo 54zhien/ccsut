@@ -13,6 +13,12 @@ import FoundationNetworking
     var current = true
     var afterWrite: (() -> Void)?
 
+    private func identity(_ cookie: HTTPCookie) -> String {
+        let domain = cookie.domain.lowercased()
+        let normalizedDomain = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+        return "\(cookie.name)|\(normalizedDomain)|\(cookie.path)"
+    }
+
     func read() throws -> [HTTPCookie] {
         reads += 1
         if readFailures > 0 { readFailures -= 1; throw URLError(.timedOut) }
@@ -22,7 +28,7 @@ import FoundationNetworking
         writes += 1
         if writeFailures > 0 { writeFailures -= 1; throw URLError(.timedOut) }
         if !dropWrites {
-            cookies.removeAll { $0.name == cookie.name && $0.domain == cookie.domain && $0.path == cookie.path }
+            cookies.removeAll { identity($0) == identity(cookie) }
             cookies.append(cookie)
         }
         afterWrite?()
@@ -36,9 +42,10 @@ import FoundationNetworking
             print("\(condition ? "PASS" : "FAIL") \(name)")
             if !condition { failures += 1 }
         }
-        func cookie(_ name: String = "TGC", value: String = "fixture", expires: Date? = nil) -> HTTPCookie {
+        func cookie(_ name: String = "TGC", value: String = "fixture", expires: Date? = nil,
+                    domain: String = "auth.ccsut.cn") -> HTTPCookie {
             var properties: [HTTPCookiePropertyKey: Any] = [
-                .name: name, .value: value, .domain: "auth.ccsut.cn", .path: "/", .secure: "TRUE"
+                .name: name, .value: value, .domain: domain, .path: "/", .secure: "TRUE"
             ]
             if let expires { properties[.expires] = expires }
             return HTTPCookie(properties: properties)!
@@ -75,6 +82,13 @@ import FoundationNetworking
         try await restore([sessionCookie, cookie("gateway")], newer, .fillMissing)
         check(newer.cookies.first(where: { $0.name == "TGC" })?.value == "rotated-in-webkit" && newer.writes == 1,
               "payment startup fills missing credentials without overwriting newer WebKit cookies")
+
+        let normalizedDomain = CookieStoreProbe()
+        normalizedDomain.cookies = [cookie(value: "rotated-in-webkit", domain: ".AUTH.CCSUT.CN")]
+        try await restore([sessionCookie], normalizedDomain, .fillMissing)
+        check(normalizedDomain.cookies.first?.value == "rotated-in-webkit" && normalizedDomain.writes == 0,
+              "fillMissing preserves a live cookie when WebKit normalizes its domain identity")
+
         try await restore([sessionCookie], newer)
         check(newer.cookies.first(where: { $0.name == "TGC" })?.value == "fixture", "bootstrap replaces stale WebKit credentials")
 

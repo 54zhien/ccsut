@@ -17,7 +17,9 @@ import FoundationNetworking
             guard isCurrent() else { throw CancellationError() }
         }
         func key(_ cookie: HTTPCookie) -> String {
-            "\(cookie.name)|\(cookie.domain.lowercased())|\(cookie.path)"
+            let domain = cookie.domain.lowercased()
+            let normalizedDomain = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+            return "\(cookie.name)|\(normalizedDomain)|\(cookie.path)"
         }
         var expected: [HTTPCookie]?
         for attempt in 0..<2 {
