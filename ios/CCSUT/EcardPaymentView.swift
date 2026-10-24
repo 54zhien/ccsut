@@ -215,20 +215,20 @@ struct EcardPaymentView: View {
     }
     private var payBar: some View {
         CampusActionDock {
-        VStack(spacing: 10) {
-            Button {
-                amountFocused = false
-                model.prepareConfirmation()
-            } label: {
-                Text("立即缴费").font(.headline).frame(maxWidth: .infinity, minHeight: 32)
+            VStack(spacing: 10) {
+                Button {
+                    amountFocused = false
+                    model.prepareConfirmation()
+                } label: {
+                    Text("立即缴费").font(.headline).frame(maxWidth: .infinity, minHeight: 32)
+                }
+                .buttonStyle(.glassProminent).buttonBorderShape(.capsule).controlSize(.large)
+                .campusActionControl()
+                .disabled(!model.canPay)
+                Text("从一卡通余额扣款，确认后即支付")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            .buttonStyle(.glassProminent).buttonBorderShape(.capsule).controlSize(.large)
-            .campusActionControl()
-            .disabled(!model.canPay)
-            Text("从一卡通余额扣款，确认后即支付")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 12)
+            .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 12)
         }
     }
     private func confirmation(_ confirmed: EcardPaymentModel.Confirmation) -> some View {
@@ -246,21 +246,21 @@ struct EcardPaymentView: View {
                 .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
             }
             CampusActionDock {
-            VStack(spacing: 12) {
-                if model.isSubmitting {
-                    HStack(spacing: 10) { ProgressView(); Text("正在提交，请勿重复缴费").font(.subheadline) }
-                } else {
-                    Text("这是免密支付。请确认房间与金额，点击下方按钮后将直接扣款。")
-                        .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Button { Task { await model.submit(confirmed) } } label: {
-                        Text("确认支付 \(confirmed.amount.ecardAmountText) 元").font(.headline)
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                VStack(spacing: 12) {
+                    if model.isSubmitting {
+                        HStack(spacing: 10) { ProgressView(); Text("正在提交，请勿重复缴费").font(.subheadline) }
+                    } else {
+                        Text("这是免密支付。请确认房间与金额，点击下方按钮后将直接扣款。")
+                            .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Button { Task { await model.submit(confirmed) } } label: {
+                            Text("确认支付 \(confirmed.amount.ecardAmountText) 元").font(.headline)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.glassProminent).buttonBorderShape(.capsule)
+                        .campusActionControl()
                     }
-                    .buttonStyle(.glassProminent).buttonBorderShape(.capsule)
-                    .campusActionControl()
                 }
-            }
-            .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
+                .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
             }
         }
         .background(Color(.systemGroupedBackground))

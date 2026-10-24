@@ -41,6 +41,7 @@ jobs:
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeDepartureForm \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusFormLoadingIsCentered \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusLeaveDatesUseChinese \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusApproversWaitForTypeSelection \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeFormLargeText \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusRecordsSurviveFormDismissal \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusFormKeyboardKeepsEditorVisible \

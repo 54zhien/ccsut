@@ -35,6 +35,9 @@ final class CampusFormModel {
         draft = CampusFormDraft(begin: start, end: start.addingTimeInterval(14_400))
     }
     var candidateKey: String { "\(configurationRevision)|\(draft.typeID)|\(draft.begin.timeIntervalSince1970)|\(draft.end.timeIntervalSince1970)" }
+    var canMatchApprovers: Bool {
+        state == .editing && kind == .leave && configuration?.choices.contains(where: { $0.id == draft.typeID }) == true && draft.duration > 0
+    }
     var canReview: Bool { state == .editing && configuration?.choices.isEmpty == false && !isLoadingApprovers && !needsReload }
 
     func load(preservingDraft: Bool = false) async {
@@ -83,11 +86,10 @@ final class CampusFormModel {
     }
 
     func refreshApprovers() async {
-        guard verifyAccount(), state == .editing, kind == .leave, let c = configuration,
-              c.choices.contains(where: { $0.id == draft.typeID }), draft.duration > 0 else { return }
+        guard verifyAccount(), canMatchApprovers, let c = configuration else { return }
         candidateTask?.cancel(); candidateRevision &+= 1
         let rev = candidateRevision, key = candidateKey, type = draft.typeID, days = draft.duration, api = api
-        isLoadingApprovers = true; approvers = nil; draft.approverID = ""; confirmation = nil
+        isLoadingApprovers = true; approvers = nil; draft.approverID = ""; confirmation = nil; error = nil
         let task = Task {
             let role = try await api.approvers(type: type, days: days)
             return try await c.roleFallback ? api.roleUsers(role) : role

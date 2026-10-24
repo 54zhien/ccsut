@@ -46,27 +46,27 @@ import ImageIO
                             .multilineTextAlignment(.center).accessibilityIdentifier("campus-form-loading-message")
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 24) {
-                            content
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 24) {
+                                content
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 24)
+                            .frame(maxWidth: 720).frame(maxWidth: .infinity)
                         }
-                        .padding(.horizontal, 16).padding(.vertical, 24)
-                        .frame(maxWidth: 720).frame(maxWidth: .infinity)
+                        .scrollDismissesKeyboard(.interactively)
+                        .scrollEdgeEffectStyle(.soft, for: .top)
+                        .disabled(model.state == .submitting || model.state == .unknown)
+                        .onChange(of: activeEditor) { _, value in
+                            if let value { proxy.scrollTo(value, anchor: .center) }
+                        }
+                        .onChange(of: focusedPhone) { _, value in
+                            if let value { activeEditor = nil; proxy.scrollTo(value, anchor: .center) }
+                        }
+                        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                            if let identifier = activeEditor ?? focusedPhone { proxy.scrollTo(identifier, anchor: .center) }
+                        }
                     }
-                    .scrollDismissesKeyboard(.interactively)
-                    .scrollEdgeEffectStyle(.soft, for: .top)
-                    .disabled(model.state == .submitting || model.state == .unknown)
-                    .onChange(of: activeEditor) { _, value in
-                        if let value { proxy.scrollTo(value, anchor: .center) }
-                    }
-                    .onChange(of: focusedPhone) { _, value in
-                        if let value { activeEditor = nil; proxy.scrollTo(value, anchor: .center) }
-                    }
-                    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
-                        if let identifier = activeEditor ?? focusedPhone { proxy.scrollTo(identifier, anchor: .center) }
-                    }
-                }
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -153,11 +153,21 @@ import ImageIO
         section("联系与审批") {
             phone("紧急联系人电话", key: \.contactPhone, identifier: "campus-form-contact")
             if !c.contacts.isEmpty { choice("常用联系人", options: c.contacts, selection: binding(\.contactPhone)) }
-            if model.isLoadingApprovers { ProgressView("正在匹配审批人…").font(.footnote) }
-            choice(model.approvers?.roleName ?? "审批人", options: model.approvers?.users ?? [], selection: binding(\.approverID))
-            fieldError("审批")
-            if !model.isLoadingApprovers && model.approvers == nil {
+            if !model.canMatchApprovers {
+                Text(model.draft.typeID.isEmpty ? "请先选择请假类型，审批人会自动匹配" : "请先设置有效的开始和结束时间，审批人会自动匹配")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("campus-approver-prerequisite")
+            } else if model.isLoadingApprovers {
+                ProgressView("正在匹配审批人…").font(.footnote)
+            } else if let approvers = model.approvers {
+                choice(approvers.roleName, options: approvers.users, selection: binding(\.approverID))
+                fieldError("审批")
+            } else {
+                Text(model.error ?? "暂未匹配到审批人，请重试")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("campus-approver-error")
                 Button("重新匹配审批人") { Task { await model.refreshApprovers() } }
+                    .accessibilityIdentifier("campus-approver-retry")
             }
         }
         if c.needsDestination {
@@ -236,32 +246,32 @@ import ImageIO
 
     @ViewBuilder private var footer: some View {
         CampusActionDock {
-        VStack(alignment: .leading, spacing: 10) {
-            if let error = model.error {
-                Text(error).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("campus-form-error")
-                if error == CampusError.authentication.localizedDescription {
-                    Button("重新认证") { Task { await session.refresh(); await model.load() } }
+            VStack(alignment: .leading, spacing: 10) {
+                if let error = model.error {
+                    Text(error).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("campus-form-error")
+                    if error == CampusError.authentication.localizedDescription {
+                        Button("重新认证") { Task { await session.refresh(); await model.load() } }
+                    }
+                }
+                if model.needsReload && model.state == .editing {
+                    Button("刷新配置并保留填写内容") { Task { await model.load(preservingDraft: true) } }
+                        .accessibilityIdentifier("campus-form-reload")
+                }
+                if model.state == .unknown {
+                    Button { Task { await model.checkResult() } } label: {
+                        HStack { if model.isChecking { ProgressView() }; Text("查询提交结果") }.frame(maxWidth: .infinity, minHeight: 44)
+                    }.buttonStyle(.glassProminent).campusActionControl().disabled(model.isChecking)
+                } else if model.state == .submitted {
+                    Button("完成") { onSubmitted(); dismiss() }.frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.glassProminent).campusActionControl()
+                } else if model.configuration != nil {
+                    Button { endEditing(); model.prepareConfirmation() } label: {
+                        Text("核对并提交").frame(maxWidth: .infinity, minHeight: 44)
+                    }.buttonStyle(.glassProminent).campusActionControl().disabled(!model.canReview || isImporting || isLocating)
+                        .accessibilityIdentifier("campus-form-review")
                 }
             }
-            if model.needsReload && model.state == .editing {
-                Button("刷新配置并保留填写内容") { Task { await model.load(preservingDraft: true) } }
-                    .accessibilityIdentifier("campus-form-reload")
-            }
-            if model.state == .unknown {
-                Button { Task { await model.checkResult() } } label: {
-                    HStack { if model.isChecking { ProgressView() }; Text("查询提交结果") }.frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.glassProminent).campusActionControl().disabled(model.isChecking)
-            } else if model.state == .submitted {
-                Button("完成") { onSubmitted(); dismiss() }.frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.glassProminent).campusActionControl()
-            } else if model.configuration != nil {
-                Button { endEditing(); model.prepareConfirmation() } label: {
-                    Text("核对并提交").frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.glassProminent).campusActionControl().disabled(!model.canReview || isImporting || isLocating)
-                    .accessibilityIdentifier("campus-form-review")
-            }
-        }
-        .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
+            .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
         }
     }
 
@@ -331,11 +341,11 @@ import ImageIO
                 }.padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
             }
             CampusActionDock {
-            Button { Task { await model.submit(snapshot) } } label: {
-                HStack { if model.state == .submitting { ProgressView() }; Text(model.state == .submitting ? "正在提交…" : "确认提交") }
-                    .frame(maxWidth: .infinity, minHeight: 44)
-            }.buttonStyle(.glassProminent).campusActionControl().padding(16).disabled(model.state == .submitting)
-                .accessibilityIdentifier("campus-form-confirm")
+                Button { Task { await model.submit(snapshot) } } label: {
+                    HStack { if model.state == .submitting { ProgressView() }; Text(model.state == .submitting ? "正在提交…" : "确认提交") }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }.buttonStyle(.glassProminent).campusActionControl().padding(16).disabled(model.state == .submitting)
+                    .accessibilityIdentifier("campus-form-confirm")
             }
         }
         .background(Color(.systemGroupedBackground))
@@ -402,7 +412,7 @@ import ImageIO
     private func endEditing() { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
     private func dateText(_ date: Date) -> String {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"; return formatter.string(from: date)
+        formatter.dateFormat = "yyyy年M月d日 HH:mm"; return formatter.string(from: date)
     }
     private func locate() {
         isLocating = true
@@ -472,6 +482,9 @@ private actor CampusFormPreviewAPI: CampusFormServing {
         }
         var c = CampusFormConfiguration(kind:kind,account:account,userId:"preview-user",generation:generation)
         c.choices = [.init(id:"preview-type",name:kind == .leave ? "病假" : "示例假期")]
+        if kind == .leave && ProcessInfo.processInfo.arguments.contains("--preview-form-choices") {
+            c.choices.append(.init(id: "preview-second-type", name: "事假"))
+        }
         c.phone = "18000000000"; c.parentPhone = "18000000001"; c.displayName = "示例学生"
         c.needsLeaveTime = kind == .leave
         return c

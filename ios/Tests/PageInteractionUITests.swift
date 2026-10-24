@@ -108,6 +108,20 @@ final class PageInteractionUITests: XCTestCase {
         capture(app, "campus-chinese-date-picker")
     }
 
+    func testCampusApproversWaitForTypeSelection() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-ui", "--preview-page", "campus-form-leave", "--preview-form-choices"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["campus-approver-prerequisite"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["campus-approver-retry"].exists)
+        app.buttons["类型"].tap()
+        app.buttons["病假"].tap()
+        XCTAssertTrue(app.buttons["辅导员"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["campus-approver-prerequisite"].exists)
+        XCTAssertFalse(app.buttons["campus-approver-retry"].exists)
+        capture(app, "campus-approver-after-type-selection")
+    }
+
     func testCampusNativeFormLargeText() {
         let app = launch("campus-form-leave", largeText: true)
         let review = app.buttons["campus-form-review"]

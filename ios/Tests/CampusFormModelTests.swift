@@ -2,7 +2,9 @@ import Foundation
 
 actor FormModelServer: CampusFormServing {
     var unknown = false, found = false, delayedLoad = false, changedConfig = false
-    var writes = 0, checks = 0
+    var writes = 0, checks = 0, candidateReads = 0
+    var candidateFailure = false
+    func failCandidates(_ value: Bool) { candidateFailure = value }
     func configure(unknown: Bool = false, found: Bool = false, delayedLoad: Bool = false) { self.unknown = unknown; self.found = found; self.delayedLoad = delayedLoad }
     func changeConfiguration(_ value: Bool) { changedConfig = value }
     func loadForm(_ kind: CampusFormKind) async throws -> CampusFormConfiguration {
@@ -12,6 +14,8 @@ actor FormModelServer: CampusFormServing {
         return c
     }
     func approvers(type: String, days: Double) async throws -> CampusApprovers {
+        candidateReads += 1
+        if candidateFailure { throw CampusError.authentication }
         if type == "slow" { try? await Task.sleep(for: .milliseconds(100)) }
         return .init(roleID: type, roleName: "审批", users: [.init(id:type+"-teacher",name:"示例审批人")])
     }
@@ -38,8 +42,14 @@ final class FormEpoch: @unchecked Sendable {
         let model = CampusFormModel(kind:.leave, account:"fixture-account", api:api, currentGeneration:{epoch.current()})
         await model.load()
         check(model.configuration != nil && model.draft.contactPhone == "18000000001", "form publishes minimal prefill after account verification")
-        model.update { $0.typeID = "sick"; $0.leaving = false; $0.reason = "示例事由" }
         await model.refreshApprovers()
+        check(await api.candidateReads == 0 && model.approvers == nil, "an unselected type cannot issue a candidate request")
+        model.update { $0.typeID = "sick"; $0.leaving = false; $0.reason = "示例事由" }
+        await api.failCandidates(true); await model.refreshApprovers()
+        check(model.approvers == nil && model.error != nil, "candidate request failures retain a safe retryable error")
+        await api.failCandidates(false)
+        await model.refreshApprovers()
+        check(model.error == nil, "successful candidate retry clears the previous failure message")
         check(model.draft.approverID == "sick-teacher", "only eligible unique approver is auto-selected")
         model.prepareConfirmation(); let first = model.confirmation!
         model.update { $0.reason = "新事由" }
