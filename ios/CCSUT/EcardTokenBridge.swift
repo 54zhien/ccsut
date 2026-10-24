@@ -37,8 +37,11 @@ final class EcardTokenBridge: NSObject {
 
     /// 请求代数：每次新请求自增，用于丢弃迟到回调
     private var generation = 0
-    /// 本次导航所属的代数：导航回调只对同代请求生效
-    private var navigationGeneration = 0
+    // Keep each navigation's owner, including retired navigations: a late error
+    // must never be relabelled with the current request's generation.
+    private var navigationGenerations: [WKNavigation: Int] = [:]
+    private var currentNavigation: WKNavigation?
+    private var requestCacheRevision = 0
 
     private var continuation: CheckedContinuation<String, Error>?
     private var timeoutTask: Task<Void, Never>?
@@ -46,14 +49,15 @@ final class EcardTokenBridge: NSObject {
 
     init(feeitemID: String = EcardClient.electricityFeeItemID,
          timeout: TimeInterval = 120,
-         dataStore: WKWebsiteDataStore = .default()) {
+         dataStore: WKWebsiteDataStore = .default(),
+         webView: WKWebView? = nil) {
         self.feeitemID = feeitemID
         self.timeout = timeout
 
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = dataStore
 
-        let wv = WKWebView(frame: .zero, configuration: cfg)
+        let wv = webView ?? WKWebView(frame: .zero, configuration: cfg)
         wv.allowsBackForwardNavigationGestures = false
         self.webView = wv
         super.init()
@@ -65,6 +69,7 @@ final class EcardTokenBridge: NSObject {
     /// 加载 + 等 token
     /// - Parameter account: 当前登录学号。传了就只在同学号缓存上复用；传 nil 不复用缓存。
     func fetchToken(forAccount account: String?) async throws -> String {
+        guard !Task.isCancelled else { throw EcardError.canceled }
         if let cached = Self.cachedToken(forAccount: account) { return cached }
         return try await startRequest(account: account)
     }
@@ -78,6 +83,7 @@ final class EcardTokenBridge: NSObject {
     }
 
     private static var cache: CacheEntry?
+    private static var cacheRevision = 0
 
     static func cachedToken(forAccount account: String?) -> String? {
         guard let entry = cache else { return nil }
@@ -91,7 +97,10 @@ final class EcardTokenBridge: NSObject {
         return entry.token
     }
 
-    static func clearCachedToken() { cache = nil }
+    static func clearCachedToken() {
+        cache = nil
+        cacheRevision &+= 1
+    }
 
     /// 只有「结构合法 + 未过期」才入缓存
     private static func store(token: String) {
@@ -109,19 +118,18 @@ final class EcardTokenBridge: NSObject {
             timeoutTask?.cancel()
             old.resume(throwing: EcardError.canceled)
         }
+        webView.stopLoading()
 
         generation &+= 1
         let myGeneration = generation
         pendingAccount = account
-
-        // 导航与本次请求绑定
-        navigationGeneration = myGeneration
-        refresh()
+        requestCacheRevision = Self.cacheRevision
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { cont in
                 self.continuation = cont
                 self.startTimeout(generation: myGeneration)
+                self.refresh(generation: myGeneration)
             }
         } onCancel: {
             Task { @MainActor [weak self] in
@@ -131,20 +139,18 @@ final class EcardTokenBridge: NSObject {
         }
     }
 
-    private func refresh() {
+    private func refresh(generation: Int) {
         let url = URL(string:
             "https://ecard.ccsut.cn/charge/feeitem/toAppitem?feeitemid=\(feeitemID)")!
-        webView.load(URLRequest(url: url))
+        if let navigation = webView.load(URLRequest(url: url)) {
+            navigationGenerations[navigation] = generation
+            currentNavigation = navigation
+        }
     }
 
     private func cancel(generation gen: Int) {
-        guard gen == generation, let cont = continuation else { return }
-        continuation = nil
-        timeoutTask?.cancel()
-        timeoutTask = nil
-        // 让这一代之后的所有回调失效
-        generation &+= 1
-        cont.resume(throwing: EcardError.canceled)
+        guard gen == generation, continuation != nil else { return }
+        finish(.failure(EcardError.canceled), generation: gen)
     }
 
     private func finish(_ result: Result<String, Error>, generation gen: Int) {
@@ -152,6 +158,13 @@ final class EcardTokenBridge: NSObject {
         continuation = nil
         timeoutTask?.cancel()
         timeoutTask = nil
+        generation &+= 1
+        webView.stopLoading()
+
+        guard requestCacheRevision == Self.cacheRevision else {
+            cont.resume(throwing: EcardError.canceled)
+            return
+        }
 
         switch result {
         case .success(let token):
@@ -175,11 +188,7 @@ final class EcardTokenBridge: NSObject {
 
     /// 只认缴费网关这一条路径，且 JWT 未过期
     private func token(from url: URL?, account: String?) -> String? {
-        guard let url,
-              url.scheme?.lowercased() == "https",
-              url.host?.lowercased() == "ecard.ccsut.cn",
-              url.path.hasPrefix("/charge-app")
-        else { return nil }
+        guard Self.isPaymentPage(url), let url else { return nil }
 
         guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let raw = comps.queryItems?.first(where: { $0.name == "token" })?.value,
@@ -187,6 +196,13 @@ final class EcardTokenBridge: NSObject {
         else { return nil }
 
         return validate(raw, account: account)
+    }
+
+    private static func isPaymentPage(_ url: URL?) -> Bool {
+        guard let url, url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "ecard.ccsut.cn",
+              url.port == nil || url.port == 443 else { return false }
+        return url.path == "/charge-app" || url.path.hasPrefix("/charge-app/")
     }
 
     /// 结构 + 过期 + 账号一致性
@@ -204,44 +220,51 @@ final class EcardTokenBridge: NSObject {
 
 extension EcardTokenBridge: WKNavigationDelegate {
 
-    nonisolated func webView(_ webView: WKWebView,
+    func webView(_ webView: WKWebView,
                              decidePolicyFor navigationAction: WKNavigationAction,
                              decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        decisionHandler(.allow)
-
         let url = navigationAction.request.url
-        Task { @MainActor [weak self] in
-            guard let self, self.navigationGeneration == self.generation else { return }
-            guard let token = self.token(from: url, account: self.pendingAccount) else { return }
-            self.finish(.success(token), generation: self.generation)
-            webView.stopLoading()
+        if continuation != nil,
+           let token = token(from: url, account: pendingAccount) {
+            decisionHandler(.cancel)
+            finish(.success(token), generation: generation)
+        } else {
+            decisionHandler(.allow)
         }
     }
 
-    nonisolated func webView(_ webView: WKWebView,
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard let navigation, continuation != nil else { return }
+        if navigationGenerations[navigation] == nil {
+            navigationGenerations[navigation] = generation
+        }
+        if navigationGenerations[navigation] == generation { currentNavigation = navigation }
+    }
+
+    func webView(_ webView: WKWebView,
                              didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
-        let url = webView.url
-        Task { @MainActor [weak self] in
-            guard let self, self.navigationGeneration == self.generation else { return }
-            guard let token = self.token(from: url, account: self.pendingAccount) else { return }
-            self.finish(.success(token), generation: self.generation)
-            webView.stopLoading()
-        }
+        guard let navigation, navigationGenerations[navigation] == generation,
+              let token = token(from: webView.url, account: pendingAccount) else { return }
+        finish(.success(token), generation: generation)
     }
 
-    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard let navigation, navigationGenerations[navigation] == generation,
+              currentNavigation === navigation, continuation != nil else { return }
+        let gen = generation
+        let account = pendingAccount
         let pageURL = webView.url
         Task { @MainActor [weak self] in
-            guard let self, self.navigationGeneration == self.generation,
+            guard let self, gen == self.generation,
                   self.continuation != nil else { return }
 
-            if let token = self.token(from: pageURL, account: self.pendingAccount) {
-                self.finish(.success(token), generation: self.generation)
+            if let token = self.token(from: pageURL, account: account) {
+                self.finish(.success(token), generation: gen)
                 return
             }
 
             // 兜底只读固定键，且必须确认还在缴费域名下
-            guard let pageURL, pageURL.host?.lowercased() == "ecard.ccsut.cn" else { return }
+            guard Self.isPaymentPage(pageURL), webView.url == pageURL else { return }
 
             let js = """
             (function () {
@@ -254,25 +277,26 @@ extension EcardTokenBridge: WKNavigationDelegate {
             })();
             """
             guard let value = try? await webView.evaluateJavaScript(js),
+                  gen == self.generation, self.currentNavigation === navigation,
+                  webView.url == pageURL,
                   let raw = value as? String,
-                  let token = self.validate(raw, account: self.pendingAccount)
+                  let token = self.validate(raw, account: account)
             else { return }
 
-            self.finish(.success(token), generation: self.generation)
+            self.finish(.success(token), generation: gen)
         }
     }
 
-    nonisolated func webView(_ webView: WKWebView,
+    func webView(_ webView: WKWebView,
                              didFailProvisionalNavigation navigation: WKNavigation!,
                              withError error: Error) {
-        let code = (error as NSError).code
-        let message = error.localizedDescription
-        Task { @MainActor [weak self] in
-            guard let self, code != NSURLErrorCancelled else { return }
-            // 用导航所属的代数：旧导航的错误不能落到新请求上
-            self.finish(.failure(EcardError.transport(message)),
-                        generation: self.navigationGeneration)
-        }
+        guard let navigation, let gen = navigationGenerations[navigation],
+              (error as NSError).code != NSURLErrorCancelled else { return }
+        finish(.failure(EcardError.transport(error.localizedDescription)), generation: gen)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        self.webView(webView, didFailProvisionalNavigation: navigation, withError: error)
     }
 }
 
