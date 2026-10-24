@@ -1,158 +1,71 @@
-//
-//  ScheduleDetailSheet.swift
-//  CCSUT
-//
-//  课表详情
-//
-//  点课表格子里的课程块弹出，展示任课教师、上课地点、
-//  星期节次和上课周次。数据全部来自 sdpkkbList。
-//
-
 import SwiftUI
 
 struct ScheduleDetailSheet: View {
     let slot: ScheduleSlot
-
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            SheetHeader(title: "课程详情") { dismiss() }
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    header
+                VStack(spacing: 24) {
+                    VStack(spacing: 8) {
+                        Text(slot.course)
+                            .font(.title2.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
+                        Text("\(weekdayName) · 第 \(slot.startPeriod)–\(slot.endPeriod) 节")
+                            .font(.subheadline)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 8)
 
-                    block(
-                        symbol: "person.fill",
-                        title: "任课教师",
-                        primary: slot.teacher.isEmpty ? "未标注" : slot.teacher,
-                        tint: .blue
-                    )
-
-                    block(
-                        symbol: "mappin.and.ellipse",
-                        title: "上课地点",
-                        primary: slot.room.isEmpty ? "未标注" : slot.room,
-                        tint: .orange
-                    )
-
-                    block(
-                        symbol: "clock.fill",
-                        title: "上课时间",
-                        primary: "\(weekdayName(slot.weekday)) 第 \(slot.startPeriod)-\(slot.endPeriod) 节",
-                        secondary: weekDescription,
-                        tint: .purple
-                    )
-
-                    Spacer(minLength: 8)
+                    VStack(spacing: 0) {
+                        information("person", label: "任课教师", value: slot.teacher.isEmpty ? "未标注" : slot.teacher)
+                        Divider().padding(.leading, 28)
+                        information("mappin", label: "上课地点", value: slot.room.isEmpty ? "未标注" : slot.room)
+                        Divider().padding(.leading, 28)
+                        information("clock", label: "上课时间", value: clockRange ?? "未标注")
+                        Divider().padding(.leading, 28)
+                        information("calendar", label: "上课周次",
+                                    value: slot.weeks.isEmpty ? "未标注" : "第 \(WeekParser.compress(slot.weeks.sorted())) 周")
+                    }
                 }
-                .padding(20)
+                .textSelection(.enabled)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("课程详情")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                }
-            }
+            .scrollBounceBehavior(.basedOnSize)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .ignoresSafeArea(.container, edges: .top)
     }
 
-    // MARK: 头部
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(slot.course)
-                .font(.title3.weight(.semibold))
+    private func information(_ symbol: String, label: String, value: String) -> some View {
+        LabeledContent {
+            Text(value)
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
                 .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 8) {
-                chip("第 \(slot.startPeriod)-\(slot.endPeriod) 节", tint: .accentColor)
-                chip(weekdayName(slot.weekday), tint: .secondary)
-                if slot.weeks.count < 20 {
-                    chip("\(slot.weeks.count) 周", tint: .secondary)
-                }
-            }
+        } label: {
+            Label(label, systemImage: symbol)
+                .foregroundStyle(.secondary)
         }
+        .font(.subheadline)
+        .padding(.vertical, 12)
     }
 
-    private func chip(_ text: String, tint: Color) -> some View {
-        Text(text)
-            .font(.caption2.weight(.medium))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(tint.opacity(0.12), in: .capsule)
-            .foregroundStyle(tint)
+    private var weekdayName: String {
+        let days = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+        return days.indices.contains(slot.weekday - 1) ? days[slot.weekday - 1] : "时间待定"
     }
 
-    // MARK: 信息块
-
-    private func block(symbol: String,
-                       title: String,
-                       primary: String,
-                       secondary: String? = nil,
-                       tint: Color) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(tint.opacity(0.14))
-                    .frame(width: 38, height: 38)
-                Image(systemName: symbol)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(tint)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(primary)
-                    .font(.body.weight(.medium))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if let secondary, !secondary.isEmpty {
-                    Text(secondary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
-    }
-
-    // MARK: 文案
-
-    private func weekdayName(_ d: Int) -> String {
-        let names = ["", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-        return names.indices.contains(d) ? names[d] : "第 \(d) 天"
-    }
-
-    /// 把 [1,2,3,6,7,8] 压成 "第 1-3、6-8 周"
-    private var weekDescription: String {
-        guard !slot.weeks.isEmpty else { return "" }
-        let sorted = slot.weeks.sorted()
-        var ranges: [(Int, Int)] = []
-        var start = sorted[0]
-        var prev = sorted[0]
-
-        for w in sorted.dropFirst() {
-            if w == prev + 1 {
-                prev = w
-            } else {
-                ranges.append((start, prev))
-                start = w
-                prev = w
-            }
-        }
-        ranges.append((start, prev))
-
-        let parts = ranges.map { $0.0 == $0.1 ? "\($0.0)" : "\($0.0)-\($0.1)" }
-        return "第 " + parts.joined(separator: "、") + " 周"
+    private var clockRange: String? {
+        guard slot.startPeriod % 2 == 1, slot.endPeriod == slot.startPeriod + 1 else { return nil }
+        let ranges = ["8:20–10:00", "10:20–12:00", "14:00–15:40", "16:00–17:40"]
+        let index = (slot.startPeriod - 1) / 2
+        return ranges.indices.contains(index) ? ranges[index] : nil
     }
 }

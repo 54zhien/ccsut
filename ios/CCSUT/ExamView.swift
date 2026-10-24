@@ -17,8 +17,10 @@ struct ExamView: View {
 
     @State private var items: [ExamItem] = []
     @State private var isLoading = false
+    @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
     @State private var loadedTerms: Set<String> = []
+    @State private var termHeaderTracker = AcademicTermHeaderTracker()
 
     /// 从新到旧的学期列表
     private static let terms = [
@@ -30,82 +32,73 @@ struct ExamView: View {
     ]
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading && items.isEmpty {
-                    ProgressView("加载考试安排…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorText, items.isEmpty {
-                    ContentUnavailableView {
-                        Label("加载失败", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(errorText)
-                    } actions: {
-                        Button("重试") { Task { await load(force: true) } }
-                    }
-                } else if items.isEmpty {
-                    ContentUnavailableView {
-                        Label("暂无考试安排", systemImage: "calendar.badge.clock")
-                    } description: {
-                        Text("这个学期的考试还没排出来。")
-                    } actions: {
-                        Button("刷新") { Task { await load(force: true) } }
-                    }
-                } else {
-                    content
-                }
-            }
-            .navigationTitle("考试")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await load(force: true) }
-                    } label: {
-                        if isLoading {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
+        GeometryReader { viewport in
+            ScrollView {
+                VStack(spacing: 0) {
+                    if isLoading && items.isEmpty {
+                        ProgressView("加载考试安排…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if errorText != nil, items.isEmpty {
+                        ContentUnavailableView {
+                            Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
+                        } description: {
+                            EmptyView()
+                        } actions: {
+                            Button("重试") { Task { await load(force: true) } }
                         }
+                    } else if items.isEmpty {
+                        ContentUnavailableView {
+                            Label("暂无考试安排", systemImage: "calendar.badge.clock")
+                        } description: {
+                            Text("这个学期的考试还没排出来。")
+                        }
+                    } else {
+                        content
                     }
-                    .disabled(isLoading)
                 }
+                .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
+                .pageRefreshControl(showsRefreshCount: true) { await load(force: true) }
             }
-            .refreshable { await load(force: true) }
-            .task { if items.isEmpty { await load() } }
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            .coordinateSpace(name: "academic-scroll")
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+        .academicDetailChrome(title: "考试")
+        .task { if items.isEmpty { await load() } }
     }
 
     // MARK: 内容
 
     private var content: some View {
-        ScrollView {
-            LazyVStack(spacing: 14, pinnedViews: [.sectionHeaders]) {
-                if let next = upcoming.first {
-                    nextCard(next)
-                }
+        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+            if let next = upcoming.first {
+                nextCard(next).padding(.bottom, 12)
+            }
 
-                ForEach(terms, id: \.self) { term in
-                    let list = grouped[term] ?? []
-                    if !list.isEmpty {
-                        Section {
-                            VStack(spacing: 0) {
-                                ForEach(Array(list.enumerated()), id: \.element.id) { idx, exam in
-                                    ExamRow(exam: exam, showTerm: false)
-                                    if idx < list.count - 1 {
-                                        Divider().padding(.leading, 16)
-                                    }
+            ForEach(terms, id: \.self) { term in
+                let list = grouped[term] ?? []
+                if !list.isEmpty {
+                    Section {
+                        VStack(spacing: 0) {
+                            ForEach(Array(list.enumerated()), id: \.element.id) { idx, exam in
+                                ExamRow(exam: exam, showTerm: false)
+                                if idx < list.count - 1 {
+                                    Divider().padding(.leading, 16)
                                 }
                             }
-                            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
-                            .padding(.horizontal, 16)
-                        } header: {
-                            termHeader(term, count: list.count)
                         }
+                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 16)
+                    } header: {
+                        termHeader(term, count: list.count)
                     }
                 }
             }
-            .padding(.vertical, 12)
         }
+        .padding(.vertical, 12)
     }
 
     /// 即将开始的那场（未来 60 天内最近的一场）
@@ -121,7 +114,7 @@ struct ExamView: View {
     }
 
     private var grouped: [String: [ExamItem]] {
-        Dictionary(grouping: items) { $0.dataXnxq ?? "未知学期" }
+        Dictionary(grouping: items) { $0.term ?? $0.dataXnxq ?? "未知学期" }
     }
 
     private var terms: [String] {
@@ -138,64 +131,57 @@ struct ExamView: View {
             HStack {
                 Label("即将开始", systemImage: "alarm.fill")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(Color("AccentForeground").opacity(0.9))
                 Spacer()
                 if let d = exam.startDate {
                     Text(d, format: .relative(presentation: .named))
+                        .environment(\.locale, Locale(identifier: "zh_CN"))
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(Color("AccentForeground").opacity(0.85))
                 }
             }
 
             Text(exam.kcmc ?? "—")
                 .font(.title3.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color("AccentForeground"))
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
                 Label(timeText(exam), systemImage: "clock.fill")
                 if !exam.location.isEmpty {
                     Label(exam.location, systemImage: "mappin.and.ellipse")
                 }
             }
             .font(.caption)
-            .foregroundStyle(.white.opacity(0.92))
+            .foregroundStyle(Color("AccentForeground").opacity(0.92))
 
             if let seat = exam.zwh, !seat.isEmpty, seat != "0" {
                 Text("座位 \(seat)")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 9)
                     .padding(.vertical, 3)
-                    .background(.white.opacity(0.22), in: .capsule)
-                    .foregroundStyle(.white)
+                    .background(Color("AccentForeground").opacity(0.12), in: .capsule)
+                    .foregroundStyle(Color("AccentForeground"))
             }
         }
-        .padding(16)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [Color(red: 0.16, green: 0.42, blue: 0.92),
-                         Color(red: 0.36, green: 0.62, blue: 0.98)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: .rect(cornerRadius: 18)
-        )
+        .background(Color.accentColor, in: .rect(cornerRadius: 28))
         .padding(.horizontal, 16)
     }
 
     private func termHeader(_ term: String, count: Int) -> some View {
-        HStack {
-            Text(term)
-                .font(.subheadline.weight(.semibold))
-            Spacer()
-            Text("\(count) 场")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+        AcademicTermStrip(term: term, tracker: termHeaderTracker) {
+            HStack {
+                Text(SchedulePresentation.termTitle(term))
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Text("\(count) 场")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(.bar)
     }
 
     private func timeText(_ exam: ExamItem) -> String {
@@ -218,6 +204,20 @@ struct ExamView: View {
     // MARK: 加载
 
     private func load(force: Bool = false) async {
+        await loadGate.run { await fetch(force: force) }
+    }
+
+    private func fetch(force: Bool) async {
+        #if DEBUG
+        if InterfacePreview.enabled {
+            isLoading = true
+            defer { isLoading = false }
+            try? await Task.sleep(for: .milliseconds(250))
+            items = InterfacePreview.emptyPage ? [] : InterfacePreview.exams
+            return
+        }
+        #endif
+
         guard !isLoading else { return }
         if !force, !items.isEmpty { return }
 
@@ -230,7 +230,10 @@ struct ExamView: View {
 
         for term in Self.terms {
             do {
-                let list = try await APIClient.shared.examList(xnxq: term)
+                var list = try await APIClient.shared.examList(xnxq: term)
+                // 服务端的 dataXnxq 恒为当前学期，不能用来分组。
+                // 每条记录真正属于哪个学期，只有发起请求的人知道。
+                for i in list.indices { list[i].term = term }
                 collected.append(contentsOf: list)
             } catch let e as APIError {
                 if case .notLoggedIn = e {
@@ -309,8 +312,8 @@ private struct ExamRow: View {
                             .font(.caption2.weight(.medium))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(.blue.opacity(0.12), in: .capsule)
-                            .foregroundStyle(.blue)
+                            .background(Color.accentColor.opacity(0.12), in: .capsule)
+                            .foregroundStyle(Color.accentColor)
                     }
                     if exam.isMakeup {
                         Text("补缓考")

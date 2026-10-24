@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A00000000000000000000020 /* TopBarBlurProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000020; };
+		A00000000000000000000021 /* TopBarMaterialBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000021; };
+		A0000000000000000000001F /* AcademicNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001F; };
+		A0000000000000000000001E /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001E /* AppIcon.icon */; };
 		A0000000000000000000000A /* CCSUTApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000A /* CCSUTApp.swift */; };
 		A0000000000000000000000B /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000B /* Session.swift */; };
 		A0000000000000000000000C /* API.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000C /* API.swift */; };
@@ -21,9 +25,32 @@
 		A00000000000000000000015 /* CourseDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* CourseDetailSheet.swift */; };
 		A00000000000000000000016 /* ScheduleDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000017 /* ScheduleDetailSheet.swift */; };
 		A00000000000000000000017 /* ExamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000018 /* ExamView.swift */; };
+		A00000000000000000000019 /* AcademicView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000019 /* AcademicView.swift */; };
+		A0000000000000000000001A /* InterfacePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001A /* InterfacePreview.swift */; };
+		A0000000000000000000001B /* SchedulePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001B /* SchedulePresentation.swift */; };
+		A0000000000000000000001C /* NagiPageChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001C /* NagiPageChrome.swift */; };
+
+900000000000000000000001 = {isa = PBXBuildFile; fileRef = 900000000000000000000002; };
+900000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/PageInteractionUITests.swift; sourceTree = "<group>"; };
+900000000000000000000003 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = CCSUTUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+900000000000000000000004 = {isa = PBXNativeTarget; buildConfigurationList = 90000000000000000000000A; buildPhases = (900000000000000000000005,900000000000000000000006,900000000000000000000007,); buildRules = (); dependencies = (90000000000000000000000C,); name = CCSUTUITests; productName = CCSUTUITests; productReference = 900000000000000000000003; productType = "com.apple.product-type.bundle.ui-testing"; };
+900000000000000000000005 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (900000000000000000000001,); runOnlyForDeploymentPostprocessing = 0; };
+900000000000000000000006 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+900000000000000000000007 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+90000000000000000000000A = {isa = XCConfigurationList; buildConfigurations = (900000000000000000000008,900000000000000000000009,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+90000000000000000000000B = {isa = PBXContainerItemProxy; containerPortal = D00000000000000000000002; proxyType = 1; remoteGlobalIDString = D00000000000000000000001; remoteInfo = CCSUT; };
+90000000000000000000000C = {isa = PBXTargetDependency; target = D00000000000000000000001; targetProxy = 90000000000000000000000B; };
+900000000000000000000008 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.imzhien.ccsut.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = CCSUT; CODE_SIGNING_ALLOWED = NO; }; name = Debug; };
+900000000000000000000009 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.imzhien.ccsut.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = CCSUT; CODE_SIGNING_ALLOWED = NO; }; name = Release; };
+
+		A0000000000000000000001D /* PageSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001D; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B00000000000000000000020 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopBarBlurProfile.swift; sourceTree = "<group>"; };
+		B00000000000000000000021 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopBarMaterialBackground.swift; sourceTree = "<group>"; };
+		B0000000000000000000001F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcademicNavigation.swift; sourceTree = "<group>"; };
+		B0000000000000000000001E /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		B0000000000000000000000A /* CCSUTApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCSUTApp.swift; sourceTree = "<group>"; };
 		B0000000000000000000000B /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		B0000000000000000000000C /* API.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = API.swift; sourceTree = "<group>"; };
@@ -39,6 +66,11 @@
 		B00000000000000000000016 /* CourseDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourseDetailSheet.swift; sourceTree = "<group>"; };
 		B00000000000000000000017 /* ScheduleDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleDetailSheet.swift; sourceTree = "<group>"; };
 		B00000000000000000000018 /* ExamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExamView.swift; sourceTree = "<group>"; };
+		B00000000000000000000019 /* AcademicView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcademicView.swift; sourceTree = "<group>"; };
+		B0000000000000000000001A /* InterfacePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterfacePreview.swift; sourceTree = "<group>"; };
+		B0000000000000000000001B /* SchedulePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulePresentation.swift; sourceTree = "<group>"; };
+		B0000000000000000000001C /* NagiPageChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NagiPageChrome.swift; sourceTree = "<group>"; };
+		B0000000000000000000001D /* PageSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageSurface.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -56,6 +88,7 @@
 			isa = PBXGroup;
 			children = (
 				C00000000000000000000002 /* CCSUT */,
+                900000000000000000000002,
 				C00000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -76,7 +109,16 @@
 				B00000000000000000000016 /* CourseDetailSheet.swift */,
 				B00000000000000000000017 /* ScheduleDetailSheet.swift */,
 				B00000000000000000000018 /* ExamView.swift */,
+				B0000000000000000000001B /* SchedulePresentation.swift */,
+				B0000000000000000000001A /* InterfacePreview.swift */,
+				B00000000000000000000019 /* AcademicView.swift */,
+				B0000000000000000000001C /* NagiPageChrome.swift */,
+				B00000000000000000000020 /* TopBarBlurProfile.swift */,
+				B00000000000000000000021 /* TopBarMaterialBackground.swift */,
+                B0000000000000000000001D /* PageSurface.swift */,
 				B00000000000000000000011 /* Assets.xcassets */,
+				B0000000000000000000001E /* AppIcon.icon */,
+				B0000000000000000000001F /* AcademicNavigation.swift */,
 			);
 			path = CCSUT;
 			sourceTree = "<group>";
@@ -85,6 +127,7 @@
 			isa = PBXGroup;
 			children = (
 				B00000000000000000000012 /* CCSUT.app */,
+                900000000000000000000003,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -139,6 +182,7 @@
 			projectRoot = "";
 			targets = (
 				D00000000000000000000001 /* CCSUT */,
+                900000000000000000000004,
 			);
 		};
 /* End PBXProject section */
@@ -149,6 +193,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00000000000000000000011 /* Assets.xcassets in Resources */,
+				A0000000000000000000001E /* AppIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -159,6 +204,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A0000000000000000000001F /* AcademicNavigation.swift in Sources */,
 				A0000000000000000000000A /* CCSUTApp.swift in Sources */,
 				A0000000000000000000000B /* Session.swift in Sources */,
 				A0000000000000000000000C /* API.swift in Sources */,
@@ -172,6 +218,13 @@
 				A00000000000000000000015 /* CourseDetailSheet.swift in Sources */,
 				A00000000000000000000016 /* ScheduleDetailSheet.swift in Sources */,
 				A00000000000000000000017 /* ExamView.swift in Sources */,
+				A0000000000000000000001B /* SchedulePresentation.swift in Sources */,
+				A0000000000000000000001A /* InterfacePreview.swift in Sources */,
+				A00000000000000000000019 /* AcademicView.swift in Sources */,
+				A0000000000000000000001C /* NagiPageChrome.swift in Sources */,
+				A00000000000000000000020 /* TopBarBlurProfile.swift in Sources */,
+				A00000000000000000000021 /* TopBarMaterialBackground.swift in Sources */,
+                A0000000000000000000001D /* PageSurface.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -237,6 +290,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CCSUT/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "\U957f\U5de5\U6559\U52a1";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -267,6 +321,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CCSUT/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "\U957f\U5de5\U6559\U52a1";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

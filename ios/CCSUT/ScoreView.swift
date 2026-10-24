@@ -18,52 +18,46 @@ struct ScoreView: View {
 
     @State private var items: [ScoreItem] = []
     @State private var isLoading = false
+    @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
     @State private var selectedTerm: String?
+    @State private var termHeaderTracker = AcademicTermHeaderTracker()
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading && items.isEmpty {
-                    ProgressView("加载成绩…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorText, items.isEmpty {
-                    ContentUnavailableView {
-                        Label("加载失败", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(errorText)
-                    } actions: {
-                        Button("重试") { Task { await load(force: true) } }
-                    }
-                } else if items.isEmpty {
-                    ContentUnavailableView {
-                        Label("暂无成绩", systemImage: "doc.text.magnifyingglass")
-                    } description: {
-                        Text("这学期还没出成绩，或者还没完成评教。")
-                    }
-                } else {
-                    content
-                }
-            }
-            .navigationTitle("成绩单")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await load(force: true) }
-                    } label: {
-                        if isLoading {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
+        GeometryReader { viewport in
+            ScrollView {
+                VStack(spacing: 0) {
+                    if isLoading && items.isEmpty {
+                        ProgressView("加载成绩…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if errorText != nil, items.isEmpty {
+                        ContentUnavailableView {
+                            Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
+                        } description: {
+                            EmptyView()
+                        } actions: {
+                            Button("重试") { Task { await load(force: true) } }
                         }
+                    } else if items.isEmpty {
+                        ContentUnavailableView {
+                            Label("暂无成绩", systemImage: "doc.text.magnifyingglass")
+                        } description: {
+                            Text("这学期还没出成绩，或者还没完成评教。")
+                        }
+                    } else {
+                        content
                     }
-                    .disabled(isLoading)
                 }
+                .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
+                .pageRefreshControl(showsRefreshCount: true) { await load(force: true) }
             }
-            .refreshable { await load(force: true) }
-            .task { if items.isEmpty { await load() } }
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            .coordinateSpace(name: "academic-scroll")
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+        .academicDetailChrome(title: "成绩单")
+        .task { if items.isEmpty { await load() } }
     }
 
     // MARK: - 内容
@@ -86,43 +80,46 @@ struct ScoreView: View {
     }
 
     private var content: some View {
-        ScrollView {
-            LazyVStack(spacing: 14, pinnedViews: [.sectionHeaders]) {
-                summaryCard
+        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+            summaryCard.padding(.bottom, 12)
 
-                ForEach(terms) { term in
-                    Section {
-                        VStack(spacing: 0) {
-                            ForEach(Array(term.items.enumerated()), id: \.element.id) { idx, item in
-                                ScoreRow(item: item)
-                                if idx < term.items.count - 1 {
-                                    Divider().padding(.leading, 16)
-                                }
+            ForEach(terms) { term in
+                Section {
+                    VStack(spacing: 0) {
+                        ForEach(Array(term.items.enumerated()), id: \.element.id) { idx, item in
+                            ScoreRow(item: item)
+                            if idx < term.items.count - 1 {
+                                Divider().padding(.leading, 16)
                             }
                         }
-                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
-                        .padding(.horizontal, 16)
-                    } header: {
-                        termHeader(term)
                     }
+                    .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 16)
+                } header: {
+                    termHeader(term)
                 }
             }
-            .padding(.vertical, 12)
         }
+        .padding(.vertical, 12)
     }
 
     private var summaryCard: some View {
-        VStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("学业概览", systemImage: "chart.bar.doc.horizontal")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
             HStack(spacing: 0) {
-                statBlock(value: String(format: "%.2f", overallGPA), label: "加权绩点", tint: .blue)
+                statBlock(value: String(format: "%.2f", overallGPA), label: "加权绩点", tint: .accentColor)
                 Divider().frame(height: 34)
-                statBlock(value: String(format: "%.1f", overallCredits), label: "总学分", tint: .green)
+                statBlock(value: String(format: "%.1f", overallCredits), label: "总学分", tint: .accentColor)
                 Divider().frame(height: 34)
-                statBlock(value: "\(items.count)", label: "门课程", tint: .orange)
+                statBlock(value: "\(items.count)", label: "门课程", tint: .accentColor)
             }
         }
-        .padding(18)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
+        .padding(20)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
         .padding(.horizontal, 16)
     }
 
@@ -139,33 +136,47 @@ struct ScoreView: View {
     }
 
     private func termHeader(_ term: ScoreTerm) -> some View {
-        HStack {
-            Text(term.name)
-                .font(.subheadline.weight(.semibold))
-            Spacer()
-            if term.failedCount > 0 {
-                Text("\(term.failedCount) 挂")
-                    .font(.caption2.weight(.bold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.red.opacity(0.15), in: .capsule)
-                    .foregroundStyle(.red)
+        AcademicTermStrip(term: term.name, tracker: termHeaderTracker) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(SchedulePresentation.termTitle(term.name))
+                        .font(.subheadline.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    if term.failedCount > 0 {
+                        Text("\(term.failedCount) 门未通过")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.red)
+                    }
+                }
+                HStack(spacing: 12) {
+                    Text(String(format: "GPA %.2f", term.gpa))
+                    Text("\(String(format: "%.1f", term.credits)) 学分")
+                    Text("\(term.items.count) 门课程")
+                }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
-            Text(String(format: "GPA %.2f", term.gpa))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            Text("· \(String(format: "%.1f", term.credits)) 学分")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(.bar)
     }
 
     // MARK: - 加载
 
     private func load(force: Bool = false) async {
+        await loadGate.run { await fetch(force: force) }
+    }
+
+    private func fetch(force: Bool) async {
+        #if DEBUG
+        if InterfacePreview.enabled {
+            isLoading = true
+            defer { isLoading = false }
+            try? await Task.sleep(for: .milliseconds(250))
+            items = InterfacePreview.emptyPage ? [] : InterfacePreview.scores
+            return
+        }
+        #endif
+
         guard !isLoading else { return }
         if !force, !items.isEmpty { return }
 

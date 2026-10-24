@@ -25,3 +25,10 @@ jobs:
       - name: Run embedded login script regressions
         if: always()
         run: node --test ios/Tests/login-script.test.mjs
+      - name: Run timetable presentation regressions
+        if: always()
+        run: |
+          xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
+          "$RUNNER_TEMP/schedule-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/InterfacePreview.swift ios/Tests/ReleasePreviewTests.swift -o "$RUNNER_TEMP/release-preview-tests"
+          "$RUNNER_TEMP/release-preview-tests" --preview-ui --preview-page academic

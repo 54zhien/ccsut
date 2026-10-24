@@ -1,0 +1,348 @@
+import SwiftUI
+import UIKit
+import Observation
+
+enum AppMessages {
+    static let loadFailure = "加载失败，请重试"
+
+    static func readable(_ message: String) -> String {
+        message.range(of: "[A-Za-z]", options: .regularExpression) == nil ? message : loadFailure
+    }
+}
+
+enum SheetLayout {
+    static func cornerRadius(_ deviceRadius: CGFloat) -> CGFloat {
+        deviceRadius > 0 ? deviceRadius : 32
+    }
+
+    // The circle and the sheet corner share a center: inset + diameter / 2 = radius.
+    static func controlInset(_ deviceRadius: CGFloat, diameter: CGFloat) -> CGFloat {
+        guard diameter > 0 else { return 20 }
+        return max(0, cornerRadius(deviceRadius) - diameter / 2)
+    }
+}
+
+struct SheetSymbolButton: View {
+    let symbol: String
+    let label: String
+    var symbolSize: CGFloat? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            if let symbolSize {
+                // Image bounds, rather than a text baseline, define the center.
+                Image(systemName: symbol)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: symbolSize, height: symbolSize, alignment: .center)
+            } else {
+                Label(label, systemImage: symbol)
+            }
+        }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .controlSize(.large)
+            .fixedSize()
+            .foregroundStyle(.primary)
+            .tint(nil)
+            .accessibilityLabel(label)
+    }
+}
+
+struct SheetHeader: View {
+    @Environment(\.deviceCornerRadius) private var deviceCornerRadius
+    @State private var controlDiameter: CGFloat = 0
+    let title: String
+    let close: () -> Void
+
+    var body: some View {
+        HStack {
+            Spacer()
+            SheetSymbolButton(symbol: "xmark", label: "关闭\(title)", action: close)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlDiameter = $0 }
+        .overlay {
+            Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, controlDiameter + 8)
+                .allowsHitTesting(false)
+        }
+        .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius, diameter: controlDiameter))
+        .padding(.top, SheetLayout.controlInset(deviceCornerRadius, diameter: controlDiameter))
+        .padding(.bottom, 8)
+    }
+}
+
+private struct DeviceCornerRadiusKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    var deviceCornerRadius: CGFloat {
+        get { self[DeviceCornerRadiusKey.self] }
+        set { self[DeviceCornerRadiusKey.self] = newValue }
+    }
+}
+
+extension View {
+    func trackVerticalPageOffset(_ offset: Binding<CGFloat>) -> some View {
+        onScrollGeometryChange(for: CGFloat.self) { geometry in
+            max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
+        } action: { _, value in offset.wrappedValue = value }
+    }
+}
+
+/// Resolve the device/container curvature using public iOS 26 geometry.
+/// This view fills the window, so inset cards and sheets can share its radius.
+struct ScreenCornerReader: UIViewRepresentable {
+    var onChange: (CGFloat) -> Void
+
+    func makeUIView(context: Context) -> CornerView { CornerView(onChange: onChange) }
+    func updateUIView(_ view: CornerView, context: Context) { view.onChange = onChange }
+
+    final class CornerView: UIView {
+        var onChange: (CGFloat) -> Void
+        private var lastRadius: CGFloat?
+
+        init(onChange: @escaping (CGFloat) -> Void) {
+            self.onChange = onChange
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+            backgroundColor = .clear
+            cornerConfiguration = .corners(radius: .containerConcentric())
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func didMoveToWindow() { super.didMoveToWindow(); setNeedsLayout() }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            guard window != nil, bounds.width > 0 else { return }
+            let radius = max(effectiveRadius(corner: .topLeft), effectiveRadius(corner: .bottomLeft),
+                             effectiveRadius(corner: .topRight), effectiveRadius(corner: .bottomRight))
+            guard lastRadius != radius else { return }
+            lastRadius = radius
+            DispatchQueue.main.async { [weak self] in self?.onChange(radius) }
+        }
+    }
+}
+
+/// Join an in-flight initial load instead of ending a pull refresh immediately.
+@MainActor
+final class PageLoadGate {
+    private var pending: Task<Void, Never>?
+
+    func run(_ action: @escaping @MainActor () async -> Void) async {
+        if let pending { await pending.value; return }
+        let task = Task { @MainActor in await action() }
+        pending = task
+        await task.value
+        pending = nil
+    }
+}
+
+extension View {
+    /// Apply to the content INSIDE the vertical ScrollView, so the nearest
+    /// ancestor is the page scroll view, never the week selector or a web view.
+    func pageRefreshControl(showsRefreshCount: Bool = false, action: @escaping @MainActor () async -> Void) -> some View {
+        modifier(PageRefreshContent(showsRefreshCount: showsRefreshCount, action: action))
+    }
+}
+
+private struct PageRefreshContent: ViewModifier {
+    let showsRefreshCount: Bool
+    let action: @MainActor () async -> Void
+    @State private var refreshCount = 0
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                PageRefreshAttachment {
+                    await action()
+                    refreshCount += 1
+                }
+                .allowsHitTesting(false)
+            }
+            .overlay(alignment: .topTrailing) {
+                #if DEBUG
+                if showsRefreshCount && InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh") {
+                    Text("\(refreshCount)").font(.caption2)
+                        .accessibilityIdentifier("academic-refresh-count")
+                        .allowsHitTesting(false)
+                }
+                #endif
+            }
+    }
+}
+
+/// UIKit owns the pull distance, retained loading inset and final return animation.
+/// Keep this attachment outside loading/empty/data branches and end only after await.
+private struct PageRefreshAttachment: UIViewRepresentable {
+    let action: @MainActor () async -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+    func makeUIView(context: Context) -> AnchorView {
+        let view = AnchorView()
+        view.coordinator = context.coordinator
+        view.isUserInteractionEnabled = false
+        return view
+    }
+    func updateUIView(_ view: AnchorView, context: Context) {
+        context.coordinator.action = action
+        view.connect()
+    }
+    static func dismantleUIView(_ view: AnchorView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    final class AnchorView: UIView {
+        weak var coordinator: Coordinator?
+        override func didMoveToWindow() { super.didMoveToWindow(); connect() }
+        override func didMoveToSuperview() { super.didMoveToSuperview(); connect() }
+        override func layoutSubviews() { super.layoutSubviews(); connect() }
+
+        func connect() {
+            guard window != nil else { return }
+            var ancestor = superview
+            while let view = ancestor {
+                if let scrollView = view as? UIScrollView {
+                    coordinator?.attach(to: scrollView)
+                    return
+                }
+                ancestor = view.superview
+            }
+        }
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var action: @MainActor () async -> Void
+        private weak var scrollView: UIScrollView?
+        private let control = UIRefreshControl()
+        private var task: Task<Void, Never>?
+
+        init(action: @escaping @MainActor () async -> Void) {
+            self.action = action
+            super.init()
+            control.addTarget(self, action: #selector(refresh), for: .valueChanged)
+        }
+
+        func attach(to view: UIScrollView) {
+            guard scrollView !== view else { return }
+            detach()
+            scrollView = view
+            view.alwaysBounceVertical = true
+            view.refreshControl = control
+        }
+
+        @objc private func refresh() {
+            guard task == nil else { return }
+            task = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await action()
+                guard !Task.isCancelled else { return }
+                control.endRefreshing()
+                task = nil
+            }
+        }
+
+        func detach() {
+            task?.cancel()
+            task = nil
+            control.endRefreshing()
+            if scrollView?.refreshControl === control { scrollView?.refreshControl = nil }
+            scrollView = nil
+        }
+    }
+}
+
+/// Keep the active native pinned header glass, then hand off at close range.
+/// Keep per-frame geometry outside observation so scrolling does not redraw the list.
+@MainActor @Observable
+final class AcademicTermHeaderTracker {
+    private(set) var floatingTerms: Set<String> = []
+    @ObservationIgnored private var frames: [String: CGRect] = [:]
+
+    func setFrame(_ frame: CGRect, for term: String) {
+        frames[term] = frame
+        updateFloatingTerms()
+    }
+
+    func remove(_ term: String) {
+        frames.removeValue(forKey: term)
+        updateFloatingTerms()
+    }
+
+    private func updateFloatingTerms() {
+        let ordered = frames.sorted {
+            $0.value.minY == $1.value.minY ? $0.key > $1.key : $0.value.minY < $1.value.minY
+        }
+        var next: Set<String> = []
+        // Pinned headers can report their scrolled layout frame. Do not reject
+        // the active header because maxY is above zero or use that bottom as
+        // the on-screen pin position. Match the original scroll coordinate.
+        if let index = ordered.lastIndex(where: { $0.value.minY <= 0.5 }) {
+            let active = ordered[index]
+            next.insert(active.key)
+            let successor = index + 1
+            if ordered.indices.contains(successor),
+               ordered[successor].value.minY <= active.value.height {
+                next.insert(ordered[successor].key)
+            }
+        }
+        if next != floatingTerms { floatingTerms = next }
+    }
+}
+
+/// Both academic lists share the same inset and surface when a section pins.
+struct AcademicTermStrip<Content: View>: View {
+    let term: String
+    let tracker: AcademicTermHeaderTracker
+    @ViewBuilder var content: () -> Content
+
+    private var isFloating: Bool { tracker.floatingTerms.contains(term) }
+
+    var body: some View {
+        content()
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                if isFloating {
+                    Color.clear.glassEffect(.regular, in: .rect(cornerRadius: 18))
+                        .transition(.opacity)
+                } else {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.16), value: isFloating)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("term-header-\(term)")
+            .accessibilityValue(isFloating ? "floating" : "inline")
+            .padding(.horizontal, 16)
+            // Two visual points between adjacent pinned surfaces at the handoff.
+            .padding(.vertical, 1)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("academic-scroll")) } action: {
+                tracker.setFrame($0, for: term)
+            }
+            .onDisappear { tracker.remove(term) }
+    }
+}
+
+struct NagiBackButton: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Button { dismiss() } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 20, weight: .medium))
+                .frame(width: 48, height: 48)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
+        .accessibilityLabel("返回教务")
+    }
+}

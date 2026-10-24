@@ -347,9 +347,24 @@ extension APIClient {
 
     /// 当前教学周（校历接口，实测返回 {"xlzc":"7"}）
     func currentTeachingWeek() async throws -> Int {
-        struct WeekInfo: Decodable { let xlzc: String? }
+        struct WeekInfo: Decodable {
+            let week: Int
+            enum CodingKeys: String, CodingKey { case xlzc }
+
+            init(from decoder: Decoder) throws {
+                let values = try decoder.container(keyedBy: CodingKeys.self)
+                let number = try? values.decode(Int.self, forKey: .xlzc)
+                let text = try? values.decode(String.self, forKey: .xlzc)
+                guard let week = number ?? text.flatMap({ Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }),
+                      (1...53).contains(week) else {
+                    throw DecodingError.dataCorruptedError(forKey: .xlzc, in: values,
+                                                          debugDescription: "教学周缺失或无效")
+                }
+                self.week = week
+            }
+        }
         let info: WeekInfo = try await get("/admin/api/getXlzc")
-        return Int(info.xlzc ?? "") ?? 1
+        return info.week
     }
 
     /// 校历周次

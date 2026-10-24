@@ -12,12 +12,14 @@ import SwiftUI
 
 struct ElectiveView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(\.deviceCornerRadius) private var deviceCornerRadius
 
     @State private var initData: ElectiveInit?
     @State private var classes: [TeachingClass] = []
     @State private var keyword = ""
     @State private var selectedFilter: Filter = .all
     @State private var isLoading = false
+    @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
     @State private var detail: TeachingClass?
     @State private var pending: PendingAction?
@@ -36,72 +38,95 @@ struct ElectiveView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading && classes.isEmpty {
-                    ProgressView("拉取教学班…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorText, classes.isEmpty {
-                    ContentUnavailableView {
-                        Label("加载失败", systemImage: "exclamationmark.icloud")
-                    } description: {
-                        Text(errorText)
-                    } actions: {
-                        Button("重试") { Task { await load(force: true) } }
-                            .buttonStyle(.borderedProminent)
+        GeometryReader { viewport in
+            ScrollView {
+                VStack(spacing: 0) {
+                    if isLoading && classes.isEmpty {
+                        ProgressView("拉取教学班…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if errorText != nil, classes.isEmpty {
+                        ContentUnavailableView {
+                            Label(AppMessages.loadFailure, systemImage: "exclamationmark.icloud")
+                        } description: {
+                            EmptyView()
+                        } actions: {
+                            Button("重试") { Task { await load(force: true) } }
+                                .buttonStyle(.borderedProminent)
+                        }
+                    } else if classes.isEmpty {
+                        ContentUnavailableView {
+                            Label("当前没有可选课程", systemImage: "tray")
+                        } description: {
+                            Text(initData.map { "选课学期 \(SchedulePresentation.termTitle($0.xkxnxq ?? "—"))" } ?? "")
+                        }
+                    } else {
+                        list
                     }
-                } else if classes.isEmpty {
-                    ContentUnavailableView {
-                        Label("当前没有可选课程", systemImage: "tray")
-                    } description: {
-                        Text(initData.map { "选课学期 \($0.xkxnxq ?? "—")" } ?? "")
-                    } actions: {
-                        Button("刷新") { Task { await load(force: true) } }
-                    }
-                } else {
-                    list
                 }
+                .frame(maxWidth: .infinity, minHeight: classes.isEmpty ? viewport.size.height : 0)
+                .pageRefreshControl(showsRefreshCount: true) { await load(force: true) }
             }
-            .navigationTitle("选课")
-            .searchable(text: $keyword, prompt: "课程名 / 教师")
-            .refreshable { await load(force: true) }
-            .task {
-                if classes.isEmpty { await load() }
-            }
-            .sheet(item: $detail) { item in
-                CourseDetailSheet(item: item)
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
-                    .presentationCornerRadius(26)
-            }
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            .scrollDismissesKeyboard(.immediately)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+        .academicDetailChrome(title: "选课")
+        .task {
+            if classes.isEmpty { await load() }
+        }
+        .sheet(item: $detail) { item in
+            CourseDetailSheet(item: item)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(deviceCornerRadius)
         }
     }
 
     // MARK: 列表
 
-    private var list: some View {
-        ScrollView {
-            LazyVStack(spacing: 10) {
-                filterBar
-
-                if let initData {
-                    header(initData)
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("课程名 / 教师", text: $keyword)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+            if !keyword.isEmpty {
+                Button { keyword = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                 }
-
-                ForEach(filtered) { item in
-                    ClassCard(
-                        item: item,
-                        onAction: { pending = PendingAction(item: item, enrolling: !item.isSelected) },
-                        isWorking: workingId == item.id
-                    )
-                    .contentShape(.rect)
-                    .onTapGesture { detail = item }
-                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清除搜索")
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 24)
         }
-        .scrollDismissesKeyboard(.immediately)
+        .padding(12)
+        .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 18))
+    }
+
+    private var list: some View {
+        LazyVStack(spacing: 16) {
+            VStack(spacing: 14) {
+                searchField
+                filterBar
+                if let initData { header(initData) }
+            }
+            .padding(16)
+            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+
+            ForEach(filtered) { item in
+                ClassCard(
+                    item: item,
+                    onAction: { pending = PendingAction(item: item, enrolling: !item.isSelected) },
+                    isWorking: workingId == item.id
+                )
+                .contentShape(.rect)
+                .onTapGesture { detail = item }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 24)
         .background(Color(.systemGroupedBackground))
         .confirmationDialog(
             pending.map { $0.enrolling ? "确认选课？" : "确认退课？" } ?? "",
@@ -122,22 +147,23 @@ struct ElectiveView: View {
         )) {
             Button("好", role: .cancel) { actionMessage = nil }
         } message: {
-            Text(actionMessage ?? "")
+            Text(AppMessages.readable(actionMessage ?? ""))
         }
     }
 
     private func header(_ data: ElectiveInit) -> some View {
-        HStack(spacing: 8) {
-            Label(data.xkxnxq ?? "—", systemImage: "calendar")
-            Divider().frame(height: 14)
-            Label(data.xsxm ?? "—", systemImage: "person")
-            Spacer()
-            if selectedCount > 0 {
-                Label("\(selectedCount) 已选", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+        VStack(alignment: .leading, spacing: 8) {
+            Label(SchedulePresentation.termTitle(data.xkxnxq ?? "—"), systemImage: "calendar")
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Label(data.xsxm ?? "—", systemImage: "person")
+                Spacer(minLength: 8)
+                if selectedCount > 0 {
+                    Label("\(selectedCount) 已选", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                }
+                Text("\(filtered.count) 门").monospacedDigit()
             }
-            Text("\(filtered.count) 门")
-                .foregroundStyle(.secondary)
         }
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -192,7 +218,8 @@ struct ElectiveView: View {
                                     .font(.caption2.weight(.bold).monospacedDigit())
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 1)
-                                    .background(.white.opacity(on ? 0.25 : 0.15), in: .capsule)
+                                    .background((on ? Color("AccentForeground") : Color.accentColor)
+                                        .opacity(0.15), in: .capsule)
                             }
                         }
                         .padding(.horizontal, 12)
@@ -202,7 +229,7 @@ struct ElectiveView: View {
                                : AnyShapeStyle(Color(.secondarySystemGroupedBackground)),
                             in: .capsule
                         )
-                        .foregroundStyle(on ? .white : .primary)
+                        .foregroundStyle(on ? Color("AccentForeground") : Color.primary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -233,6 +260,21 @@ struct ElectiveView: View {
     // MARK: 加载
 
     private func load(force: Bool = false) async {
+        await loadGate.run { await fetch(force: force) }
+    }
+
+    private func fetch(force: Bool) async {
+        #if DEBUG
+        if InterfacePreview.enabled {
+            isLoading = true
+            defer { isLoading = false }
+            try? await Task.sleep(for: .milliseconds(250))
+            classes = InterfacePreview.emptyPage ? [] : InterfacePreview.classes
+            initData = InterfacePreview.electiveInit
+            return
+        }
+        #endif
+
         guard !isLoading else { return }
         isLoading = true
         errorText = nil
@@ -301,7 +343,7 @@ struct ClassCard: View {
     var isWorking: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 8) {
                 Text(item.kcmc ?? "—")
                     .font(.headline)
@@ -320,10 +362,17 @@ struct ClassCard: View {
                 }
             }
 
-            if let teacher = item.teacher, !teacher.isEmpty {
-                Label(teacher, systemImage: "person.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack {
+                if let teacher = item.teacher, !teacher.isEmpty {
+                    Label(teacher, systemImage: "person.fill")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if item.isSelected {
+                    Label("已选", systemImage: "checkmark.circle.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.green)
+                }
             }
 
             if let place = item.sksjdd, !place.isEmpty {
@@ -372,23 +421,12 @@ struct ClassCard: View {
             }
             .padding(.top, 2)
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
-        .overlay(alignment: .topTrailing) {
-            if item.isSelected {
-                Text("已选")
-                    .font(.system(size: 10, weight: .bold))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(.green, in: .capsule)
-                    .foregroundStyle(.white)
-                    .padding(10)
-            }
-        }
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
         .overlay {
             if item.isSelected {
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: 26)
                     .strokeBorder(.green.opacity(0.55), lineWidth: 1.5)
             }
         }
