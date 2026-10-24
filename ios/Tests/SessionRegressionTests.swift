@@ -106,7 +106,8 @@ struct SessionRegressionTests {
                 normalizedCookieDomain(lhs.domain) == normalizedCookieDomain(rhs.domain)
         }
         do {
-            let replacement = cookie("TGC", "new-web-value", domain: "auth.ccsut.cn")
+            // A server-side value rotation preserves the existing HttpOnly attribute.
+            let replacement = cookie("TGC", "new-web-value", httpOnly: true, domain: "auth.ccsut.cn")
             let beforeReplacement = try await WebStore.dataStore.httpCookieStore.cookieSnapshot()
             let priorCookie = beforeReplacement.first(where: { sameCookieIdentity($0, replacement) })
             try await WebStore.dataStore.httpCookieStore.set(replacement)
