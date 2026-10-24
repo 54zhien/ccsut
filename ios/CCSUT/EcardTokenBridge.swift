@@ -81,6 +81,17 @@ final class EcardTokenBridge: NSObject {
         guard !Task.isCancelled else { throw EcardError.canceled }
         if let cached = Self.cachedToken(forAccount: account) { return cached }
         let revision = Self.cacheRevision
+        // A prior cold-start injection may have failed. Fill gaps before SSO,
+        // preserving cookies already rotated by the official WebView flow.
+        do {
+            try await WebStore.restoreCookies(CookieJar.shared,
+                to: webView.configuration.websiteDataStore, policy: .fillMissing)
+        } catch is CancellationError {
+            throw EcardError.canceled
+        } catch {
+            throw EcardError.sessionSynchronization
+        }
+        guard revision == Self.cacheRevision, !Task.isCancelled else { throw EcardError.canceled }
         let token = try await startRequest(account: account)
         // Logout/cancellation may happen after finish resumes the continuation
         // but before this caller is scheduled to consume its result.
@@ -99,18 +110,25 @@ final class EcardTokenBridge: NSObject {
     private static var cache: CacheEntry?
     private static var cacheRevision = 0
     private static var preparation: (id: UUID, account: String, task: Task<Void, Never>)?
+    private static var preparationSuspensions = 0
 
     /// Best effort SSO after the main account has been verified. A gateway that
     /// requires interaction simply times out; it must not block the App login.
     static func prepareSession(forAccount account: String, dataStore: WKWebsiteDataStore) {
-        guard !account.isEmpty, cachedToken(forAccount: account) == nil,
+        guard preparationSuspensions == 0, !account.isEmpty, cachedToken(forAccount: account) == nil,
               preparation?.account != account else { return }
         cancelPreparation()
         let id = UUID()
         let task = Task { @MainActor in
+            defer { if preparation?.id == id { preparation = nil } }
+            let generation = CookieJar.generation
             let bridge = EcardTokenBridge(timeout: 20, dataStore: dataStore)
-            _ = try? await bridge.fetchToken(forAccount: account)
-            if preparation?.id == id { preparation = nil }
+            do {
+                _ = try await bridge.fetchToken(forAccount: account)
+                let cookies = try await dataStore.httpCookieStore.cookieSnapshot()
+                guard CookieJar.generation == generation, !Task.isCancelled else { return }
+                CookieJar.upsert(cookies, generation: generation)
+            } catch { /* Best effort only; payment startup can retry. */ }
         }
         preparation = (id, account, task)
     }
@@ -118,6 +136,22 @@ final class EcardTokenBridge: NSObject {
     static func cancelPreparation() {
         preparation?.task.cancel()
         preparation = nil
+    }
+
+    /// Drain suspended snapshot/write work before native CAS rotates cookies.
+    static func cancelPreparationAndWait() async {
+        let task = preparation?.task
+        cancelPreparation()
+        await task?.value
+    }
+
+    static func suspendPreparation() async {
+        preparationSuspensions += 1
+        await cancelPreparationAndWait()
+    }
+
+    static func resumePreparation() {
+        preparationSuspensions = max(0, preparationSuspensions - 1)
     }
 
     static func cachedToken(forAccount account: String?) -> String? {
@@ -224,7 +258,8 @@ final class EcardTokenBridge: NSObject {
             let seconds = self.timeout
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            self.finish(.failure(EcardError.noToken), generation: gen)
+            let stage = EcardAuthenticationStage(url: self.webView.url)
+            self.finish(.failure(EcardError.authenticationTimeout(stage)), generation: gen)
         }
     }
 

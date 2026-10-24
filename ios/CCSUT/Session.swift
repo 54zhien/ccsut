@@ -256,8 +256,9 @@ final class SessionStore {
             await injectToWebKit(allCookies())
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             phase = .loggedIn
-            await loadProfile()
             await refreshIfNeeded()
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            await loadProfile()
         } catch {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             lastError = error.localizedDescription
@@ -321,6 +322,17 @@ final class SessionStore {
         guard !Task.isCancelled, !isLoggingOut else { return }
         let previous = phase
         let generation = CookieJar.generation
+        // Keep the gate closed throughout CAS and WebKit injection: another
+        // suspended loadProfile must not start a replacement prefetch meanwhile.
+        await EcardTokenBridge.suspendPreparation()
+        defer {
+            EcardTokenBridge.resumePreparation()
+            if CookieJar.generation == generation, !Task.isCancelled, !isLoggingOut,
+               phase == .loggedIn, let account = studentId, !account.isEmpty {
+                EcardTokenBridge.prepareSession(forAccount: account, dataStore: WebStore.dataStore)
+            }
+        }
+        guard CookieJar.generation == generation, !Task.isCancelled, !isLoggingOut else { return }
         // 启动验证结束前不展示 MainTabs，避免页面拿过期 Cookie 抢先加载。
         if previous != .checking { phase = .refreshing }
         lastError = nil
@@ -334,6 +346,7 @@ final class SessionStore {
             phase = .loggedIn
             lastError = nil
             await injectToWebKit(allCookies())
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
             await loadProfile()
         } catch {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
@@ -475,11 +488,14 @@ final class SessionStore {
     }
 
     private func injectToWebKit(_ cookies: [HTTPCookie]) async {
-        let generation = CookieJar.generation
-        for c in cookies {
-            guard CookieJar.generation == generation, !Task.isCancelled else { return }
-            do { try await WebStore.dataStore.httpCookieStore.set(c) }
-            catch { return }
+        do {
+            try await WebStore.restoreCookies(cookies, to: WebStore.dataStore, policy: .replaceExisting)
+        } catch is CancellationError {
+            return
+        } catch {
+            // Native verification already succeeded; retain that login and let
+            // payment startup retry the missing WebKit credentials separately.
+            lastError = "恢复校园网页认证失败，请在缴费页重新加载"
         }
     }
 
@@ -685,4 +701,13 @@ enum CookieJar {
 
 enum WebStore {
     nonisolated(unsafe) static var dataStore: WKWebsiteDataStore = .nonPersistent()
+
+    @MainActor static func restoreCookies(_ cookies: [HTTPCookie], to store: WKWebsiteDataStore,
+                                         policy: WebSessionCookies.Policy) async throws {
+        let generation = CookieJar.generation
+        try await WebSessionCookies.restore(cookies, policy: policy,
+            read: { try await store.httpCookieStore.cookieSnapshot() },
+            write: { try await store.httpCookieStore.set($0) },
+            isCurrent: { CookieJar.generation == generation })
+    }
 }

@@ -72,6 +72,38 @@ struct SessionRegressionTests {
         check(protected.isHTTPOnly && StoredCookie(protected).asHTTPCookie?.isHTTPOnly == true,
               "Keychain roundtrip preserves HttpOnly")
 
+        let restoredTGC = cookie("TGC", "fixture-restored", httpOnly: true, domain: "auth.ccsut.cn")
+        let persistedTGC = try? JSONEncoder().encode([StoredCookie(restoredTGC)])
+        let decodedTGC = persistedTGC.flatMap { try? JSONDecoder().decode([StoredCookie].self, from: $0) }?.first?.asHTTPCookie
+        check(decodedTGC?.value == "fixture-restored" && decodedTGC?.expiresDate == nil,
+              "Keychain roundtrip retains a session-only TGC")
+
+        CookieJar.shared = [cookie("jw_uf", "cold-start"), restoredTGC]
+        WebStore.dataStore = .nonPersistent()
+        var coldStartReads = 0
+        SchoolProtocol.response = { request in
+            coldStartReads += 1
+            // Only the validation returns an identity. The follow-up profile
+            // is empty so this offline test never launches a real SSO prefetch.
+            let body = coldStartReads == 1 ? "{\"ret\":0,\"data\":{\"xsxh\":\"fixture\"}}" : "{\"ret\":0,\"data\":{}}"
+            return (200, request.url!, ["Set-Cookie": "jw_uf=cold-rotated; Path=/; Secure; HttpOnly"], body)
+        }
+        let restoredSession = SessionStore(api: api)
+        await restoredSession.bootstrap()
+        let restoredWebCookies = (try? await WebStore.dataStore.httpCookieStore.cookieSnapshot()) ?? []
+        check(restoredSession.phase == .loggedIn, "cold bootstrap retains the verified native login")
+        check(restoredWebCookies.contains(where: { $0.name == "TGC" && $0.value == "fixture-restored" }),
+              "cold bootstrap restores a session-only TGC into the non-persistent WebStore")
+        check(restoredWebCookies.contains(where: { $0.name == "jw_uf" && $0.value == "cold-rotated" }),
+              "cold bootstrap injects the validation response's rotated credentials")
+        do {
+            try await WebStore.dataStore.httpCookieStore.set(cookie("TGC", "new-web-value", domain: "auth.ccsut.cn"))
+            try await WebStore.restoreCookies(CookieJar.shared, to: WebStore.dataStore, policy: .fillMissing)
+            let currentCookies = try await WebStore.dataStore.httpCookieStore.cookieSnapshot()
+            check(currentCookies.contains(where: { $0.name == "TGC" && $0.value == "new-web-value" }),
+                  "payment restoration preserves a newer live WebKit credential")
+        } catch { check(false, "payment restoration completes using the real WebKit cookie store") }
+
         CookieJar.shared = [cookie("jw_uf", "native-only")]
         for c in HTTPCookieStorage.shared.cookies ?? [] { HTTPCookieStorage.shared.deleteCookie(c) }
         SchoolProtocol.response = { req in

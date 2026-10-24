@@ -33,6 +33,7 @@ enum EcardError: LocalizedError {
     case transport(String)
     case noToken
     case authenticationRequired
+    case authenticationTimeout(EcardAuthenticationStage)
     case sessionSynchronization
     case canceled
     /// 建单被拒（code 非 200 或 success=false）
@@ -54,7 +55,8 @@ enum EcardError: LocalizedError {
         case .transport(let what):         return "网络异常：\(what)"
         case .noToken:                     return "未获取到缴费凭证，请重新登录"
         case .authenticationRequired:      return "一卡通或学校访问网关登录已失效，请重新认证"
-        case .sessionSynchronization:      return "同步一卡通登录状态失败，请重新认证后再试"
+        case .authenticationTimeout(let stage): return "\(stage.label)超时，请重新加载；如需验证可打开认证页面"
+        case .sessionSynchronization:      return "同步校园网页认证失败，请重新加载后再试"
         case .canceled:                    return "操作已取消"
         case .orderRejected(let msg):      return "建单失败：\(msg)"
         case .paymentChannelUnavailable:   return "当前没有可用的余额支付方式"
