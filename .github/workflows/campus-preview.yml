@@ -34,6 +34,7 @@ jobs:
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeLeaveForm \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeDepartureForm \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeFormLargeText \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusRecordsSurviveFormDismissal \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/campus-tests.log"
       - name: Capture campus light and dark screens
         run: |

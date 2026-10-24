@@ -86,6 +86,25 @@ final class PageInteractionUITests: XCTestCase {
         capture(app, "campus-native-accessibility-form")
     }
 
+    func testCampusRecordsSurviveFormDismissal() {
+        for page in ["campus-leave", "campus-travel"] {
+            let app = launch(page)
+            let isLeave = page == "campus-leave"
+            let record = app.staticTexts[isLeave ? "示例请假记录" : "示例区县"]
+            XCTAssertTrue(record.waitForExistence(timeout: 8))
+            for _ in 0..<2 {
+                app.buttons[isLeave ? "申请请假" : "办理离校登记"].tap()
+                let close = app.buttons[isLeave ? "关闭申请请假" : "关闭离校登记"]
+                XCTAssertTrue(close.waitForExistence(timeout: 5))
+                close.tap()
+                XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format:"exists == false"), evaluatedWith:close)], timeout:5), .completed)
+                XCTAssertTrue(record.waitForExistence(timeout: 5), "Cancelling a form must retain existing records without a manual refresh")
+            }
+            capture(app, "campus-records-after-form-\(page)")
+            app.terminate()
+        }
+    }
+
     private func launch(_ page: String, longList: Bool = false, transition: Bool = false, withoutUpcoming: Bool = false,
                         refresh: Bool = false, empty: Bool = false, largeText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()

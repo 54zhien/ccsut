@@ -195,6 +195,15 @@ actor FormTransport: CampusTransport {
         let ac = try await ambiguousAPI.loadForm(.departure)
         do { try await ambiguousAPI.submit(stay.snapshot(configuration:ac,approvers:nil)); check(false,"unproven departure success code stays unknown") }
         catch { check(error as? CampusFormError == .unknownOutcome,"unproven departure success code stays unknown") }
+        let paddedHidden = FormTransport { req,_ in
+            if req.url!.path.hasSuffix("querySysConfigItems") {
+                return (200,#"{"data":[{"configKey":"leaveadmin_show_files","configContent":"\r\n 隐藏\t"}]}"#)
+            }; return nil
+        }
+        do {
+            let c = try await CampusClient(account:"fixture-account",credentials:FormCredentials(),transport:paddedHidden).loadForm(.leave)
+            check(!c.needsFiles && c.needsLeaveTime && !c.roleFallback, "padded hidden optional flag loads without weakening required-time or reviewer defaults")
+        } catch { check(false, "padded hidden optional flag loads without weakening required-time or reviewer defaults") }
         if failures > 0 { exit(1) }
     }
 }
