@@ -12,6 +12,10 @@ on:
         description: 'Run the three failed checks in legacy mode and render both blur versions'
         type: boolean
         default: false
+      skip_previews:
+        description: 'Skip screenshots when only completing the legacy-mode control experiment'
+        type: boolean
+        default: false
 
 jobs:
   preview:
@@ -106,10 +110,11 @@ jobs:
             -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicHomeWithoutReminderHasStableSpacedEntries \
             -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicPagesPullToRefreshIncludingEmptyStates \
             -only-testing:CCSUTUITests/PageInteractionUITests/testPullingTimetableRefreshesWholePageOnce \
-            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO CCSUT_TEST_LEGACY_TOP_BLUR=YES \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG CCSUT_TEST_LEGACY_TOP_BLUR" \
             2>&1 | tee "$RUNNER_TEMP/legacy-blur-test.log"
       - name: Render preview screens
-        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' }}
+        if: ${{ !inputs.skip_previews && !cancelled() && steps.simulator.conclusion == 'success' }}
         run: bash ios/Tests/render-preview.sh
       - uses: actions/upload-artifact@v4
         if: always()
