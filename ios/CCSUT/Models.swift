@@ -344,6 +344,10 @@ struct ScoreItem: Decodable, Identifiable, Hashable {
     var credit: Double { Double(xf ?? "") ?? 0 }
     var point: Double { jd ?? 0 }
     var passed: Bool { sfjg == "1" }
+    /// 已出成绩（缓考/在修课程 jd 为 null，不参与绩点加权）
+    var hasGrade: Bool { jd != nil }
+    /// 只将明确的 "0" 计为不及格；缺失、空白或未知状态保持中性。
+    var failed: Bool { sfjg == "0" }
     var scoreText: String { (zhcj?.isEmpty == false) ? zhcj! : "—" }
 
     /// 成绩分项拆成可读的键值对
@@ -368,14 +372,15 @@ struct ScoreTerm: Identifiable {
     var id: String { name }
     var credits: Double { items.reduce(0) { $0 + $1.credit } }
 
-    /// 加权平均绩点
+    /// 加权平均绩点（只统计已出成绩的课，未出成绩的课不进分子也不进分母）
     var gpa: Double {
-        let weighted = items.reduce(0.0) { $0 + $1.point * $1.credit }
-        let total = credits
+        let graded = items.filter(\.hasGrade)
+        let weighted = graded.reduce(0.0) { $0 + $1.point * $1.credit }
+        let total = graded.reduce(0.0) { $0 + $1.credit }
         return total > 0 ? weighted / total : 0
     }
 
-    var failedCount: Int { items.filter { !$0.passed }.count }
+    var failedCount: Int { items.filter(\.failed).count }
 }
 
 

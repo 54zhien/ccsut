@@ -93,8 +93,9 @@ struct ScoreView: View {
     }
 
     private var overallGPA: Double {
-        let weighted = items.reduce(0.0) { $0 + $1.point * $1.credit }
-        let credits = items.reduce(0.0) { $0 + $1.credit }
+        let graded = items.filter(\.hasGrade)
+        let weighted = graded.reduce(0.0) { $0 + $1.point * $1.credit }
+        let credits = graded.reduce(0.0) { $0 + $1.credit }
         return credits > 0 ? weighted / credits : 0
     }
 
@@ -305,7 +306,7 @@ private struct ScoreRow: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(item.scoreText)
                         .font(.title3.weight(.bold).monospacedDigit())
-                        .foregroundStyle(item.passed ? Color.primary : Color.red)
+                        .foregroundStyle(item.failed ? Color.red : Color.primary)
                     Text("总评")
                         .font(.caption)
                         .foregroundStyle(.secondary)

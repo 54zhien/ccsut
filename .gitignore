@@ -7,6 +7,9 @@ state.json
 node_modules/
 .pnpm-store/
 
+# CI 预览产物（本地下载的构建目录，不入库）
+dist/campus*/
+
 # iOS
 ios/build/
 ios/DerivedData/

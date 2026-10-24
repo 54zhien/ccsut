@@ -8,6 +8,23 @@ struct AcademicReliabilityTests {
             print("\(value ? "PASS" : "FAIL") \(name)")
             if !value { failures += 1 }
         }
+        func score(_ json: String) throws -> ScoreItem {
+            try JSONDecoder().decode(ScoreItem.self, from: Data(json.utf8))
+        }
+        let passedScore = try score(#"{"xf":"2","jd":4,"sfjg":"1"}"#)
+        let failedScore = try score(#"{"xf":"2","jd":0,"sfjg":"0"}"#)
+        let pendingScore = try score(#"{"xf":"2","jd":null,"sfjg":null}"#)
+        check(passedScore.passed && !passedScore.failed, "passing result is not counted as failed")
+        check(failedScore.failed && !failedScore.passed, "explicit failing result is counted as failed")
+        for flag in ["", " ", "unknown", "2"] {
+            let item = try score("{\"sfjg\":\"\(flag)\"}")
+            check(!item.failed && !item.passed, "unrecognized result stays neutral: '\(flag)'")
+        }
+        check(!pendingScore.failed && !pendingScore.hasGrade, "missing grade and result remain pending")
+        let mixedScores = ScoreTerm(name: "fixture", items: [passedScore, pendingScore])
+        check(mixedScores.gpa == 4 && mixedScores.credits == 4, "pending grades do not dilute GPA or remove displayed credits")
+        let gradedScores = ScoreTerm(name: "fixture", items: [passedScore, failedScore])
+        check(gradedScores.gpa == 2 && gradedScores.failedCount == 1, "zero GPA contributes its credits and explicit failure")
         check(WeekParser.parse("1-4，6-11") == [1,2,3,4,6,7,8,9,10,11], "Chinese separators preserve a missing teaching week")
         check(WeekParser.parse("1-8(单)") == [1,3,5,7], "odd-week suffix keeps only odd weeks")
         check(WeekParser.parse("1-8周（双周）") == [2,4,6,8], "even-week suffix keeps only even weeks")

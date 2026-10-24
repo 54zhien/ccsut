@@ -775,15 +775,6 @@ struct ClassDetailSheet: View {
                         Text(bz).font(.footnote)
                     }
                 }
-
-                Section {
-                    Label(
-                        "选课、退课请在教务官方页面操作，本页只做浏览。",
-                        systemImage: "info.circle"
-                    )
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                }
             }
             .navigationTitle("课程详情")
             .navigationBarTitleDisplayMode(.inline)
