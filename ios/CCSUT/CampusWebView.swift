@@ -26,16 +26,22 @@ enum CampusWebDestination: String, Identifiable {
 struct CampusWebView: View {
     @Environment(\.dismiss) private var dismiss
     let destination: CampusWebDestination
-    @State private var browser = CampusOfficialBrowser()
+    @State private var browser: CampusOfficialBrowser
+
+    init(destination: CampusWebDestination, account: String) {
+        self.destination = destination
+        _browser = State(initialValue: CampusOfficialBrowser(account: account))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             SheetHeader(title: destination.title) { dismiss() }
             ZStack {
                 WebPanel(webView: browser.webView)
-                if browser.isLoading {
+                if browser.isLoading || browser.error != nil {
                     Color(.systemBackground)
-                    ProgressView("正在打开官方页面…")
+                    if browser.isLoading { ProgressView("正在打开官方页面…") }
+                    else { ContentUnavailableView("无法打开官方页面", systemImage: "exclamationmark.shield") }
                 }
             }
             if let error = browser.error {
@@ -55,11 +61,16 @@ private final class CampusOfficialBrowser: NSObject, WKNavigationDelegate {
     private(set) var error: String?
     private let generation: UInt64
     private var active = true
+    private var navigationRevision: UInt64 = 0
+    private var destination: URL?
+    private let handoff: CampusOfficialCookieHandoff
 
-    override init() {
+    init(account: String) {
         generation = CookieJar.generation
+        handoff = CampusOfficialCookieHandoff(account: account, credentials: CampusCookieCredentials())
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = WebStore.dataStore
+        // A login inside an official form must not silently replace the App's identity.
+        configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController.addUserScript(WKUserScript(
             source: CampusWebPrivacy.script, injectionTime: .atDocumentEnd,
             forMainFrameOnly: false, in: .defaultClient
@@ -75,6 +86,7 @@ private final class CampusOfficialBrowser: NSObject, WKNavigationDelegate {
         guard current else { return }
         isLoading = true
         error = nil
+        destination = url
         do {
             let store = webView.configuration.websiteDataStore.httpCookieStore
             for cookie in CookieJar.shared where ["ehall.ccsut.cn", "auth.ccsut.cn", ".ccsut.cn", "ccsut.cn"].contains(cookie.domain) {
@@ -122,18 +134,63 @@ private final class CampusOfficialBrowser: NSObject, WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         Task { @MainActor [weak self] in
             guard let self, self.current else { return }
+            self.navigationRevision &+= 1
             self.isLoading = true
+            self.error = nil
         }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Task { @MainActor [weak self] in
             guard let self, self.current else { return }
-            self.isLoading = false
-            let store = self.webView.configuration.websiteDataStore.httpCookieStore
-            guard let cookies = try? await store.cookieSnapshot(), self.current else { return }
-            CookieJar.upsert(cookies.filter { ["ehall.ccsut.cn", "auth.ccsut.cn", ".ccsut.cn", "ccsut.cn"].contains($0.domain) }, generation: self.generation)
+            if self.webView.url?.host == "auth.ccsut.cn" {
+                self.isLoading = false
+                return
+            }
+            guard self.webView.url?.host == "ehall.ccsut.cn" else { self.failed(); return }
+            let revision = self.navigationRevision
+            do {
+                for _ in 0..<8 {
+                    guard self.current, revision == self.navigationRevision else { return }
+                    if let proof = try await self.identityProof() {
+                        do {
+                            try self.handoff.accept(identity: proof, cookies: [])
+                            let cookies = try await self.webView.configuration.websiteDataStore.httpCookieStore.cookieSnapshot()
+                            guard self.current, revision == self.navigationRevision else { return }
+                            try self.handoff.accept(identity: proof, cookies: cookies)
+                            self.isLoading = false
+                            return
+                        } catch CampusError.authentication { /* Wait for the official SPA's CAS bootstrap. */ }
+                    }
+                    try await Task.sleep(for: .milliseconds(500))
+                }
+                throw CampusError.authentication
+            } catch {
+                guard self.current, revision == self.navigationRevision else { return }
+                self.isLoading = false
+                self.error = (error as? CampusError ?? .serviceUnavailable).localizedDescription
+            }
         }
+    }
+
+    private func identityProof() async throws -> Data? {
+        let script = """
+        if (location.hostname !== 'ehall.ccsut.cn') return null;
+        const url = new URL('/backstage/cas-proxy/app/validate_full', location.origin);
+        url.searchParams.set('callback', callback);
+        url.searchParams.set('timestamp', String(Date.now()));
+        const response = await fetch(url, {credentials:'include', cache:'no-store'});
+        if (!response.ok) return null;
+        const value = await response.json();
+        return JSON.stringify({errcode:value?.errcode, account:value?.account});
+        """
+        let json: String? = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String?, Error>) in
+            webView.callAsyncJavaScript(script, arguments: ["callback": destination?.absoluteString ?? CampusClient.leavePage.absoluteString],
+                                        in: nil, in: .defaultClient) { result in
+                continuation.resume(with: result.map { $0 as? String })
+            }
+        }
+        return json.map { Data($0.utf8) }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

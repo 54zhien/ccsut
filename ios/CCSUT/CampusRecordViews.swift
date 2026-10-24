@@ -6,11 +6,15 @@ struct CampusRecordsView: View {
     let mode: Mode
     @State private var model: CampusRecordsModel?
     @State private var accountError = false
+    @State private var reconnectRevision: UInt64 = 0
+    @State private var selectedKind: CampusTravelKind = .departure
+    private struct Connection: Hashable { let account: String?; let revision: UInt64 }
 
     var body: some View {
         Group {
             if let model {
-                CampusRecordContent(model: model, mode: mode)
+                CampusRecordContent(model: model, mode: mode, account: session.studentId ?? "",
+                                    selected: $selectedKind) { reconnectRevision &+= 1 }
             } else if accountError {
                 ContentUnavailableView {
                     Label("暂时无法读取校园记录", systemImage: "person.crop.circle.badge.exclamationmark")
@@ -21,7 +25,7 @@ struct CampusRecordsView: View {
         }
         .background(Color(.systemGroupedBackground))
         .academicDetailChrome(title: mode == .leave ? "请假" : "节假日离返校")
-        .task(id: session.studentId) {
+        .task(id: Connection(account: session.studentId, revision: reconnectRevision)) {
             model?.cancel()
             model = nil
             accountError = false
@@ -44,7 +48,9 @@ struct CampusRecordsView: View {
 private struct CampusRecordContent: View {
     let model: CampusRecordsModel
     let mode: CampusRecordsView.Mode
-    @State private var selected: CampusTravelKind = .departure
+    let account: String
+    @Binding var selected: CampusTravelKind
+    let reconnect: () -> Void
     @State private var officialPage: CampusWebDestination?
 
     var body: some View {
@@ -79,12 +85,9 @@ private struct CampusRecordContent: View {
             if mode == .leave { await model.loadLeave(reset: true) }
             else { await model.loadTravel(kind: selected) }
         }
-        .sheet(item: $officialPage, onDismiss: {
-            Task {
-                if mode == .leave { await model.loadLeave(reset: true) }
-                else { await model.loadTravel(kind: selected) }
-            }
-        }) { destination in CampusWebView(destination: destination) }
+        .sheet(item: $officialPage, onDismiss: reconnect) { destination in
+            CampusWebView(destination: destination, account: account)
+        }
     }
 
     @ViewBuilder private var leaveContent: some View {

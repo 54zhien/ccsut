@@ -5,12 +5,36 @@ import FoundationNetworking
 
 protocol CampusSessionCredentials: Sendable {
     var generation: UInt64 { get }
-    func header(for url: URL) -> String?
+    func header(for url: URL, expectedGeneration: UInt64) throws -> String?
     func accept(_ cookies: [HTTPCookie], generation: UInt64)
 }
 
 protocol CampusTransport: Sendable {
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse)
+}
+
+/// An official browser has its own store. Never import a different CAS identity.
+struct CampusOfficialCookieHandoff: Sendable {
+    private struct Identity: Decodable { let errcode: Int; let account: String }
+    let account: String
+    let credentials: any CampusSessionCredentials
+    private let generation: UInt64
+
+    init(account: String, credentials: any CampusSessionCredentials) {
+        self.account = account
+        self.credentials = credentials
+        generation = credentials.generation
+    }
+
+    func accept(identity data: Data, cookies: [HTTPCookie]) throws {
+        guard credentials.generation == generation else { throw CancellationError() }
+        guard let identity = try? JSONDecoder().decode(Identity.self, from: data), identity.errcode == 2000 else {
+            throw CampusError.authentication
+        }
+        guard !account.isEmpty, identity.account == account else { throw CampusError.identityMismatch }
+        // Keep the App's CAS identity authoritative, even if an official login changes its own TGC.
+        credentials.accept(cookies.filter { ["ehall.ccsut.cn", ".ehall.ccsut.cn"].contains($0.domain) }, generation: generation)
+    }
 }
 
 private final class CampusNoRedirect: NSObject, URLSessionTaskDelegate {
@@ -165,7 +189,7 @@ actor CampusClient: CampusReading {
                   authentication || url.host == "ehall.ccsut.cn" else { throw CampusError.authentication }
             request.url = url
             request.httpShouldHandleCookies = false
-            request.setValue(credentials.header(for: url), forHTTPHeaderField: "Cookie")
+            request.setValue(try credentials.header(for: url, expectedGeneration: generation), forHTTPHeaderField: "Cookie")
             let remaining = deadline.timeIntervalSinceNow
             guard remaining > 0 else { throw CampusError.serviceUnavailable }
             request.timeoutInterval = min(20, remaining)

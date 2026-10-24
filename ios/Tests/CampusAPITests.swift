@@ -7,9 +7,21 @@ final class FixtureCredentials: CampusSessionCredentials, @unchecked Sendable {
     private let lock = NSLock()
     private var revision: UInt64 = 1
     private var receivedCookies = 0
+    private var switchOnHeader = false
     var generation: UInt64 { lock.lock(); defer { lock.unlock() }; return revision }
     func replaceAccount() { lock.lock(); defer { lock.unlock() }; revision += 1 }
-    func header(for url: URL) -> String? { url.host == "auth.ccsut.cn" ? "TGC=fixture-tgc" : "ehall=fixture-session" }
+    func armAccountSwitch() { lock.lock(); defer { lock.unlock() }; switchOnHeader = true }
+    func header(for url: URL) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        if switchOnHeader { switchOnHeader = false; revision += 1 }
+        return url.host == "auth.ccsut.cn" ? "TGC=fixture-tgc" : "ehall=fixture-session"
+    }
+    func header(for url: URL, expectedGeneration: UInt64) throws -> String? {
+        lock.lock(); defer { lock.unlock() }
+        if switchOnHeader { switchOnHeader = false; revision += 1 }
+        guard expectedGeneration == revision else { throw CancellationError() }
+        return url.host == "auth.ccsut.cn" ? "TGC=fixture-tgc" : "ehall=fixture-session"
+    }
     func accept(_ cookies: [HTTPCookie], generation: UInt64) {
         lock.lock(); defer { lock.unlock() }
         if generation == revision { receivedCookies += cookies.count }
@@ -140,6 +152,27 @@ struct CampusAPITests {
         cancelled.cancel()
         do { _ = try await cancelled.value; check(false, "cancelled request rejected") }
         catch { check(error is CancellationError, "cancelled query stops without publishing") }
+        let racingCredentials = FixtureCredentials()
+        let raceTransport = FixtureCampusTransport { _, _ in (200, [:], identity) }
+        let racingClient = CampusClient(account: "fixture-account", credentials: racingCredentials, transport: raceTransport)
+        racingCredentials.armAccountSwitch()
+        do { _ = try await racingClient.leaveRecords(page: 1, size: 20) } catch { }
+        check(await raceTransport.requests.isEmpty, "account change during Cookie read prevents outbound request")
+        let webCredentials = FixtureCredentials()
+        let handoff = CampusOfficialCookieHandoff(account: "fixture-account", credentials: webCredentials)
+        let sessionCookie = HTTPCookie(properties: [.name:"YZSESSIONID2", .value:"fixture", .domain:"ehall.ccsut.cn", .path:"/", .secure:"TRUE"])!
+        let casCookie = HTTPCookie(properties: [.name:"TGC", .value:"fixture", .domain:"auth.ccsut.cn", .path:"/", .secure:"TRUE"])!
+        do {
+            try handoff.accept(identity: Data(#"{"errcode":2000,"account":"another-account"}"#.utf8), cookies: [sessionCookie, casCookie])
+            check(false, "different official account rejected")
+        } catch { check(error as? CampusError == .identityMismatch && webCredentials.accepted == 0, "official account mismatch cannot import any Cookies") }
+        try handoff.accept(identity: Data(identity.utf8), cookies: [sessionCookie, casCookie])
+        check(webCredentials.accepted == 1, "verified handoff imports ehall session only, never CAS identity")
+        webCredentials.replaceAccount()
+        do {
+            try handoff.accept(identity: Data(identity.utf8), cookies: [sessionCookie])
+            check(false, "late official handoff rejected")
+        } catch { check(error is CancellationError && webCredentials.accepted == 1, "late official handoff cannot restore prior credentials") }
         if failures > 0 { exit(1) }
     }
 }
