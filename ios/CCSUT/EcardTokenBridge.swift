@@ -49,13 +49,13 @@ final class EcardTokenBridge: NSObject {
 
     init(feeitemID: String = EcardClient.electricityFeeItemID,
          timeout: TimeInterval = 120,
-         dataStore: WKWebsiteDataStore = .default(),
+         dataStore: WKWebsiteDataStore? = nil,
          webView: WKWebView? = nil) {
         self.feeitemID = feeitemID
         self.timeout = timeout
 
         let cfg = WKWebViewConfiguration()
-        cfg.websiteDataStore = dataStore
+        cfg.websiteDataStore = dataStore ?? .default()
 
         let wv = webView ?? WKWebView(frame: .zero, configuration: cfg)
         wv.allowsBackForwardNavigationGestures = false

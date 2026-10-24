@@ -40,7 +40,7 @@ import WebKit
 @MainActor final class OfflineEcardWebView: WKWebView {
     var navigations: [WKNavigation] = []
     var pageURL: URL?
-    var scriptCompletion: ((Any?, Error?) -> Void)?
+    var scriptCompletion: (@MainActor @Sendable (Any?, Error?) -> Void)?
     var stopped = false
     override var url: URL? { pageURL }
     override func load(_ request: URLRequest) -> WKNavigation? {
@@ -50,7 +50,7 @@ import WebKit
     }
     override func stopLoading() { stopped = true }
     override func evaluateJavaScript(_ javaScriptString: String,
-                                    completionHandler: ((Any?, (any Error)?) -> Void)? = nil) {
+                                    completionHandler: (@MainActor @Sendable (Any?, (any Error)?) -> Void)? = nil) {
         scriptCompletion = completionHandler
     }
 }

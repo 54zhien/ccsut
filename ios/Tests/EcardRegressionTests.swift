@@ -4,6 +4,7 @@ import FoundationNetworking
 #endif
 #if !ECARD_WEBKIT_DOUBLE
 import WebKit
+import Darwin
 #endif
 
 extension String {
@@ -84,6 +85,9 @@ final class EcardProtocol: URLProtocol {
         bridge.webView(view, didReceiveServerRedirectForProvisionalNavigation: navigation)
     }
     static func main() async {
+        #if !ECARD_WEBKIT_DOUBLE
+        setbuf(stdout, nil)
+        #endif
         await paymentTests()
         await loginTests()
         print("Ecard regression failures: \(failures)")
