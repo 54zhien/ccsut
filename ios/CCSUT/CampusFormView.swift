@@ -329,7 +329,8 @@ import ImageIO
                     } else if !snapshot.draft.destinationDetails.isEmpty {
                         CampusSection("去向") { safeText(snapshot.draft.destinationDetails) }
                     }
-                    if let address = snapshot.draft.locationAddress {
+                    if snapshot.configuration.showLocation || snapshot.configuration.needsLocation,
+                       let address = snapshot.draft.locationAddress {
                         CampusSection("当前位置") { safeText(address) }
                     }
                     if !snapshot.draft.attachments.isEmpty {

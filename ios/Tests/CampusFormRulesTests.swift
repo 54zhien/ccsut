@@ -33,6 +33,20 @@ import Foundation
         check(rejected(bad, config), "arbitrary approver cannot be submitted")
         bad = draft; bad.contactPhone = "bad"
         check(rejected(bad, config), "malformed contact rejected")
+        var optionalLocation = config
+        optionalLocation.showLocation = true
+        var located = draft
+        located.locationAddress = "示例定位地址"
+        let locatedSnapshot = try located.snapshot(configuration: optionalLocation, approvers: approvers)
+        located.locationAddress = "修改后的示例地址"
+        check(try locatedSnapshot.payload(uploaded: [])["address"] as? String == "示例定位地址", "optional collected location matches the immutable confirmed address")
+        located.locationAddress = nil
+        check(try located.snapshot(configuration: optionalLocation, approvers: approvers).payload(uploaded: [])["address"] as? String == "", "optional location can be omitted without blocking submission")
+        located.locationAddress = "草稿残留地址"
+        check(try located.snapshot(configuration: config, approvers: approvers).payload(uploaded: [])["address"] as? String == "", "hidden location does not send a stale draft address")
+        var requiredLocation = config
+        requiredLocation.needsLocation = true
+        check(try located.snapshot(configuration: requiredLocation, approvers: approvers).payload(uploaded: [])["address"] as? String == "草稿残留地址", "required location remains included even without an explicit visibility flag")
         config.needsLocation = true
         check(rejected(draft, config), "mandatory missing location rejected")
         draft.locationAddress = "测试地址"; config.needsLocation = false; config.needsDestination = true
