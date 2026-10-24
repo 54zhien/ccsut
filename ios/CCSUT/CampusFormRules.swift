@@ -214,7 +214,7 @@ struct CampusSubmission: Identifiable, Sendable, Equatable {
             "qxlx": c.needsDestination ? d.destinationTypeID : "", "qxmx": c.needsDestination ? d.destinationDetails : "",
             "reason": d.reason, "linkmanPhone": CampusFormDraft.phone(d.contactPhone),
             "approver": d.approverID, "roleId": approvers?.roleID ?? "",
-            "address": c.needsLocation ? d.locationAddress ?? "" : "", "applyFiles": images,
+            "address": c.showLocation || c.needsLocation ? d.locationAddress ?? "" : "", "applyFiles": images,
             "fileList": c.needsFiles ? String(data: fileJSON, encoding: .utf8)! : ""]
     }
 }

@@ -70,6 +70,21 @@ actor FormTransport: CampusTransport {
         try await client.submit(stay.snapshot(configuration: departure, approvers: nil))
         check(await transport.requests.filter { $0.url!.path.hasSuffix("applyGqleave") }.count == 1, "new registration uses create endpoint only")
 
+        let locationTransport = FormTransport { req,_ in
+            if req.url!.path.hasSuffix("querySysConfigItems") {
+                return (200,#"{"data":[{"configKey":"dataAddressShow","configContent":"显示"},{"configKey":"leave_address_config","configContent":"隐藏"}]}"#)
+            }
+            return nil
+        }
+        let locationAPI = CampusClient(account: "fixture-account", credentials: FormCredentials(), transport: locationTransport)
+        let locationConfig = try await locationAPI.loadForm(.leave)
+        var locationDraft = draft; locationDraft.locationAddress = "示例定位地址"
+        let locationRole = try await locationAPI.approvers(type: "sick", days: 0.5)
+        try await locationAPI.submit(locationDraft.snapshot(configuration: locationConfig, approvers: locationRole))
+        let locationWrite = await locationTransport.requests.last { $0.url!.path.hasSuffix("submitLeaveApply") }!
+        let locationBody = try JSONSerialization.jsonObject(with: locationWrite.httpBody!) as! [String: Any]
+        check(locationConfig.showLocation && !locationConfig.needsLocation && locationBody["address"] as? String == "示例定位地址", "visible optional location survives school configuration loading and JSON submission")
+
         for status in [401, 302, 500] {
             let t = FormTransport { req,_ in req.url!.path.hasSuffix("submitLeaveApply") ? (status,"private-server-error") : nil }
             let api = CampusClient(account: "fixture-account", credentials: FormCredentials(), transport: t)
