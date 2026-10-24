@@ -26,7 +26,29 @@ jobs:
         run: '"$RUNNER_TEMP/session-tests"'
       - name: Run embedded login script regressions
         if: always()
-        run: node --test ios/Tests/login-script.test.mjs
+        run: node --test ios/Tests/login-script.test.mjs ios/Tests/campus-web-privacy.test.mjs
+      - name: Run campus read-only regressions
+        if: always()
+        run: |
+          set -e
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/Tests/CampusModelTests.swift -o "$RUNNER_TEMP/campus-model-tests"
+          "$RUNNER_TEMP/campus-model-tests"
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusAPI.swift ios/Tests/CampusAPITests.swift -o "$RUNNER_TEMP/campus-api-tests"
+          "$RUNNER_TEMP/campus-api-tests"
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusAPI.swift ios/CCSUT/CampusRecordsModel.swift ios/Tests/CampusRecordsModelTests.swift -o "$RUNNER_TEMP/campus-record-tests"
+          "$RUNNER_TEMP/campus-record-tests"
+      - name: Run native campus form regressions
+        if: always()
+        run: |
+          set -e
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusFormRules.swift ios/Tests/CampusFormRulesTests.swift -o "$RUNNER_TEMP/campus-form-rules"
+          "$RUNNER_TEMP/campus-form-rules"
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusFormRules.swift ios/CCSUT/CampusAPI.swift ios/CCSUT/CampusFormsAPI.swift ios/Tests/CampusFormsAPITests.swift -o "$RUNNER_TEMP/campus-form-api"
+          "$RUNNER_TEMP/campus-form-api"
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusFormRules.swift ios/CCSUT/CampusAPI.swift ios/CCSUT/CampusFormsAPI.swift ios/CCSUT/CampusFormModel.swift ios/Tests/CampusFormModelTests.swift -o "$RUNNER_TEMP/campus-form-model"
+          "$RUNNER_TEMP/campus-form-model"
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusPresentation.swift ios/Tests/CampusPresentationTests.swift -o "$RUNNER_TEMP/campus-presentation"
+          "$RUNNER_TEMP/campus-presentation"
       - name: Run protocol and academic integrity regressions
         if: always()
         run: |

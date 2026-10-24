@@ -3,6 +3,214 @@ import XCTest
 final class PageInteractionUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
+    func testCampusEntryAndRecords() {
+        var app = launch("campus")
+        for id in ["campus-leave", "campus-travel", "campus-electricity"] {
+            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5))
+        }
+        capture(app, "campus-home")
+        app.buttons["campus-leave"].tap()
+        XCTAssertTrue(app.staticTexts["示例请假记录"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["申请请假"].exists)
+        capture(app, "campus-leave-records")
+        app.terminate()
+        app = launch("campus")
+        app.buttons["campus-travel"].tap()
+        XCTAssertTrue(app.staticTexts["示例区县"].waitForExistence(timeout: 5))
+        app.segmentedControls.buttons["返校记录"].tap()
+        XCTAssertTrue(app.buttons["办理返校登记"].waitForExistence(timeout: 5))
+        capture(app, "campus-return-records")
+        app.terminate()
+        app = launch("academic")
+        XCTAssertTrue(app.buttons["academic-scores"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["academic-electricity"].exists)
+    }
+
+    func testCampusLargeTextEntries() {
+        let app = launch("campus", largeText: true)
+        let leave = app.buttons["campus-leave"]
+        XCTAssertTrue(leave.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(leave.frame.height, 44)
+        app.swipeUp()
+        let electricity = app.buttons["campus-electricity"]
+        XCTAssertTrue(electricity.isHittable)
+        XCTAssertGreaterThanOrEqual(electricity.frame.height, 44)
+        capture(app, "campus-accessibility-text")
+    }
+
+    func testCampusOfficialWebPrivacy() {
+        let app = launch("campus-privacy")
+        XCTAssertTrue(app.webViews.staticTexts["网页隐私检查通过"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.webViews.secureTextFields.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.webViews.staticTexts["18000000000"].exists)
+        capture(app, "campus-web-privacy")
+    }
+
+    func testCampusNativeLeaveForm() {
+        let app = launch("campus-form-leave")
+        XCTAssertTrue(app.secureTextFields["campus-form-contact"].waitForExistence(timeout: 8))
+        app.segmentedControls.buttons["不离校"].tap()
+        app.buttons["campus-form-review"].tap()
+        XCTAssertTrue(app.staticTexts["campus-form-error"].waitForExistence(timeout: 5))
+        let reason = app.textViews["campus-form-reason"]
+        reason.tap(); reason.typeText("reason 18000000000")
+        let visible = reason.value as? String ?? ""
+        XCTAssertTrue(visible.contains("reason"))
+        XCTAssertFalse(visible.contains("18000000000"))
+        capture(app, "campus-native-masked-input")
+        app.buttons["campus-form-review"].tap()
+        XCTAssertTrue(app.buttons["campus-form-confirm"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "年")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "18000000000")).firstMatch.exists)
+        capture(app, "campus-native-confirmation")
+        app.buttons["campus-form-confirm"].tap()
+        XCTAssertTrue(app.staticTexts["已提交，等待审核"].waitForExistence(timeout: 5))
+    }
+
+    func testCampusNativeDepartureForm() {
+        let app = launch("campus-form-departure")
+        XCTAssertTrue(app.secureTextFields["campus-form-phone"].waitForExistence(timeout: 8))
+        app.segmentedControls.buttons["留校"].tap()
+        app.buttons["campus-form-review"].tap()
+        XCTAssertTrue(app.buttons["campus-form-confirm"].waitForExistence(timeout: 5))
+        capture(app, "campus-native-stay-confirmation")
+        app.buttons["campus-form-confirm"].tap()
+        XCTAssertTrue(app.staticTexts["已提交，等待审核"].waitForExistence(timeout: 5))
+    }
+
+    func testCampusFormLoadingIsCentered() {
+        for page in ["campus-form-leave", "campus-form-departure"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--preview-ui", "--preview-page", page, "--preview-form-loading"]
+            app.launch()
+            let message = app.staticTexts["campus-form-loading-message"]
+            let indicator = app.activityIndicators["campus-form-loading-indicator"]
+            let close = app.buttons[page == "campus-form-leave" ? "关闭申请请假" : "关闭离校登记"]
+            XCTAssertTrue(message.waitForExistence(timeout: 8))
+            XCTAssertTrue(indicator.exists)
+            XCTAssertEqual(message.frame.midX, app.frame.midX, accuracy: 2)
+            XCTAssertEqual(indicator.frame.midX, app.frame.midX, accuracy: 2)
+            let groupCenter = (indicator.frame.minY + message.frame.maxY) / 2
+            XCTAssertEqual(groupCenter, (close.frame.maxY + app.frame.maxY) / 2, accuracy: 60)
+            XCTAssertFalse(app.buttons["campus-form-review"].exists)
+            capture(app, "campus-centered-loading-\(page)")
+            app.terminate()
+        }
+    }
+
+    func testCampusLeaveDatesUseChinese() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-ui", "--preview-page", "campus-form-leave", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let dates = app.datePickers
+        XCTAssertTrue(dates.firstMatch.waitForExistence(timeout: 8))
+        let labels = dates.firstMatch.descendants(matching: .any).allElementsBoundByIndex.map { $0.label }.joined(separator: " ")
+        XCTAssertTrue(labels.contains("年") && labels.contains("月"), "Native date controls must retain Chinese units under an English system language: \(labels)")
+        capture(app, "campus-chinese-date-picker")
+    }
+
+    func testCampusApproversWaitForTypeSelection() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-ui", "--preview-page", "campus-form-leave", "--preview-form-choices"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["campus-approver-prerequisite"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["campus-approver-retry"].exists)
+        app.buttons["campus-form-choice-类型"].tap()
+        app.buttons["病假"].tap()
+        XCTAssertTrue(app.buttons["campus-form-choice-辅导员"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["示例审批人"].exists)
+        XCTAssertFalse(app.staticTexts["campus-approver-prerequisite"].exists)
+        XCTAssertFalse(app.buttons["campus-approver-retry"].exists)
+        capture(app, "campus-approver-after-type-selection")
+    }
+
+    func testCampusNativeFormLargeText() {
+        let app = launch("campus-form-leave", largeText: true)
+        let review = app.buttons["campus-form-review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 8))
+        XCTAssertGreaterThanOrEqual(review.frame.height, 44)
+        app.swipeUp()
+        capture(app, "campus-native-accessibility-form")
+    }
+
+    func testCampusFormKeyboardKeepsEditorVisible() {
+        let app = launch("campus-form-leave")
+        let reason = app.textViews["campus-form-reason"]
+        XCTAssertTrue(reason.waitForExistence(timeout: 8))
+        reason.tap()
+        reason.typeText("A short reason")
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        let visible = NSPredicate { _, _ in reason.frame.maxY <= keyboard.frame.minY + 2 }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: visible, evaluatedWith: reason)], timeout: 5), .completed,
+                       "The active editor must remain above the keyboard")
+        capture(app, "campus-form-keyboard")
+    }
+
+    func testCampusElectricityAmountSelection() {
+        let app = launch("campus-electricity")
+        let amount = app.textFields["缴费金额，单位元"]
+        XCTAssertTrue(amount.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["剩余金额"].exists)
+        app.buttons["50 元"].tap()
+        XCTAssertEqual(amount.value as? String, "50")
+        XCTAssertFalse(app.buttons["立即缴费"].isEnabled, "Synthetic previews must never enable a real payment")
+        capture(app, "campus-electricity-amount")
+    }
+
+    func testCampusAdaptiveLayout() {
+        defer { XCUIDevice.shared.orientation = .portrait }
+        for page in ["campus-form-leave", "campus-form-departure", "campus-electricity"] {
+            XCUIDevice.shared.orientation = .portrait
+            var app = launch(page, largeText: true)
+            let action = app.buttons[page == "campus-electricity" ? "立即缴费" : "campus-form-review"]
+            XCTAssertTrue(action.waitForExistence(timeout: 8))
+            XCTAssertTrue(action.isHittable)
+            XCTAssertGreaterThanOrEqual(action.frame.height, 44)
+            capture(app, "campus-largest-type-\(page)")
+            app.terminate()
+            app = launch(page)
+            XCUIDevice.shared.orientation = .landscapeLeft
+            let landscape = NSPredicate { _, _ in app.frame.width > app.frame.height }
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: landscape, evaluatedWith: app)], timeout: 5), .completed)
+            XCTAssertTrue(app.buttons[page == "campus-electricity" ? "立即缴费" : "campus-form-review"].isHittable)
+            capture(app, "campus-landscape-\(page)")
+            app.terminate()
+        }
+    }
+
+    func testCampusReducedMotion() {
+        for page in ["campus-form-leave", "campus-form-departure", "campus-electricity"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--preview-ui", "--preview-page", page, "--preview-reduce-motion"]
+            app.launch()
+            let probe = app.staticTexts["campus-reduce-motion"]
+            XCTAssertTrue(probe.waitForExistence(timeout: 8))
+            XCTAssertEqual(probe.label, "reduce-motion-on", "Verify the real simulator preference reaches SwiftUI")
+            capture(app, "campus-reduce-motion-\(page)")
+            app.terminate()
+        }
+    }
+
+    func testCampusRecordsSurviveFormDismissal() {
+        for page in ["campus-leave", "campus-travel"] {
+            let app = launch(page)
+            let isLeave = page == "campus-leave"
+            let record = app.staticTexts[isLeave ? "示例请假记录" : "示例区县"]
+            XCTAssertTrue(record.waitForExistence(timeout: 8))
+            for _ in 0..<2 {
+                app.buttons[isLeave ? "申请请假" : "办理离校登记"].tap()
+                let close = app.buttons[isLeave ? "关闭申请请假" : "关闭离校登记"]
+                XCTAssertTrue(close.waitForExistence(timeout: 5))
+                close.tap()
+                XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format:"exists == false"), evaluatedWith:close)], timeout:5), .completed)
+                XCTAssertTrue(record.waitForExistence(timeout: 5), "Cancelling a form must retain existing records without a manual refresh")
+            }
+            capture(app, "campus-records-after-form-\(page)")
+            app.terminate()
+        }
+    }
+
     private func launch(_ page: String, longList: Bool = false, transition: Bool = false, withoutUpcoming: Bool = false,
                         refresh: Bool = false, empty: Bool = false, largeText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()

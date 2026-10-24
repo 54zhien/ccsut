@@ -4,22 +4,49 @@ import Combine
 
 struct EcardPaymentView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(\.dynamicTypeSize) private var textSize
     @State private var model = EcardPaymentModel()
     @FocusState private var amountFocused: Bool
+
+    init() {
+        let value = EcardPaymentModel()
+        #if DEBUG
+        if InterfacePreview.enabled && InterfacePreview.page.hasPrefix("campus-electricity") {
+            value.fee = try! JSONDecoder().decode(FeeItem.self, from: Data("""
+            {"feeitemid":"preview-fee","name":"电费","flag":"0000000100","maxmoney":"400","daymaxmoney":"1000","dayout":"10,50,100"}
+            """.utf8))
+            func option(_ name: String, _ id: String) -> ThirdOption {
+                let data = try! JSONSerialization.data(withJSONObject: ["name": name, "value": id])
+                return try! JSONDecoder().decode(ThirdOption.self, from: data)
+            }
+            value.campuses = [option("示例校区", "preview-campus")]; value.campus = "preview-campus"
+            value.buildings = [option("示例宿舍 1 栋", "preview-building")]; value.building = "preview-building"
+            value.rooms = [option("101 室", "preview-room")]; value.room = "preview-room"
+            let context = MeterContext()
+            value.detail = MeterDetail(context: context, show: ["房间信息": "示例宿舍 1 栋 · 101 室", "表类型": "电表", "剩余金额": "36.80"], dataType: nil)
+            if InterfacePreview.page == "campus-electricity-confirmation" {
+                value.confirmation = .init(amount: 50, room: "示例宿舍 1 栋 · 101 室", roomValue: "preview-room", context: context)
+            } else if InterfacePreview.page == "campus-electricity-result" || InterfacePreview.page == "campus-electricity-pending" {
+                value.receipt = .init(status: InterfacePreview.page == "campus-electricity-result" ? .completed : .pending,
+                                      room: "示例宿舍 1 栋 · 101 室", amount: "50", orderID: "preview-order")
+            }
+        }
+        #endif
+        _model = State(initialValue: value)
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                introduction
                 if let receipt = model.receipt { result(receipt) }
                 else {
-                    roomSelection
                     if let detail = model.detail { meterCard(detail) }
+                    roomSelection
                     amountSelection
                 }
                 if let message = model.errorText {
                     VStack(alignment: .leading, spacing: 10) {
-                        Label(message, systemImage: "exclamationmark.circle")
+                        Label(CampusPrivacy.redact(message), systemImage: "exclamationmark.circle")
                             .font(.footnote).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
@@ -60,6 +87,10 @@ struct EcardPaymentView: View {
                 .interactiveDismissDisabled(model.isSubmitting)
         }
         .task {
+            #if DEBUG
+            // No client, account or network preparation exists in these synthetic fixtures.
+            if InterfacePreview.enabled && InterfacePreview.page.hasPrefix("campus-electricity") { return }
+            #endif
             if session.studentId == nil { await session.loadProfile() }
             guard !Task.isCancelled else { return }
             model.start(account: session.studentId)
@@ -67,38 +98,20 @@ struct EcardPaymentView: View {
         .onDisappear { model.stopQueries() }
     }
 
-    private var introduction: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: "bolt.fill")
-                .font(.system(size: 21, weight: .medium)).foregroundStyle(Color.accentColor)
-                .frame(width: 46, height: 46)
-                .background(Color.accentColor.opacity(0.09), in: .rect(cornerRadius: 14))
-            VStack(alignment: .leading, spacing: 6) {
-                Text("宿舍用电，随时补充").font(.headline)
-                Text("选择房间，查询电表余额后缴费。")
-                    .font(.subheadline).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 4)
-    }
-
     private var roomSelection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("缴费房间")
-            VStack(spacing: 0) {
+            CampusSection("缴费房间") {
                 if model.campuses.count > 1 {
                     selectionRow("校区", placeholder: "请选择校区", options: model.campuses,
                                  value: model.campus, action: model.selectCampus)
-                    Divider().padding(.leading, 16)
+                    Divider()
                 }
                 selectionRow("楼栋", placeholder: "请选择楼栋", options: model.buildings,
                              value: model.building, action: model.selectBuilding)
-                Divider().padding(.leading, 16)
+                Divider()
                 selectionRow("房间", placeholder: "请选择房间", options: model.rooms,
                              value: model.room, action: model.selectRoom)
             }
-            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
             if model.isStarting || model.loadingText != nil {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -109,52 +122,61 @@ struct EcardPaymentView: View {
     }
     private func selectionRow(_ title: String, placeholder: String, options: [ThirdOption],
                               value: String?, action: @escaping (String?) -> Void) -> some View {
-        HStack {
-            Text(title).font(.body)
-            Spacer(minLength: 8)
-            Picker(title, selection: Binding(get: { value }, set: action)) {
-                Text(placeholder).tag(nil as String?)
-                ForEach(options, id: \.value) { option in Text(option.name).tag(Optional(option.value)) }
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                Text(title).foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                selectionPicker(title, placeholder: placeholder, options: options, value: value, action: action)
+                    .fixedSize(horizontal: true, vertical: false)
             }
-            .pickerStyle(.menu).labelsHidden()
-            .disabled(options.isEmpty || model.isSubmitting)
-            .accessibilityLabel(title)
-        }
-        .frame(minHeight: 52).padding(.horizontal, 16).padding(.vertical, 4)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).foregroundStyle(.secondary)
+                selectionPicker(title, placeholder: placeholder, options: options, value: value, action: action)
+            }
+        }.frame(minHeight: 44)
+    }
+    private func selectionPicker(_ title: String, placeholder: String, options: [ThirdOption],
+                                 value: String?, action: @escaping (String?) -> Void) -> some View {
+        Picker(title, selection: Binding(get: { value }, set: action)) {
+            Text(placeholder).tag(nil as String?)
+            ForEach(options, id: \.value) { option in Text(CampusPrivacy.redact(option.name)).tag(Optional(option.value)) }
+        }.pickerStyle(.menu).labelsHidden().disabled(options.isEmpty || model.isSubmitting).accessibilityLabel(title)
     }
     private func meterCard(_ detail: MeterDetail) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionTitle("电表信息")
-            VStack(spacing: 14) {
-                info("房间信息", detail.roomDescription ?? "—")
-                info("表类型", detail.meterTypeName ?? "—")
-                Divider()
-                HStack(alignment: .firstTextBaseline) {
-                    Text("剩余金额").foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("\(detail.show["剩余金额"] ?? "—") 元")
-                            .font(.title3.weight(.semibold).monospacedDigit())
-                            .foregroundStyle((detail.remainingAmount ?? 0) < 0 ? Color.red : Color.primary)
-                        if (detail.remainingAmount ?? 0) < 0 {
-                            Text("当前欠费").font(.caption).foregroundStyle(.red)
-                        }
-                    }
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Label("剩余金额", systemImage: "bolt.fill").font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+                if (detail.remainingAmount ?? 0) < 0 {
+                    Text("当前欠费").font(.caption.weight(.semibold)).foregroundStyle(.red)
                 }
             }
-            .padding(20)
-            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+            ViewThatFits(in: .horizontal) {
+                balance(detail).fixedSize(horizontal: true, vertical: false)
+                balance(detail).minimumScaleFactor(0.5)
+            }
+            Divider()
+            CampusInfoRow("房间信息", value: detail.roomDescription ?? "—")
+            CampusInfoRow("表类型", value: detail.meterTypeName ?? "—")
         }
+        .padding(24).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+    }
+    private func balance(_ detail: MeterDetail) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(CampusPrivacy.redact(detail.show["剩余金额"] ?? "—"))
+                .font(.largeTitle.weight(.semibold).monospacedDigit()).lineLimit(1)
+                .foregroundStyle((detail.remainingAmount ?? 0) < 0 ? Color.red : Color.primary)
+            Text("元").font(.subheadline).foregroundStyle(.secondary)
+        }.accessibilityElement(children: .combine)
     }
 
     private var amountSelection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("缴费金额")
-            VStack(alignment: .leading, spacing: 18) {
+        CampusSection("缴费金额") {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text("¥").font(.title2.weight(.medium)).foregroundStyle(.secondary)
                     TextField("输入金额", text: $model.amountText)
-                        .font(.system(size: 32, weight: .semibold, design: .rounded).monospacedDigit())
+                        .font(.largeTitle.weight(.semibold).monospacedDigit())
                         .keyboardType(.decimalPad).focused($amountFocused)
                         .accessibilityLabel("缴费金额，单位元")
                     if amountFocused {
@@ -164,7 +186,7 @@ struct EcardPaymentView: View {
                     }
                 }
                 if !model.quickAmounts.isEmpty {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 10) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: textSize.isAccessibilitySize ? 140 : 80))], spacing: 10) {
                         ForEach(model.quickAmounts, id: \.self) { amount in
                             Button { model.amountText = amount.ecardAmountText; amountFocused = false } label: {
                                 Text("\(amount.ecardAmountText) 元")
@@ -183,9 +205,6 @@ struct EcardPaymentView: View {
                 } else {
                     Text(limitDescription).font(.footnote).foregroundStyle(.secondary)
                 }
-            }
-            .padding(20)
-            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
         }
     }
     private var limitDescription: String {
@@ -195,54 +214,56 @@ struct EcardPaymentView: View {
         return text
     }
     private var payBar: some View {
-        VStack(spacing: 10) {
-            Button {
-                amountFocused = false
-                model.prepareConfirmation()
-            } label: {
-                Text("立即缴费").font(.headline).frame(maxWidth: .infinity, minHeight: 32)
-            }
-            .buttonStyle(.glassProminent).buttonBorderShape(.capsule).controlSize(.large)
-            .disabled(!model.canPay)
-            Text("从一卡通余额扣款，确认后即支付")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 12)
-        .background(.bar)
-    }
-    private func confirmation(_ confirmed: EcardPaymentModel.Confirmation) -> some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack {
-                Text(model.isSubmitting ? "正在缴费" : "确认缴费").font(.title2.bold())
-                Spacer()
-                if !model.isSubmitting {
-                    SheetSymbolButton(symbol: "xmark", label: "取消缴费") { model.confirmation = nil }
-                }
-            }
-            VStack(spacing: 16) {
-                info("缴费房间", confirmed.room)
-                info("支付方式", "一卡通余额")
-                Divider()
-                HStack {
-                    Text("缴费金额").foregroundStyle(.secondary)
-                    Spacer()
-                    Text("¥\(confirmed.amount.ecardAmountText)").font(.title.bold().monospacedDigit())
-                }
-            }
-            if model.isSubmitting {
-                HStack(spacing: 10) { ProgressView(); Text("正在提交，请勿重复缴费").font(.subheadline) }
-            } else {
-                Text("这是免密支付。请确认房间与金额，点击下方按钮后将直接扣款。")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Button { Task { await model.submit(confirmed) } } label: {
-                    Text("确认支付 \(confirmed.amount.ecardAmountText) 元").font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 32)
+        CampusActionDock {
+            VStack(spacing: 10) {
+                Button {
+                    amountFocused = false
+                    model.prepareConfirmation()
+                } label: {
+                    Text("立即缴费").font(.headline).frame(maxWidth: .infinity, minHeight: 32)
                 }
                 .buttonStyle(.glassProminent).buttonBorderShape(.capsule).controlSize(.large)
+                .campusActionControl()
+                .disabled(!model.canPay)
+                Text("从一卡通余额扣款，确认后即支付")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            Spacer(minLength: 0)
+            .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 12)
         }
-        .padding(24).padding(.top, 8)
+    }
+    private func confirmation(_ confirmed: EcardPaymentModel.Confirmation) -> some View {
+        VStack(spacing: 0) {
+            SheetHeader(title: model.isSubmitting ? "正在缴费" : "确认缴费") { model.confirmation = nil }
+                .disabled(model.isSubmitting)
+            ScrollView {
+                CampusSection("支付明细") {
+                    Text("¥\(confirmed.amount.ecardAmountText)").font(.largeTitle.weight(.semibold).monospacedDigit())
+                        .fixedSize(horizontal: false, vertical: true)
+                    Divider()
+                    info("缴费房间", confirmed.room)
+                    info("支付方式", "一卡通余额")
+                }
+                .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
+            }
+            CampusActionDock {
+                VStack(spacing: 12) {
+                    if model.isSubmitting {
+                        HStack(spacing: 10) { ProgressView(); Text("正在提交，请勿重复缴费").font(.subheadline) }
+                    } else {
+                        Text("这是免密支付。请确认房间与金额，点击下方按钮后将直接扣款。")
+                            .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Button { Task { await model.submit(confirmed) } } label: {
+                            Text("确认支付 \(confirmed.amount.ecardAmountText) 元").font(.headline)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.glassProminent).buttonBorderShape(.capsule)
+                        .campusActionControl()
+                    }
+                }
+                .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
+            }
+        }
+        .background(Color(.systemGroupedBackground))
     }
     private func result(_ receipt: EcardPaymentModel.Receipt) -> some View {
         VStack(spacing: 20) {
@@ -252,14 +273,15 @@ struct EcardPaymentView: View {
                 .padding(.top, 8).accessibilityHidden(true)
             Text(receipt.status == .completed ? "缴费成功" : receipt.status == .pending ? "结果待确认" : "缴费未完成")
                 .font(.title2.bold())
-            Text("¥\(receipt.amount)").font(.system(size: 36, weight: .semibold, design: .rounded).monospacedDigit())
-            Text(receipt.room).font(.subheadline).multilineTextAlignment(.center)
+            Text("¥\(CampusPrivacy.redact(receipt.amount))").font(.largeTitle.weight(.semibold).monospacedDigit())
+                .fixedSize(horizontal: false, vertical: true)
+            Text(CampusPrivacy.redact(receipt.room)).font(.subheadline).multilineTextAlignment(.center)
             Divider()
-            if let message = receipt.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
+            if let message = receipt.message { Text(CampusPrivacy.redact(message)).font(.footnote).foregroundStyle(.secondary) }
             Text(receipt.status == .pending ? "支付结果尚未确认，请查询原订单，勿重复缴费。" : receipt.status == .completed ? "电表到账约 1–5 分钟" : "缴费成功后，电表到账约 1–5 分钟")
                 .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             if let orderID = receipt.orderID {
-                Text("订单号 \(orderID)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Text("订单号 \(CampusPrivacy.redact(orderID))").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
             if receipt.status == .pending {
                 Button { Task { await model.checkOrder() } } label: {
@@ -275,16 +297,8 @@ struct EcardPaymentView: View {
         .frame(maxWidth: .infinity).padding(24)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
     }
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-            .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
-    }
     private func info(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            Text(label).foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-            Text(value).multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
-        }
+        CampusInfoRow(label, value: value)
     }
 }
 

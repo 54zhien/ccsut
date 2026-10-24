@@ -1,0 +1,96 @@
+name: Campus preview
+
+on:
+  push:
+    branches: [codex/zhixiao-services]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/campus-preview.yml'
+  workflow_dispatch:
+    inputs:
+      adaptive_devices:
+        description: 'Also capture compact phone and iPad'
+        type: boolean
+        default: false
+
+jobs:
+  campus:
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build simulator app
+        id: build
+        run: |
+          set -o pipefail
+          xcodebuild build -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/UIPreview" \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/campus-build.log"
+      - name: Boot native simulator
+        run: bash ios/Tests/render-preview.sh --boot-only
+      - name: Check campus navigation and accessibility
+        run: |
+          set -o pipefail
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/campus-tests.xcresult" \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusEntryAndRecords \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusLargeTextEntries \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusOfficialWebPrivacy \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeLeaveForm \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeDepartureForm \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusFormLoadingIsCentered \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusLeaveDatesUseChinese \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusApproversWaitForTypeSelection \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeFormLargeText \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusRecordsSurviveFormDismissal \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusFormKeyboardKeepsEditorVisible \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusAdaptiveLayout \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/campus-tests.log"
+      - name: Capture campus light and dark screens
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          for appearance in light dark; do
+            xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance "$appearance"
+            for page in campus campus-leave campus-travel campus-form-leave campus-form-departure campus-electricity campus-electricity-confirmation campus-electricity-result campus-electricity-pending; do
+              xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$page"
+              sleep 3
+              xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$RUNNER_TEMP/ui-screenshots/$page-$appearance.png"
+            done
+          done
+      - name: Verify reduced motion setting
+        run: |
+          set -o pipefail
+          xcrun simctl spawn "$CCSUT_PREVIEW_DEVICE" defaults write com.apple.Accessibility ReduceMotionEnabled -bool YES
+          xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/campus-motion.xcresult" \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusReducedMotion \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/campus-motion.log"
+      - name: Capture compact phone and iPad
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.adaptive_devices == true }}
+        run: bash ios/Tests/render-campus-adaptive.sh
+      - name: Export test screenshots
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/campus-tests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/campus-tests.xcresult" --output-path "$RUNNER_TEMP/campus-attachments"
+          fi
+          if [ -d "$RUNNER_TEMP/campus-motion.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/campus-motion.xcresult" --output-path "$RUNNER_TEMP/campus-motion-attachments"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CCSUT-campus-preview
+          path: |
+            ${{ runner.temp }}/campus-build.log
+            ${{ runner.temp }}/campus-tests.log
+            ${{ runner.temp }}/campus-motion.log
+            ${{ runner.temp }}/ui-screenshots/
+            ${{ runner.temp }}/campus-attachments/
+            ${{ runner.temp }}/campus-motion-attachments/
+          if-no-files-found: error
+          retention-days: 14
