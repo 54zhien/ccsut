@@ -48,6 +48,13 @@ struct CampusModelTests {
         }
         check(CampusPrivacy.redact("2026-10-24 病假") == "2026-10-24 病假", "ordinary date text remains readable")
         check(!CampusError.invalidResponse.localizedDescription.contains("private fixture error"), "errors have fixed safe copy")
+        let webError = NSError(domain: NSURLErrorDomain, code: -1022, userInfo: [
+            NSLocalizedDescriptionKey: "private fixture body",
+            NSURLErrorFailingURLErrorKey: URL(string: "https://auth.ccsut.cn/?ticket=private-fixture-ticket")!
+        ])
+        let webMessage = CampusWebFailure.message(webError, syncingCookies: false)
+        check(webMessage.contains("-1022") && !webMessage.contains("private") && !webMessage.contains("ticket"),
+              "official browser reports a useful error code without sensitive error details")
 
         var state = CampusPageState()
         try state.apply(page, reset: true)

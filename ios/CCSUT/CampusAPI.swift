@@ -84,9 +84,21 @@ actor CampusClient: CampusReading {
     private enum Subsystem: Hashable { case leave, travel }
     private enum Failure: Error { case unauthorized }
     private struct Identity: Decodable, Sendable {
+        struct Token: Decodable, Sendable {
+            let access_token: String
+            let token_type: String
+        }
         let errcode: Int
         let account: String
         let userId: String
+        let data: Token?
+
+        // Kept only in this generation-bound client; never persisted or logged.
+        var authorization: String? {
+            guard let data, data.token_type.lowercased() == "bearer", !data.access_token.isEmpty,
+                  data.access_token.unicodeScalars.allSatisfy({ (33...126).contains($0.value) }) else { return nil }
+            return "Bearer " + data.access_token
+        }
     }
 
     static let leavePage = URL(string: "https://ehall.ccsut.cn/backstage/leaveadmin/page/mobile/#/leaveList")!
@@ -124,6 +136,7 @@ actor CampusClient: CampusReading {
             let identity = try await identity(for: subsystem, callback: callback, force: attempt == 1)
             var request = request(path)
             request.httpMethod = "POST"
+            request.setValue(identity.authorization, forHTTPHeaderField: "Authorization")
             request.setValue("application/json;charset=UTF-8", forHTTPHeaderField: "Content-Type")
             request.setValue(callback.absoluteString, forHTTPHeaderField: "Referer")
             request.httpBody = try JSONSerialization.data(withJSONObject: body(identity.userId))
@@ -166,6 +179,7 @@ actor CampusClient: CampusReading {
         guard let identity = try? JSONDecoder().decode(Identity.self, from: data),
               identity.errcode == 2000, !identity.userId.isEmpty else { return nil }
         guard identity.account == account else { throw CampusError.identityMismatch }
+        guard identity.authorization != nil else { throw CampusError.invalidResponse }
         return identity
     }
 

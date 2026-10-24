@@ -11,6 +11,8 @@ SwiftUI + Swift 6 + iOS 26。
 
 新增校园记录只保存在内存，手机号、身份证号、银行卡号不进入展示模型，自由文本号码脱敏；错误不包含服务器响应正文。真实会话和抓包文件不得用作仓库 fixture。
 
+ehall 业务查询还需要 `validate_full.data.access_token`，以 `Authorization: Bearer …` 传递；单独带 Cookie 会返回 401。令牌仅保存在当前账号代数对应的内存客户端中，401 后重新验证并换用新令牌，CAS 跳转与验证请求不携带该令牌。官方 WebView 失败提示仅显示固定类别与数字错误码，不显示原始错误、完整 URL 或票据。
+
 | 模块 | 数据源 | 实测规模 |
 |---|---|---|
 | 课表 | `POST /admin/xsd/pkgl/xskb/sdpkkbList` | 98 条 / 10 门课 / 4 大节 × 7 天 |

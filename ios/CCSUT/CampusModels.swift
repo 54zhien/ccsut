@@ -1,5 +1,16 @@
 import Foundation
 
+enum CampusWebFailure {
+    /// NSError.userInfo can contain tickets, full URLs and response bodies.
+    /// Expose only a fixed category and numeric code for device diagnostics.
+    static func message(_ error: Error, syncingCookies: Bool) -> String {
+        let error = error as NSError
+        let category = error.domain == NSURLErrorDomain ? "网络" : "网页"
+        let stage = syncingCookies ? "校园会话同步失败" : "官方页面连接失败"
+        return "\(stage)（\(category) \(error.code)），请重试"
+    }
+}
+
 enum CampusError: Error, LocalizedError, Equatable, Sendable {
     case authentication, forbidden, invalidResponse, serviceUnavailable, identityMismatch
     case http(Int)

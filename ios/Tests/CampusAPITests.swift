@@ -43,7 +43,7 @@ actor FixtureCampusTransport: CampusTransport {
 
 @main
 struct CampusAPITests {
-    static let identity = #"{"errcode":2000,"account":"fixture-account","userId":"fixture-user-id"}"#
+    static let identity = #"{"errcode":2000,"account":"fixture-account","userId":"fixture-user-id","data":{"access_token":"fixture-access-token","token_type":"bearer"}}"#
     static let emptyPage = #"{"data":{"list":[],"pageNum":1,"pageSize":20,"total":0,"hasNextPage":false}}"#
 
     static func main() async throws {
@@ -72,6 +72,39 @@ struct CampusAPITests {
         let travelBodies = try travel.map { try JSONSerialization.jsonObject(with: $0.httpBody!) as! [String: String] }
         check(travelBodies.allSatisfy { $0["studentId"] == "fixture-user-id" }, "both travel requests use userId as studentId")
         check(requests.allSatisfy { $0.cachePolicy == .reloadIgnoringLocalCacheData }, "requests do not use response cache")
+        check(requests.filter { $0.httpMethod == "POST" }.allSatisfy {
+            $0.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-access-token"
+        }, "all three read-only endpoints send the validated bearer token")
+        check(requests.filter { $0.httpMethod != "POST" }.allSatisfy {
+            $0.value(forHTTPHeaderField: "Authorization") == nil
+        }, "validation and CAS never receive business bearer tokens")
+
+        let rotated = FixtureCampusTransport { req, index in
+            if req.url!.path.hasSuffix("validate_full") {
+                return (200, [:], index == 1 ? identity : identity.replacingOccurrences(of: "fixture-access-token", with: "fixture-new-token"))
+            }
+            return index == 2 ? (401, [:], "") : (200, [:], emptyPage)
+        }
+        _ = try await CampusClient(account: "fixture-account", credentials: credentials, transport: rotated).leaveRecords()
+        let rotatedRequests = await rotated.requests
+        check(rotatedRequests.last?.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-new-token",
+              "401 retry replaces the stale bearer token with revalidated credentials")
+
+        for invalidToken in ["", "fixture\r\nInjected: value"] {
+            let malformed = FixtureCampusTransport { _, _ in
+                let data: [String: Any] = ["errcode": 2000, "account": "fixture-account", "userId": "fixture-user-id",
+                                          "data": ["access_token": invalidToken, "token_type": "bearer"]]
+                return (200, [:], String(data: try JSONSerialization.data(withJSONObject: data), encoding: .utf8)!)
+            }
+            do {
+                _ = try await CampusClient(account: "fixture-account", credentials: credentials, transport: malformed).leaveRecords()
+                check(false, "malformed token rejected")
+            } catch {
+                let count = await malformed.requests.count
+                check(error as? CampusError == .invalidResponse && count == 1,
+                      "empty or header-injecting token cannot issue a business request")
+            }
+        }
 
         let retried = FixtureCampusTransport { req, index in
             if req.url!.path.hasSuffix("validate_full") { return (200, [:], identity) }

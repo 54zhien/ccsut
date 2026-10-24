@@ -98,15 +98,15 @@ private final class CampusOfficialBrowser: NSObject, WKNavigationDelegate {
             guard current else { return }
             webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
         } catch is CancellationError { return }
-        catch { failed() }
+        catch { failed(CampusWebFailure.message(error, syncingCookies: true)) }
     }
 
     func stop() { active = false; webView.stopLoading() }
     private var current: Bool { active && CookieJar.generation == generation }
-    private func failed() {
+    private func failed(_ message: String = "官方页面暂时无法打开，请重试") {
         guard current else { return }
         isLoading = false
-        error = "官方页面暂时无法打开，请重试"
+        error = message
     }
 
     nonisolated func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -116,7 +116,7 @@ private final class CampusOfficialBrowser: NSObject, WKNavigationDelegate {
         guard ["ehall.ccsut.cn", "auth.ccsut.cn"].contains(url.host?.lowercased() ?? ""),
               url.user == nil, url.password == nil else {
             decisionHandler(.cancel)
-            Task { @MainActor [weak self] in self?.failed() }
+            Task { @MainActor [weak self] in self?.failed("官方页面跳转未被允许，请重试") }
             return
         }
         if url.scheme == "http" {
@@ -195,11 +195,13 @@ private final class CampusOfficialBrowser: NSObject, WKNavigationDelegate {
 
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         if (error as NSError).code == NSURLErrorCancelled { return }
-        Task { @MainActor [weak self] in self?.failed() }
+        let message = CampusWebFailure.message(error, syncingCookies: false)
+        Task { @MainActor [weak self] in self?.failed(message) }
     }
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         if (error as NSError).code == NSURLErrorCancelled { return }
-        Task { @MainActor [weak self] in self?.failed() }
+        let message = CampusWebFailure.message(error, syncingCookies: false)
+        Task { @MainActor [weak self] in self?.failed(message) }
     }
 }
 
