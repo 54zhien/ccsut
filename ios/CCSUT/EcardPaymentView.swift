@@ -61,6 +61,7 @@ struct EcardPaymentView: View {
         }
         .task {
             if session.studentId == nil { await session.loadProfile() }
+            guard !Task.isCancelled else { return }
             model.start(account: session.studentId)
         }
         .onDisappear { model.stopQueries() }
