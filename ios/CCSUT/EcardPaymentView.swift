@@ -22,6 +22,7 @@ struct EcardPaymentView: View {
                         Label(message, systemImage: "exclamationmark.circle")
                             .font(.footnote).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
                         if model.receipt == nil {
                             Button("重新加载") { model.start(account: session.studentId, force: true) }
                                 .font(.subheadline.weight(.semibold))

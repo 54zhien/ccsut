@@ -530,9 +530,62 @@ final class EcardClient {
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch let error as DecodingError {
-            throw EcardError.decoding(Self.describe(error))
+            throw EcardError.decoding(Self.responseDescription(req, http: http, data: data, error: error))
         } catch {
-            throw EcardError.decoding(error.localizedDescription)
+            throw EcardError.decoding("\(Self.operationName(req))：无法读取接口响应")
+        }
+    }
+
+    /// Only report fixed classifications. Never include the response body, URL
+    /// query, cookies or headers: these can contain credentials and student data.
+    private static func responseDescription(_ request: URLRequest, http: HTTPURLResponse,
+                                            data: Data, error: DecodingError) -> String {
+        let prefix = String(decoding: data.prefix(128), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}")))
+            .lowercased()
+        let content: String
+        if data.isEmpty { content = "响应为空" }
+        else if http.mimeType?.lowercased() == "text/html" || prefix.hasPrefix("<!doctype html") || prefix.hasPrefix("<html") {
+            content = "接口返回了网页，未收到 JSON 数据"
+        } else { content = describe(error) }
+
+        let destination: String
+        switch http.url?.host?.lowercased() {
+        case "ecard.ccsut.cn":
+            if http.url?.path == request.url?.path { destination = "一卡通接口" }
+            else if http.url?.path.hasPrefix("/plat") == true { destination = "一卡通门户" }
+            else { destination = "一卡通其他页面" }
+        case "auth.ccsut.cn": destination = "CAS 登录页"
+        case "zts.ccsut.cn": destination = "学校访问网关"
+        default: destination = "其他地址"
+        }
+        let format: String
+        switch http.mimeType?.lowercased() {
+        case "application/json", "text/json": format = "JSON"
+        case "text/html": format = "HTML"
+        case "text/plain": format = "纯文本"
+        case nil: format = "未声明类型"
+        default: format = "其他类型"
+        }
+        return "\(operationName(request))：\(content)（HTTP \(http.statusCode)，\(format)，\(destination)）"
+    }
+
+    private static func operationName(_ request: URLRequest) -> String {
+        switch request.url?.path {
+        case "/charge/feeitem/singleFeeitem": return "加载缴费项目"
+        case "/charge/feeitem/getThirdData":
+            var form = URLComponents()
+            form.percentEncodedQuery = request.httpBody.flatMap { String(data: $0, encoding: .utf8) }
+            switch form.queryItems?.first(where: { $0.name == "level" })?.value {
+            case "0": return "加载校区"
+            case "1": return "加载楼栋"
+            case "2": return "加载房间"
+            case "3": return "查询电表"
+            default: return "加载房间选项"
+            }
+        case "/blade-pay/pay": return "提交缴费订单"
+        case "/charge/pay/getpayinfo": return "查询支付结果"
+        default: return "请求一卡通"
         }
     }
 
@@ -545,7 +598,8 @@ final class EcardClient {
         case .valueNotFound(_, let ctx):
             return "值为空 @\(ctx.codingPath.map(\.stringValue).joined(separator: "."))"
         case .dataCorrupted(let ctx):
-            return "数据损坏 @\(ctx.codingPath.map(\.stringValue).joined(separator: "."))"
+            return ctx.codingPath.isEmpty ? "响应不是有效的 JSON 数据" :
+                "字段内容无法解析 @\(ctx.codingPath.map(\.stringValue).joined(separator: "."))"
         @unknown default:
             return "未知解析错误"
         }
