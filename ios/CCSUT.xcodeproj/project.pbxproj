@@ -7,6 +7,27 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		000000000000000000CE2002 /* CampusComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CE1002; };
+		000000000000000000CE2001 /* CampusPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CE1001; };
+		000000000000000000CF2001 /* CampusFormRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CF1001; };
+		000000000000000000CF2002 /* CampusFormsAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CF1002; };
+		000000000000000000CF2003 /* CampusFormModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CF1003; };
+		000000000000000000CF2004 /* CampusFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CF1004; };
+		000000000000000000CF2005 /* CampusFormInputs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CF1005; };
+		000000000000000000CF2006 /* CampusLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CF1006; };
+		000000000000000000CF2007 /* CampusAreas.json in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CF1007; };
+		000000000000000000CA2001 /* CampusModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1001; };
+		000000000000000000CA2002 /* CampusAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1002; };
+		000000000000000000CA2003 /* CampusSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1003; };
+		000000000000000000CA2004 /* CampusRecordsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1004; };
+		000000000000000000CA2005 /* CampusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1005; };
+		000000000000000000CA2006 /* CampusRecordViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1006; };
+		000000000000000000CA2007 /* CampusWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1007; };
+		000000000000000000CA2008 /* CampusWebPrivacy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000CA1008; };
+		000000000000000000EC2001 /* EcardAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1001 /* EcardAPI.swift */; };
+		000000000000000000EC2002 /* EcardTokenBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1002 /* EcardTokenBridge.swift */; };
+		000000000000000000EC2003 /* EcardPaymentModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1003 /* EcardPaymentModel.swift */; };
+		000000000000000000EC2004 /* EcardPaymentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1004 /* EcardPaymentView.swift */; };
 		A00000000000000000000020 /* APIResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000020; };
 		A00000000000000000000021 /* AcademicCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000021; };
 		A00000000000000000000022 /* AcademicAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000022; };
@@ -49,6 +70,27 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		000000000000000000CE1002 /* CampusComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusComponents.swift; sourceTree = "<group>"; };
+		000000000000000000CE1001 /* CampusPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusPresentation.swift; sourceTree = "<group>"; };
+		000000000000000000CF1001 /* CampusFormRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusFormRules.swift; sourceTree = "<group>"; };
+		000000000000000000CF1002 /* CampusFormsAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusFormsAPI.swift; sourceTree = "<group>"; };
+		000000000000000000CF1003 /* CampusFormModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusFormModel.swift; sourceTree = "<group>"; };
+		000000000000000000CF1004 /* CampusFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusFormView.swift; sourceTree = "<group>"; };
+		000000000000000000CF1005 /* CampusFormInputs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusFormInputs.swift; sourceTree = "<group>"; };
+		000000000000000000CF1006 /* CampusLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusLocation.swift; sourceTree = "<group>"; };
+		000000000000000000CF1007 /* CampusAreas.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = CampusAreas.json; sourceTree = "<group>"; };
+		000000000000000000CA1001 /* CampusModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusModels.swift; sourceTree = "<group>"; };
+		000000000000000000CA1002 /* CampusAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusAPI.swift; sourceTree = "<group>"; };
+		000000000000000000CA1003 /* CampusSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusSession.swift; sourceTree = "<group>"; };
+		000000000000000000CA1004 /* CampusRecordsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusRecordsModel.swift; sourceTree = "<group>"; };
+		000000000000000000CA1005 /* CampusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusView.swift; sourceTree = "<group>"; };
+		000000000000000000CA1006 /* CampusRecordViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusRecordViews.swift; sourceTree = "<group>"; };
+		000000000000000000CA1007 /* CampusWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusWebView.swift; sourceTree = "<group>"; };
+		000000000000000000CA1008 /* CampusWebPrivacy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusWebPrivacy.swift; sourceTree = "<group>"; };
+		000000000000000000EC1001 /* EcardAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardAPI.swift; sourceTree = "<group>"; };
+		000000000000000000EC1002 /* EcardTokenBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardTokenBridge.swift; sourceTree = "<group>"; };
+		000000000000000000EC1003 /* EcardPaymentModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardPaymentModel.swift; sourceTree = "<group>"; };
+		000000000000000000EC1004 /* EcardPaymentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardPaymentView.swift; sourceTree = "<group>"; };
 		B00000000000000000000020 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIResponse.swift; sourceTree = "<group>"; };
 		B00000000000000000000021 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcademicCalendar.swift; sourceTree = "<group>"; };
 		B00000000000000000000022 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcademicAPI.swift; sourceTree = "<group>"; };
@@ -100,6 +142,27 @@
 		C00000000000000000000002 /* CCSUT */ = {
 			isa = PBXGroup;
 			children = (
+				000000000000000000CA1001 /* CampusModels.swift */,
+				000000000000000000CA1002 /* CampusAPI.swift */,
+				000000000000000000CA1003 /* CampusSession.swift */,
+				000000000000000000CA1004 /* CampusRecordsModel.swift */,
+				000000000000000000CA1005 /* CampusView.swift */,
+				000000000000000000CA1006 /* CampusRecordViews.swift */,
+				000000000000000000CA1007 /* CampusWebView.swift */,
+				000000000000000000CA1008 /* CampusWebPrivacy.swift */,
+				000000000000000000CE1001 /* CampusPresentation.swift */,
+				000000000000000000CE1002 /* CampusComponents.swift */,
+				000000000000000000CF1001 /* CampusFormRules.swift */,
+				000000000000000000CF1002 /* CampusFormsAPI.swift */,
+				000000000000000000CF1003 /* CampusFormModel.swift */,
+				000000000000000000CF1004 /* CampusFormView.swift */,
+				000000000000000000CF1005 /* CampusFormInputs.swift */,
+				000000000000000000CF1006 /* CampusLocation.swift */,
+				000000000000000000CF1007 /* CampusAreas.json */,
+				000000000000000000EC1001 /* EcardAPI.swift */,
+				000000000000000000EC1002 /* EcardTokenBridge.swift */,
+				000000000000000000EC1003 /* EcardPaymentModel.swift */,
+				000000000000000000EC1004 /* EcardPaymentView.swift */,
 				B0000000000000000000000A /* CCSUTApp.swift */,
 				B0000000000000000000000B /* Session.swift */,
 				B0000000000000000000000C /* API.swift */,
@@ -200,6 +263,7 @@
 			files = (
 				A00000000000000000000011 /* Assets.xcassets in Resources */,
 				A0000000000000000000001E /* AppIcon.icon in Resources */,
+				000000000000000000CF2007 /* CampusAreas.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -210,6 +274,26 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				000000000000000000CA2001 /* CampusModels.swift in Sources */,
+				000000000000000000CA2002 /* CampusAPI.swift in Sources */,
+				000000000000000000CA2003 /* CampusSession.swift in Sources */,
+				000000000000000000CA2004 /* CampusRecordsModel.swift in Sources */,
+				000000000000000000CA2005 /* CampusView.swift in Sources */,
+				000000000000000000CA2006 /* CampusRecordViews.swift in Sources */,
+				000000000000000000CA2007 /* CampusWebView.swift in Sources */,
+				000000000000000000CA2008 /* CampusWebPrivacy.swift in Sources */,
+				000000000000000000CE2001 /* CampusPresentation.swift in Sources */,
+				000000000000000000CE2002 /* CampusComponents.swift in Sources */,
+				000000000000000000CF2001 /* CampusFormRules.swift in Sources */,
+				000000000000000000CF2002 /* CampusFormsAPI.swift in Sources */,
+				000000000000000000CF2003 /* CampusFormModel.swift in Sources */,
+				000000000000000000CF2004 /* CampusFormView.swift in Sources */,
+				000000000000000000CF2005 /* CampusFormInputs.swift in Sources */,
+				000000000000000000CF2006 /* CampusLocation.swift in Sources */,
+				000000000000000000EC2001 /* EcardAPI.swift in Sources */,
+				000000000000000000EC2002 /* EcardTokenBridge.swift in Sources */,
+				000000000000000000EC2003 /* EcardPaymentModel.swift in Sources */,
+				000000000000000000EC2004 /* EcardPaymentView.swift in Sources */,
 				A0000000000000000000001F /* AcademicNavigation.swift in Sources */,
 				A00000000000000000000020 /* APIResponse.swift in Sources */,
 				A00000000000000000000021 /* AcademicCalendar.swift in Sources */,

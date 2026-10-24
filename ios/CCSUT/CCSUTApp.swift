@@ -20,11 +20,23 @@ struct CCSUTApp: App {
                     switch InterfacePreview.page {
                     case "login": LoginView()
                     case "launch": LaunchView()
+                    #if DEBUG
+                    case "campus-privacy": CampusPrivacyPreview()
+                    case "campus-form-leave": CampusFormView(kind: .leave, account: "preview-account")
+                    case "campus-form-departure": CampusFormView(kind: .departure, account: "preview-account")
+                    case "campus-electricity", "campus-electricity-confirmation", "campus-electricity-result", "campus-electricity-pending":
+                        NavigationStack { EcardPaymentView() }
+                    #endif
                     default: MainTabs()
                     }
                 } else { RootView() }
             }
                 .environment(session)
+                .overlay(alignment: .bottomTrailing) {
+                    #if DEBUG
+                    if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-reduce-motion") { CampusMotionPreviewProbe() }
+                    #endif
+                }
                 .tint(.accentColor)
                 .environment(\.deviceCornerRadius, deviceCornerRadius)
                 .background {
@@ -42,6 +54,17 @@ struct CCSUTApp: App {
 }
 
 // MARK: - 根视图
+
+#if DEBUG
+private struct CampusMotionPreviewProbe: View {
+    @Environment(\.accessibilityReduceMotion) private var reduced
+    var body: some View {
+        Text(reduced ? "reduce-motion-on" : "reduce-motion-off")
+            .font(.caption2).padding(4).background(.background)
+            .accessibilityIdentifier("campus-reduce-motion")
+    }
+}
+#endif
 
 struct RootView: View {
     @Environment(SessionStore.self) private var session
@@ -131,13 +154,15 @@ struct MainTabs: View {
     @Environment(SessionStore.self) private var session
 
     enum AppTab: Hashable {
-        case schedule, academic
+        case schedule, academic, campus
     }
 
     @State private var selection: AppTab = .schedule
 
     init() {
-        _selection = State(initialValue: ["academic", "scores", "exams", "electives"].contains(InterfacePreview.page) ? .academic : .schedule)
+        let page = InterfacePreview.page
+        _selection = State(initialValue: page.hasPrefix("campus") ? .campus :
+            (["academic", "scores", "exams", "electives"].contains(page) ? .academic : .schedule))
     }
 
     var body: some View {
@@ -148,6 +173,10 @@ struct MainTabs: View {
 
             Tab("教务", systemImage: "square.grid.2x2", value: AppTab.academic) {
                 AcademicView()
+            }
+
+            Tab("校园", systemImage: "building.2", value: AppTab.campus) {
+                CampusView()
             }
         }
         .tabBarMinimizeBehavior(.never)
