@@ -4,7 +4,7 @@ final class PageInteractionUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
     private func launch(_ page: String, longList: Bool = false, transition: Bool = false, withoutUpcoming: Bool = false,
-                        refresh: Bool = false, empty: Bool = false) -> XCUIApplication {
+                        refresh: Bool = false, empty: Bool = false, legacyBlur: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", page]
         if longList { app.launchArguments.append("--preview-long-list") }
@@ -12,6 +12,7 @@ final class PageInteractionUITests: XCTestCase {
         if withoutUpcoming { app.launchArguments.append("--preview-no-upcoming") }
         if refresh { app.launchArguments.append("--preview-refresh") }
         if empty { app.launchArguments.append("--preview-empty") }
+        if legacyBlur { app.launchArguments.append("--legacy-top-blur") }
         app.launch()
         return app
     }
@@ -21,6 +22,40 @@ final class PageInteractionUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    func testTopBlurPreservesLegacyPageAndControlFrames() {
+        for page in ["schedule", "academic", "scores", "exams", "electives"] {
+            var referenceControl = CGRect.zero
+            var referenceScroll = CGRect.zero
+            for legacy in [true, false] {
+                let app = launch(page, legacyBlur: legacy)
+                let control = app.buttons[page == "schedule" || page == "academic" ? "账号" : "返回教务"]
+                XCTAssertTrue(control.waitForExistence(timeout: 5))
+                XCTAssertTrue(control.isHittable, "The blur must not block the top control")
+                let scroll = app.scrollViews.firstMatch
+                XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+                capture(app, "top-blur-\(page)-\(legacy ? "legacy" : "material")")
+                if legacy {
+                    referenceControl = control.frame
+                    referenceScroll = scroll.frame
+                } else {
+                    for (actual, expected) in [(control.frame, referenceControl), (scroll.frame, referenceScroll)] {
+                        XCTAssertEqual(actual.minX, expected.minX, accuracy: 1)
+                        XCTAssertEqual(actual.minY, expected.minY, accuracy: 1)
+                        XCTAssertEqual(actual.width, expected.width, accuracy: 1)
+                        XCTAssertEqual(actual.height, expected.height, accuracy: 1)
+                    }
+                    control.tap()
+                    if page == "schedule" || page == "academic" {
+                        XCTAssertTrue(app.buttons["退出登录"].waitForExistence(timeout: 5))
+                    } else {
+                        XCTAssertTrue(app.buttons["账号"].waitForExistence(timeout: 5))
+                    }
+                }
+                app.terminate()
+            }
+        }
     }
 
     func testColdLoadingFillsPageWidth() {

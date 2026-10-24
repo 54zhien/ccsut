@@ -20,10 +20,12 @@ xcrun simctl install "$DEVICE" "$APP"
 if [ "${1:-}" = "--boot-only" ]; then exit 0; fi
 
 capture() {
+  local blur_args=()
+  if [ "${3:-}" = "legacy" ]; then blur_args+=(--legacy-top-blur); fi
   xcrun simctl ui "$DEVICE" appearance "$2"
-  xcrun simctl launch --terminate-running-process "$DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$1"
+  xcrun simctl launch --terminate-running-process "$DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$1" "${blur_args[@]}"
   sleep 3
-  xcrun simctl io "$DEVICE" screenshot "$OUT/$1-$2.png"
+  xcrun simctl io "$DEVICE" screenshot "$OUT/$1-$2${3:+-$3}.png"
 }
 
 capture schedule light
@@ -43,6 +45,12 @@ capture account light
 capture course light
 capture conflict light
 capture header-hidden light
+capture header-hidden dark
+capture schedule light legacy
+capture schedule dark legacy
+capture header-hidden light legacy
+capture header-hidden dark legacy
+xcrun simctl ui "$DEVICE" appearance light
 xcrun simctl launch --terminate-running-process "$DEVICE" com.imzhien.ccsut --preview-ui --preview-page header-motion
 xcrun simctl io "$DEVICE" recordVideo --codec=h264 "$OUT/header-motion.mp4" &
 VIDEO_PID=$!
