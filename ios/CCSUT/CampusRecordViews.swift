@@ -8,7 +8,9 @@ struct CampusRecordsView: View {
     @State private var accountError = false
     @State private var reconnectRevision: UInt64 = 0
     @State private var selectedKind: CampusTravelKind = .departure
-    private struct Connection: Hashable { let account: String?; let revision: UInt64 }
+    @State private var boundConnection: Connection?
+    private struct Connection: Hashable { let account: String?; let generation: UInt64 }
+    private struct ConnectionTask: Hashable { let connection: Connection; let revision: UInt64 }
 
     var body: some View {
         Group {
@@ -25,13 +27,23 @@ struct CampusRecordsView: View {
         }
         .background(Color(.systemGroupedBackground))
         .academicDetailChrome(title: mode == .leave ? "请假" : "节假日离返校")
-        .task(id: Connection(account: session.studentId, revision: reconnectRevision)) {
+        .task(id: ConnectionTask(connection: Connection(account: session.studentId, generation: CookieJar.generation), revision: reconnectRevision)) {
+            let connection = Connection(account: session.studentId, generation: CookieJar.generation)
+            // A dismissed form resumes the same account/session. Refresh its existing model
+            // so loaded records stay visible, including when the refresh fails.
+            if boundConnection == connection, let model {
+                if mode == .leave { await model.loadLeave(reset: true) }
+                else { await model.loadTravel(kind: selectedKind) }
+                return
+            }
             model?.cancel()
             model = nil
+            boundConnection = nil
             accountError = false
             #if DEBUG
             if InterfacePreview.enabled {
                 model = CampusRecordsModel(api: CampusPreviewReader(), currentGeneration: { CookieJar.generation })
+                boundConnection = connection
                 return
             }
             #endif
@@ -40,6 +52,7 @@ struct CampusRecordsView: View {
             guard let account = session.studentId, !account.isEmpty else { accountError = true; return }
             let client = CampusClient(account: account, credentials: CampusCookieCredentials())
             model = CampusRecordsModel(api: client, currentGeneration: { CookieJar.generation })
+            boundConnection = Connection(account: account, generation: CookieJar.generation)
         }
         .onDisappear { model?.cancel() }
     }
@@ -53,6 +66,7 @@ private struct CampusRecordContent: View {
     let reconnect: () -> Void
     @State private var officialPage: CampusWebDestination?
     @State private var nativeForm: CampusFormKind?
+    private struct ReadTask: Hashable { let model: ObjectIdentifier; let kind: CampusTravelKind }
 
     var body: some View {
         ScrollView {
@@ -84,7 +98,9 @@ private struct CampusRecordContent: View {
             if mode == .leave { await model.loadLeave(reset: true) }
             else { await model.loadTravel(kind: selected) }
         }
-        .task(id: selected) {
+        // A real account/session replacement must start reads even when the selected kind
+        // did not change; SwiftUI may retain this content view's identity across model swaps.
+        .task(id: ReadTask(model: ObjectIdentifier(model), kind: selected)) {
             if mode == .leave { await model.loadLeave(reset: true) }
             else { await model.loadTravel(kind: selected) }
         }
