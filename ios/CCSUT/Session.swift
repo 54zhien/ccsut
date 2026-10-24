@@ -447,6 +447,7 @@ final class SessionStore {
             if let sid = initData.xsxh, !sid.isEmpty {
                 studentId = sid
                 UserDefaults.standard.set(sid, forKey: sidKey)
+                EcardTokenBridge.prepareSession(forAccount: sid, dataStore: WebStore.dataStore)
             }
         } catch {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }

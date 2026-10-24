@@ -80,13 +80,13 @@ final class EcardPaymentModel {
             return
         }
         stopQueries()
+        EcardTokenBridge.cancelPreparation()
         self.account = account
         receipt = pendingReceipt(for: account)
         campus = nil; building = nil; room = nil; detail = nil
         campuses = []; buildings = []; rooms = []; fee = nil
         client = nil
         amountText = ""; errorText = nil; isStarting = true
-        if force { EcardTokenBridge.clearCachedToken() }
         if let token = EcardTokenBridge.cachedToken(forAccount: account) {
             acceptToken(token)
         } else {
@@ -95,13 +95,20 @@ final class EcardPaymentModel {
     }
 
     func acceptToken(_ token: String) {
-        client = EcardClient(token: token)
-        loginRequest = nil
         let current = revision
+        let generation = CookieJar.generation
+        let store = loginRequest?.bridge.webView.configuration.websiteDataStore ?? WebStore.dataStore
         initialTask = Task {
             defer { if current == revision { isStarting = false } }
             do {
-                guard let client else { return }
+                // The token and gateway session are both required. WebKit's
+                // cookie store is separate from URLSession's default store.
+                let cookies = try await store.httpCookieStore.cookieSnapshot()
+                guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
+                CookieJar.upsert(cookies, generation: generation)
+                let client = Self.authenticatedClient(token: token, generation: generation)
+                self.client = client
+                loginRequest = nil
                 async let item = client.feeItem()
                 async let options = client.campuses()
                 let (loadedFee, loadedCampuses) = try await (item, options)
@@ -110,7 +117,51 @@ final class EcardPaymentModel {
                 isStarting = false
                 if loadedCampuses.count == 1 { selectCampus(loadedCampuses[0].value) }
                 else if loadedCampuses.isEmpty { errorText = "暂无可选校区，请稍后重新加载" }
-            } catch { if current == revision, !Task.isCancelled { errorText = error.localizedDescription } }
+            } catch {
+                if current == revision, CookieJar.generation == generation, !Task.isCancelled {
+                    handleLoadError(error)
+                    loginRequest = nil
+                }
+            }
+        }
+    }
+
+    private static func authenticatedClient(token: String, generation: UInt64) -> EcardClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.timeoutIntervalForRequest = 20
+        configuration.timeoutIntervalForResource = 30
+        let session = URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
+        return EcardClient(token: token, transport: { original in
+            try Task.checkCancellation()
+            guard let url = original.url, url.scheme == "https", url.host == "ecard.ccsut.cn",
+                  url.port == nil || url.port == 443 else { throw EcardError.noToken }
+            var request = original
+            request.httpShouldHandleCookies = false
+            request.setValue(try CookieJar.header(for: url, expectedGeneration: generation), forHTTPHeaderField: "Cookie")
+            request.setValue(UserAgent.mobile, forHTTPHeaderField: "User-Agent")
+            let (data, response) = try await session.data(for: request)
+            try Task.checkCancellation()
+            guard CookieJar.generation == generation else { throw EcardError.canceled }
+            if let http = response as? HTTPURLResponse, let fields = http.allHeaderFields as? [String: String] {
+                CookieJar.upsert(HTTPCookie.cookies(withResponseHeaderFields: fields, for: url), generation: generation)
+            }
+            return (data, response)
+        })
+    }
+
+    private func handleLoadError(_ error: Error) {
+        errorText = error.localizedDescription
+        if let error = error as? EcardError {
+            switch error {
+            case .authenticationRequired, .noToken, .business(401, _):
+                EcardTokenBridge.clearCachedToken()
+                client = nil
+                fee = nil
+            default: break
+            }
         }
     }
 
@@ -170,7 +221,7 @@ final class EcardPaymentModel {
                 guard let client else { return }
                 try await action(client)
             } catch {
-                if current == revision, !Task.isCancelled { errorText = error.localizedDescription }
+                if current == revision, !Task.isCancelled { handleLoadError(error) }
             }
         }
     }

@@ -306,7 +306,7 @@ private struct EcardLoginSheet: View {
                 .padding(.top, SheetLayout.controlInset(cornerRadius, diameter: controlHeight))
             }
             .overlay(alignment: .bottom) {
-                Text("请先登录一卡通，再进入电费缴费。\n获取缴费凭证后会自动返回。")
+                Text("正在尝试复用 App 登录。\n若学校要求验证，请在此完成；随后会自动返回。")
                     .font(.footnote).foregroundStyle(.primary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 20).padding(.vertical, 14)

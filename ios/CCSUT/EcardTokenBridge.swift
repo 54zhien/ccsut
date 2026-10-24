@@ -47,6 +47,8 @@ final class EcardTokenBridge: NSObject {
     private var continuation: CheckedContinuation<String, Error>?
     private var timeoutTask: Task<Void, Never>?
     private var pendingAccount: String?
+    private var attemptedPortalActions: Set<String> = []
+    private var advancingPortal = false
 
     init(feeitemID: String = EcardClient.electricityFeeItemID,
          timeout: TimeInterval = 120,
@@ -60,6 +62,7 @@ final class EcardTokenBridge: NSObject {
 
         let wv = webView ?? WKWebView(frame: .zero, configuration: cfg)
         wv.allowsBackForwardNavigationGestures = false
+        wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
         self.webView = wv
         super.init()
         wv.navigationDelegate = self
@@ -91,6 +94,27 @@ final class EcardTokenBridge: NSObject {
 
     private static var cache: CacheEntry?
     private static var cacheRevision = 0
+    private static var preparation: (id: UUID, account: String, task: Task<Void, Never>)?
+
+    /// Best effort SSO after the main account has been verified. A gateway that
+    /// requires interaction simply times out; it must not block the App login.
+    static func prepareSession(forAccount account: String, dataStore: WKWebsiteDataStore) {
+        guard !account.isEmpty, cachedToken(forAccount: account) == nil,
+              preparation?.account != account else { return }
+        cancelPreparation()
+        let id = UUID()
+        let task = Task { @MainActor in
+            let bridge = EcardTokenBridge(timeout: 20, dataStore: dataStore)
+            _ = try? await bridge.fetchToken(forAccount: account)
+            if preparation?.id == id { preparation = nil }
+        }
+        preparation = (id, account, task)
+    }
+
+    static func cancelPreparation() {
+        preparation?.task.cancel()
+        preparation = nil
+    }
 
     static func cachedToken(forAccount account: String?) -> String? {
         guard let entry = cache else { return nil }
@@ -105,6 +129,7 @@ final class EcardTokenBridge: NSObject {
     }
 
     static func clearCachedToken() {
+        cancelPreparation()
         cache = nil
         cacheRevision &+= 1
     }
@@ -130,6 +155,8 @@ final class EcardTokenBridge: NSObject {
         generation &+= 1
         let myGeneration = generation
         pendingAccount = account
+        attemptedPortalActions = []
+        advancingPortal = false
         requestCacheRevision = Self.cacheRevision
 
         return try await withTaskCancellationHandler {
@@ -215,6 +242,54 @@ final class EcardTokenBridge: NSObject {
         return url.path == "/charge-app" || url.path.hasPrefix("/charge-app/")
     }
 
+    private static func isPortalPage(_ url: URL?) -> Bool {
+        guard let url, url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "ecard.ccsut.cn",
+              url.port == nil || url.port == 443 else { return false }
+        return url.path == "/plat" || url.path.hasPrefix("/plat/")
+    }
+
+    /// Only follow the observed official SSO/project entries. Never match or
+    /// activate payment/confirmation controls. Manual login remains available.
+    private func advancePortal(pageURL: URL, generation gen: Int) async {
+        guard !advancingPortal else { return }
+        advancingPortal = true
+        defer { if gen == generation { advancingPortal = false } }
+        let script = """
+        for (let attempt = 0; attempt < 20; attempt++) {
+          if (location.origin !== 'https://ecard.ccsut.cn' ||
+              !(location.pathname === '/plat' || location.pathname.startsWith('/plat/'))) return '';
+          const entries = [...document.querySelectorAll('a, button, [role="button"], span, div')];
+          const exact = labels => {
+            const matches = entries.filter(el => {
+            const text = (el.textContent || '').replace(/\\s+/g, '').toLowerCase();
+            return labels.includes(text) && el.getClientRects().length > 0 &&
+              el.getAttribute('aria-disabled') !== 'true' && !el.disabled;
+            });
+            return matches.find(el => el.matches('a, button, [role="button"]')) ||
+              matches.find(el => !matches.some(child => child !== el && el.contains(child)));
+          };
+          const electricity = allowElectricity ? exact(['电表缴费', '电费缴费']) : null;
+          const cas = allowCAS ? exact(['智林cas']) : null;
+          const entry = electricity || cas;
+          if (entry) {
+            entry.click();
+            return electricity ? 'electricity' : 'cas';
+          }
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
+        return '';
+        """
+        let value = try? await webView.callAsyncJavaScript(script, arguments: [
+            "allowCAS": !attemptedPortalActions.contains("cas"),
+            "allowElectricity": !attemptedPortalActions.contains("electricity")
+        ], in: nil, in: .page)
+        guard gen == generation, continuation != nil else { return }
+        if let action = value as? String, ["cas", "electricity"].contains(action) {
+            attemptedPortalActions.insert(action)
+        }
+    }
+
     /// 结构 + 过期 + 账号一致性
     private func validate(_ token: String, account: String?) -> String? {
         guard let claims = JWT.claims(token), let exp = claims.expiresAt,
@@ -270,6 +345,11 @@ extension EcardTokenBridge: WKNavigationDelegate {
 
             if let token = self.token(from: pageURL, account: account) {
                 self.finish(.success(token), generation: gen)
+                return
+            }
+
+            if Self.isPortalPage(pageURL), let pageURL, webView.url == pageURL {
+                await self.advancePortal(pageURL: pageURL, generation: gen)
                 return
             }
 

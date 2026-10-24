@@ -32,6 +32,7 @@ enum EcardError: LocalizedError {
     /// 网络层错误（断网、超时、TLS 等），统一收口成这一种
     case transport(String)
     case noToken
+    case authenticationRequired
     case canceled
     /// 建单被拒（code 非 200 或 success=false）
     case orderRejected(String)
@@ -51,6 +52,7 @@ enum EcardError: LocalizedError {
         case .decoding(let what):          return "数据解析失败：\(what)"
         case .transport(let what):         return "网络异常：\(what)"
         case .noToken:                     return "未获取到缴费凭证，请重新登录"
+        case .authenticationRequired:      return "一卡通或学校访问网关登录已失效，请重新认证"
         case .canceled:                    return "操作已取消"
         case .orderRejected(let msg):      return "建单失败：\(msg)"
         case .paymentChannelUnavailable:   return "当前没有可用的余额支付方式"
@@ -456,16 +458,21 @@ final class EcardClient {
     static let electricityFeeItemID = "408"
 
     private let token: String
-    private let session: URLSession
+    typealias Transport = (URLRequest) async throws -> (Data, URLResponse)
+    private let transport: Transport
 
-    init(token: String, configuration: URLSessionConfiguration = .default) {
+    init(token: String, configuration: URLSessionConfiguration = .default,
+         transport: Transport? = nil) {
         self.token = token
-
-        let cfg = configuration
-        cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
-        cfg.timeoutIntervalForRequest = 20
-        cfg.timeoutIntervalForResource = 30
-        self.session = URLSession(configuration: cfg)
+        if let transport { self.transport = transport }
+        else {
+            let cfg = configuration
+            cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+            cfg.timeoutIntervalForRequest = 20
+            cfg.timeoutIntervalForResource = 30
+            let session = URLSession(configuration: cfg)
+            self.transport = { try await session.data(for: $0) }
+        }
     }
 
     // MARK: 基础请求
@@ -509,7 +516,11 @@ final class EcardClient {
         let data: Data
         let resp: URLResponse
         do {
-            (data, resp) = try await session.data(for: req)
+            (data, resp) = try await transport(req)
+        } catch let error as EcardError {
+            throw error
+        } catch is CancellationError {
+            throw EcardError.canceled
         } catch let error as URLError {
             if error.code == .cancelled { throw EcardError.canceled }
             throw EcardError.transport(error.localizedDescription)
@@ -520,6 +531,9 @@ final class EcardClient {
         // A gateway may return JSON with code=500 after forwarding a payment.
         // Preserve its HTTP failure so recharge can reconcile the existing order.
         guard let http = resp as? HTTPURLResponse else { throw EcardError.http(-1) }
+        if [301, 302, 303, 307, 308, 401, 403].contains(http.statusCode) {
+            throw EcardError.authenticationRequired
+        }
         guard (200..<300).contains(http.statusCode) else { throw EcardError.http(http.statusCode) }
 
         // 业务异常时后端仍返回 200，错误在 body 的 code 里
@@ -799,7 +813,7 @@ final class EcardClient {
             _ = try await pay(orderID: orderID, payTypeID: payTypeID, payTypeCode: payTypeCode)
         } catch let error as EcardError {
             switch error {
-            case .transport, .http, .decoding, .canceled:
+            case .transport, .http, .decoding, .canceled, .authenticationRequired:
                 // 支付可能已被服务端处理（超时 / 网关 5xx）。
                 // 先查单；查不到也把订单号交给 UI 显示「结果待确认」，
                 // 绝不直接抛错，否则用户会再缴一次。
