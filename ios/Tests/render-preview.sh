@@ -20,10 +20,12 @@ xcrun simctl install "$DEVICE" "$APP"
 if [ "${1:-}" = "--boot-only" ]; then exit 0; fi
 
 capture() {
-  local blur_args=()
-  if [ "${3:-}" = "legacy" ]; then blur_args+=(--legacy-top-blur); fi
   xcrun simctl ui "$DEVICE" appearance "$2"
-  xcrun simctl launch --terminate-running-process "$DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$1" "${blur_args[@]}"
+  if [ "${3:-}" = "legacy" ]; then
+    xcrun simctl launch --terminate-running-process "$DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$1" --legacy-top-blur
+  else
+    xcrun simctl launch --terminate-running-process "$DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$1"
+  fi
   sleep 3
   xcrun simctl io "$DEVICE" screenshot "$OUT/$1-$2${3:+-$3}.png"
 }

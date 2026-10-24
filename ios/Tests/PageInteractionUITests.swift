@@ -12,7 +12,9 @@ final class PageInteractionUITests: XCTestCase {
         if withoutUpcoming { app.launchArguments.append("--preview-no-upcoming") }
         if refresh { app.launchArguments.append("--preview-refresh") }
         if empty { app.launchArguments.append("--preview-empty") }
-        if legacyBlur { app.launchArguments.append("--legacy-top-blur") }
+        let useLegacy = legacyBlur || ProcessInfo.processInfo.environment["CCSUT_TEST_LEGACY_TOP_BLUR"] == "YES"
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
         app.launch()
         return app
     }
