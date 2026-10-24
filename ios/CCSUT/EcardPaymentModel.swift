@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import WebKit
 
 @Observable @MainActor
 final class EcardPaymentModel {
@@ -63,7 +64,7 @@ final class EcardPaymentModel {
         return nil
     }
     var canPay: Bool {
-        detail != nil && room != nil && amount != nil && !amountText.isEmpty && amountHint == nil &&
+        client != nil && detail != nil && room != nil && amount != nil && !amountText.isEmpty && amountHint == nil &&
         loadingText == nil && !isStarting && !isSubmitting && receipt == nil
     }
     var quickAmounts: [Decimal] { fee?.quickAmounts.filter { $0 > 0 && $0 <= (fee?.maxAmount ?? 0) } ?? [] }
@@ -103,16 +104,28 @@ final class EcardPaymentModel {
             do {
                 // The token and gateway session are both required. WebKit's
                 // cookie store is separate from URLSession's default store.
-                let cookies = try await store.httpCookieStore.cookieSnapshot()
+                var loaded: (FeeItem, [ThirdOption])?
+                for attempt in 0..<4 {
+                    let cookies = try await store.httpCookieStore.cookieSnapshot()
+                    guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
+                    CookieJar.upsert(cookies, generation: generation)
+                    let client = Self.authenticatedClient(token: token, generation: generation, store: store)
+                    self.client = client
+                    loginRequest = nil
+                    do {
+                        async let item = client.feeItem()
+                        async let options = client.campuses()
+                        loaded = try await (item, options)
+                        break
+                    } catch EcardError.authenticationRequired where attempt < 3 {
+                        // WebKit may publish the final gateway cookies after
+                        // the token redirect. Re-read them with a bounded wait.
+                        // Only these initial READS are retried, never a payment.
+                        try await Task.sleep(for: .milliseconds(300))
+                    }
+                }
+                guard let (loadedFee, loadedCampuses) = loaded else { throw EcardError.noToken }
                 guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
-                CookieJar.upsert(cookies, generation: generation)
-                let client = Self.authenticatedClient(token: token, generation: generation)
-                self.client = client
-                loginRequest = nil
-                async let item = client.feeItem()
-                async let options = client.campuses()
-                let (loadedFee, loadedCampuses) = try await (item, options)
-                guard current == revision, !Task.isCancelled else { return }
                 fee = loadedFee; campuses = loadedCampuses
                 isStarting = false
                 if loadedCampuses.count == 1 { selectCampus(loadedCampuses[0].value) }
@@ -126,7 +139,7 @@ final class EcardPaymentModel {
         }
     }
 
-    private static func authenticatedClient(token: String, generation: UInt64) -> EcardClient {
+    private static func authenticatedClient(token: String, generation: UInt64, store: WKWebsiteDataStore) -> EcardClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
@@ -146,8 +159,16 @@ final class EcardPaymentModel {
             try Task.checkCancellation()
             guard CookieJar.generation == generation else { throw EcardError.canceled }
             if let http = response as? HTTPURLResponse, let fields = http.allHeaderFields as? [String: String] {
-                CookieJar.upsert(HTTPCookie.cookies(withResponseHeaderFields: fields, for: url), generation: generation)
+                let cookies = HTTPCookie.cookies(withResponseHeaderFields: fields, for: url).filter(CookieJar.isSchoolCookie)
+                CookieJar.upsert(cookies, generation: generation)
+                // Keep the next WebKit handoff from restoring a stale cookie
+                // after the native request has received a rotated session.
+                for cookie in cookies {
+                    guard CookieJar.generation == generation else { throw EcardError.canceled }
+                    try? await store.httpCookieStore.set(cookie)
+                }
             }
+            guard CookieJar.generation == generation else { throw EcardError.canceled }
             return (data, response)
         })
     }
@@ -172,7 +193,10 @@ final class EcardPaymentModel {
     func loginDismissed() {
         // SwiftUI clears the sheet item before calling onDismiss.
         if isStarting, client == nil {
-            loginRequest = nil; isStarting = false
+            // Cookie handoff is asynchronous too. Closing the sheet in that
+            // window must not let its pending snapshot restart data loading.
+            stopQueries()
+            loginRequest = nil
             errorText = EcardError.canceled.localizedDescription
         }
     }
@@ -243,6 +267,8 @@ final class EcardPaymentModel {
         } catch EcardError.paymentUnconfirmed(let orderID) {
             receipt = Receipt(status: .pending, room: confirmed.room, amount: confirmed.amount.ecardAmountText, orderID: orderID)
         } catch {
+            handleLoadError(error)
+            errorText = nil // The failed receipt presents this error itself.
             receipt = Receipt(status: .failed, room: confirmed.room, amount: confirmed.amount.ecardAmountText,
                               orderID: nil, message: error.localizedDescription)
         }
@@ -258,11 +284,12 @@ final class EcardPaymentModel {
                 self.receipt?.status = .completed
                 persistPending()
             } else { errorText = "订单暂未确认完成，请稍后再次查询，勿重复缴费" }
-        } catch { errorText = error.localizedDescription }
+        } catch { handleLoadError(error) }
     }
     func returnToForm() {
         guard receipt?.status != .pending else { return }
         receipt = nil; amountText = ""; errorText = nil
+        guard client != nil else { start(account: account, force: true); return }
         if let room { selectRoom(room) }
     }
     private func pendingReceipt(for account: String) -> Receipt? {

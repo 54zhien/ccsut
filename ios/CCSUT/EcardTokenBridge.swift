@@ -308,9 +308,11 @@ extension EcardTokenBridge: WKNavigationDelegate {
     func webView(_ webView: WKWebView,
                              decidePolicyFor navigationAction: WKNavigationAction,
                              decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        // A canceled/retired background SSO must not continue navigating the
+        // shared website session after the interactive flow takes over.
+        guard continuation != nil else { decisionHandler(.cancel); return }
         let url = navigationAction.request.url
-        if continuation != nil,
-           let token = token(from: url, account: pendingAccount) {
+        if let token = token(from: url, account: pendingAccount) {
             decisionHandler(.cancel)
             finish(.success(token), generation: generation)
         } else {
