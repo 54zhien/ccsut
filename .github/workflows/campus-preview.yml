@@ -30,6 +30,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/campus-tests.xcresult" \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusEntryAndRecords \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusLargeTextEntries \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusOfficialWebPrivacy \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/campus-tests.log"
       - name: Capture campus light and dark screens
         run: |

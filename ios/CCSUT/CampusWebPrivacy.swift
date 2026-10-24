@@ -12,7 +12,13 @@ enum CampusWebPrivacy {
         pattern.lastIndex = 0;
         const contact = field.type === 'tel' || /phone|mobile|identity|idcard|bank|cert|手机|电话|身份证|银行卡/i.test(
           (field.name || '') + ' ' + (field.placeholder || ''));
-        if (contact || pattern.test(field.value || '')) field.style.webkitTextSecurity = 'disc';
+        if (contact || pattern.test(field.value || '')) {
+          field.style.webkitTextSecurity = 'disc';
+          if (field.tagName === 'INPUT' && ['text','tel','search','email','url','number'].includes(field.type)) {
+            if (!field.inputMode) field.inputMode = field.type === 'tel' ? 'tel' : (field.type === 'number' ? 'numeric' : 'text');
+            field.type = 'password';
+          }
+        }
       }
       // A JS value assignment does not emit DOM mutation or input events.
       for (const type of [HTMLInputElement, HTMLTextAreaElement]) {
@@ -31,6 +37,7 @@ enum CampusWebPrivacy {
         return parent;
       }
       function mask() {
+        if (!document.documentElement) return;
         const walker = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_TEXT);
         const nodes = [];
         let node, previousBlock, combined = '';
@@ -54,8 +61,8 @@ enum CampusWebPrivacy {
         for (const field of document.querySelectorAll('input, textarea')) maskField(field);
       }
       mask();
-      new MutationObserver(mask).observe(document.documentElement, {
-        subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['value']
+      new MutationObserver(mask).observe(document, {
+        subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['value','type','name','placeholder']
       });
       document.addEventListener('input', mask, true);
     })();

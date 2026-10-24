@@ -72,8 +72,8 @@ private final class CampusOfficialBrowser: NSObject, WKNavigationDelegate {
         // A login inside an official form must not silently replace the App's identity.
         configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController.addUserScript(WKUserScript(
-            source: CampusWebPrivacy.script, injectionTime: .atDocumentEnd,
-            forMainFrameOnly: false, in: .defaultClient
+            source: CampusWebPrivacy.script, injectionTime: .atDocumentStart,
+            forMainFrameOnly: false, in: .page
         ))
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
@@ -202,3 +202,36 @@ private final class CampusOfficialBrowser: NSObject, WKNavigationDelegate {
         Task { @MainActor [weak self] in self?.failed() }
     }
 }
+
+#if DEBUG
+/// A local HTML fixture tests the actual WebKit content-world boundary without school requests.
+struct CampusPrivacyPreview: UIViewRepresentable {
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: CampusWebPrivacy.script, injectionTime: .atDocumentStart,
+            forMainFrameOnly: false, in: .page
+        ))
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.loadHTMLString("""
+        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+        <body><p id="split"><span>180</span><span>0000</span><span>0000</span></p>
+        <input id="contact" name="contactValue" aria-label="联系号码">
+        <p id="result">正在检查网页隐私</p>
+        <script>
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setTimeout(() => {
+          const field = document.getElementById('contact');
+          setter.call(field, '18000000000');
+          const protected = field.type === 'password' && getComputedStyle(field).webkitTextSecurity === 'disc'
+            && field.value === '18000000000' && !document.getElementById('split').textContent.includes('18000000000');
+          document.getElementById('result').textContent = protected ? '网页隐私检查通过' : '网页隐私检查失败';
+        }, 300);
+        </script></body></html>
+        """, baseURL: URL(string: "https://ehall.ccsut.cn"))
+        return webView
+    }
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
+#endif

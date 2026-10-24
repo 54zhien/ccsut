@@ -38,6 +38,14 @@ final class PageInteractionUITests: XCTestCase {
         capture(app, "campus-accessibility-text")
     }
 
+    func testCampusOfficialWebPrivacy() {
+        let app = launch("campus-privacy")
+        XCTAssertTrue(app.webViews.staticTexts["网页隐私检查通过"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.webViews.secureTextFields.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.webViews.staticTexts["18000000000"].exists)
+        capture(app, "campus-web-privacy")
+    }
+
     private func launch(_ page: String, longList: Bool = false, transition: Bool = false, withoutUpcoming: Bool = false,
                         refresh: Bool = false, empty: Bool = false, largeText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()

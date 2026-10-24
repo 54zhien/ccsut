@@ -20,6 +20,9 @@ struct CCSUTApp: App {
                     switch InterfacePreview.page {
                     case "login": LoginView()
                     case "launch": LaunchView()
+                    #if DEBUG
+                    case "campus-privacy": CampusPrivacyPreview()
+                    #endif
                     default: MainTabs()
                     }
                 } else { RootView() }

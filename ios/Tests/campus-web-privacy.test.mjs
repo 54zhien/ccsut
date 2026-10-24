@@ -39,6 +39,7 @@ test('official text and contact fields are masked without changing submission va
   const state=page();
   assert.equal(state.text.nodeValue,'联系电话 ••••');
   assert.equal(state.field.style.webkitTextSecurity,'disc');
+  assert.equal(state.field.type,'password');
   assert.equal(state.field.value,'18000000000');
 });
 test('dynamically rendered identity and bank text is also masked',()=>{
