@@ -81,9 +81,9 @@ protocol CampusReading: Sendable {
 }
 
 actor CampusClient: CampusReading {
-    private enum Subsystem: Hashable { case leave, travel }
-    private enum Failure: Error { case unauthorized }
-    private struct Identity: Decodable, Sendable {
+    enum Subsystem: Hashable { case leave, travel }
+    enum Failure: Error { case unauthorized }
+    struct Identity: Decodable, Sendable {
         struct Token: Decodable, Sendable {
             let access_token: String
             let token_type: String
@@ -91,6 +91,7 @@ actor CampusClient: CampusReading {
         let errcode: Int
         let account: String
         let userId: String
+        let realName: String?
         let data: Token?
 
         // Kept only in this generation-bound client; never persisted or logged.
@@ -103,10 +104,11 @@ actor CampusClient: CampusReading {
 
     static let leavePage = URL(string: "https://ehall.ccsut.cn/backstage/leaveadmin/page/mobile/#/leaveList")!
     static let leaveForm = URL(string: "https://ehall.ccsut.cn/backstage/leaveadmin/page/mobile/#/leaveForm")!
-    private let account: String
-    private let credentials: any CampusSessionCredentials
-    private let transport: any CampusTransport
-    private let generation: UInt64
+    let account: String
+    let credentials: any CampusSessionCredentials
+    let transport: any CampusTransport
+    let generation: UInt64
+    var formAttemptIDs: Set<UUID> = []
     private var identities: [Subsystem: Identity] = [:]
 
     init(account: String, credentials: any CampusSessionCredentials, transport: any CampusTransport = CampusURLTransport()) {
@@ -149,7 +151,7 @@ actor CampusClient: CampusReading {
         throw CampusError.authentication
     }
 
-    private func identity(for subsystem: Subsystem, callback: URL, force: Bool) async throws -> Identity {
+    func identity(for subsystem: Subsystem, callback: URL, force: Bool) async throws -> Identity {
         try checkState()
         guard !account.isEmpty else { throw CampusError.authentication }
         if !force, let cached = identities[subsystem] { return cached }
@@ -183,7 +185,7 @@ actor CampusClient: CampusReading {
         return identity
     }
 
-    private func request(_ path: String, query: [URLQueryItem] = []) -> URLRequest {
+    func request(_ path: String, query: [URLQueryItem] = []) -> URLRequest {
         var components = URLComponents(string: "https://ehall.ccsut.cn" + path)!
         if !query.isEmpty { components.queryItems = query }
         var request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
@@ -194,7 +196,7 @@ actor CampusClient: CampusReading {
     }
 
     /// Follow only the official CAS/ehall chain, with fresh Cookie matching per hop.
-    private func send(_ original: URLRequest, authentication: Bool = false) async throws -> (Data, HTTPURLResponse) {
+    func send(_ original: URLRequest, authentication: Bool = false) async throws -> (Data, HTTPURLResponse) {
         var request = original
         let deadline = Date().addingTimeInterval(30)
         for _ in 0..<12 {
@@ -234,7 +236,7 @@ actor CampusClient: CampusReading {
         throw CampusError.authentication
     }
 
-    private func checkState() throws {
+    func checkState() throws {
         try Task.checkCancellation()
         guard credentials.generation == generation else { throw CancellationError() }
     }

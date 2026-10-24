@@ -48,6 +48,7 @@ struct CampusFormConfiguration: Sendable, Equatable {
     var needsLeaveTime = false
     var roleFallback = false
     var photoLimit = 1
+    var baselineRecordIDs: Set<String> = []
 }
 
 struct CampusAttachment: Identifiable, Sendable, Equatable {
@@ -140,6 +141,7 @@ struct CampusFormDraft: Sendable, Equatable {
 
 struct CampusSubmission: Identifiable, Sendable, Equatable {
     let id = UUID()
+    let createdAt = Date()
     let kind: CampusFormKind
     let configuration: CampusFormConfiguration
     let draft: CampusFormDraft
