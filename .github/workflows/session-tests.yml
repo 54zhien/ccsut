@@ -11,13 +11,15 @@ on:
 jobs:
   session:
     runs-on: macos-26
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Compile session regression runner
         run: |
           xcrun swiftc -parse-as-library \
-            ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/Models.swift \
+            ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift \
+            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift \
+            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift \
             ios/Tests/SessionRegressionTests.swift \
             -o "$RUNNER_TEMP/session-tests"
       - name: Run Swift session regressions
@@ -25,3 +27,24 @@ jobs:
       - name: Run embedded login script regressions
         if: always()
         run: node --test ios/Tests/login-script.test.mjs
+      - name: Run protocol and academic integrity regressions
+        if: always()
+        run: |
+          xcrun swiftc ios/CCSUT/APIResponse.swift ios/Tests/APIResponseTests.swift -o "$RUNNER_TEMP/api-response-tests"
+          "$RUNNER_TEMP/api-response-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/ElectiveState.swift ios/Tests/ElectiveStateTests.swift -o "$RUNNER_TEMP/elective-state-tests"
+          "$RUNNER_TEMP/elective-state-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/CCSUT/AcademicCalendar.swift ios/Tests/AcademicReliabilityTests.swift -o "$RUNNER_TEMP/academic-tests"
+          "$RUNNER_TEMP/academic-tests"
+      - name: Run timetable presentation regressions
+        if: always()
+        run: |
+          xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
+          "$RUNNER_TEMP/schedule-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/InterfacePreview.swift ios/Tests/ReleasePreviewTests.swift -o "$RUNNER_TEMP/release-preview-tests"
+          "$RUNNER_TEMP/release-preview-tests" --preview-ui --preview-page academic
+      - name: Build iOS simulator app with debug fixtures
+        run: |
+          xcodebuild build -quiet -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/AcademicBuild" \
+            CODE_SIGNING_ALLOWED=NO

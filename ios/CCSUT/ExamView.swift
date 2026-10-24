@@ -14,103 +14,118 @@ import SwiftUI
 
 struct ExamView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var items: [ExamItem] = []
     @State private var isLoading = false
+    @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
-    @State private var loadedTerms: Set<String> = []
-
-    /// 从新到旧的学期列表
-    private static let terms = [
-        "2026-2027-1",
-        "2025-2026-2",
-        "2025-2026-1",
-        "2024-2025-2",
-        "2024-2025-1",
-    ]
+    @State private var termHeaderTracker = AcademicTermHeaderTracker()
+    @State private var referenceDate = Date()
+#if DEBUG
+    @State private var previewPublicationCount = 0
+#endif
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading && items.isEmpty {
-                    ProgressView("加载考试安排…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorText, items.isEmpty {
-                    ContentUnavailableView {
-                        Label("加载失败", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(errorText)
-                    } actions: {
-                        Button("重试") { Task { await load(force: true) } }
-                    }
-                } else if items.isEmpty {
-                    ContentUnavailableView {
-                        Label("暂无考试安排", systemImage: "calendar.badge.clock")
-                    } description: {
-                        Text("这个学期的考试还没排出来。")
-                    } actions: {
-                        Button("刷新") { Task { await load(force: true) } }
-                    }
-                } else {
-                    content
-                }
-            }
-            .navigationTitle("考试")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await load(force: true) }
-                    } label: {
-                        if isLoading {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
+        GeometryReader { viewport in
+          ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    if isLoading && items.isEmpty {
+                        ProgressView("加载考试安排…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if errorText != nil, items.isEmpty {
+                        ContentUnavailableView {
+                            Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
+                        } description: {
+                            Text(errorText ?? AppMessages.loadFailure)
+                        } actions: {
+                            Button("重试") { Task { await load(force: true) } }
                         }
+                    } else if items.isEmpty {
+                        ContentUnavailableView {
+                            Label("暂无考试安排", systemImage: "calendar.badge.clock")
+                        } description: {
+                            Text("教务系统暂未返回考试安排。")
+                        }
+                    } else {
+                        if let errorText {
+                            PageStatusNotice(message: errorText) { Task { await load(force: true) } }
+                        }
+                        content(proxy: proxy)
                     }
-                    .disabled(isLoading)
                 }
+                .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
             }
-            .refreshable { await load(force: true) }
-            .task { if items.isEmpty { await load() } }
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            .pageRefreshable { await load(force: true) }
+            .coordinateSpace(name: "academic-scroll")
+          }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+        .academicDetailChrome(title: "考试")
+#if DEBUG
+        .overlay(alignment: .topTrailing) {
+            PageRefreshPublicationDiagnostics(count: previewPublicationCount)
+        }
+#endif
+        .task { if items.isEmpty { await load() } }
+        .task {
+            guard !InterfacePreview.enabled else { return }
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                if scenePhase == .active { referenceDate = Date() }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { referenceDate = Date() }
         }
     }
 
     // MARK: 内容
 
-    private var content: some View {
-        ScrollView {
-            LazyVStack(spacing: 14, pinnedViews: [.sectionHeaders]) {
-                if let next = upcoming.first {
-                    nextCard(next)
-                }
+    private func content(proxy: ScrollViewProxy) -> some View {
+        LazyVStack(spacing: 0, pinnedViews: dynamicTypeSize.isAccessibilitySize ? [] : [.sectionHeaders]) {
+            if let next = upcoming.first {
+                nextCard(next).padding(.bottom, 12)
+            }
 
-                ForEach(terms, id: \.self) { term in
-                    let list = grouped[term] ?? []
-                    if !list.isEmpty {
-                        Section {
-                            VStack(spacing: 0) {
-                                ForEach(Array(list.enumerated()), id: \.element.id) { idx, exam in
-                                    ExamRow(exam: exam, showTerm: false)
-                                    if idx < list.count - 1 {
-                                        Divider().padding(.leading, 16)
-                                    }
+            ForEach(terms, id: \.self) { term in
+                let list = grouped[term] ?? []
+                if !list.isEmpty {
+                    Section {
+                        VStack(spacing: 0) {
+                            ForEach(Array(list.enumerated()), id: \.element.id) { idx, exam in
+                                ExamRow(exam: exam, showTerm: false)
+                                if idx < list.count - 1 {
+                                    Divider().padding(.leading, 16)
                                 }
                             }
-                            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
-                            .padding(.horizontal, 16)
-                        } header: {
-                            termHeader(term, count: list.count)
                         }
+                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 16)
+                    } header: {
+                        termHeader(term, count: list.count) { target in
+                            withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
+                                proxy.scrollTo("exam-term-\(target)", anchor: .top)
+                            }
+                        }
+                            .id("exam-term-\(term)")
                     }
                 }
             }
-            .padding(.vertical, 12)
         }
+        .padding(.vertical, 12)
     }
 
     /// 即将开始的那场（未来 60 天内最近的一场）
     private var upcoming: [ExamItem] {
-        let now = Date()
+        let now = referenceDate
         let limit = Calendar.current.date(byAdding: .day, value: 60, to: now) ?? now
         return items
             .filter { exam in
@@ -125,10 +140,7 @@ struct ExamView: View {
     }
 
     private var terms: [String] {
-        let keys = Set(grouped.keys)
-        let known = Self.terms.filter { keys.contains($0) }
-        let extra = keys.subtracting(Self.terms).sorted(by: >)
-        return known + extra
+        grouped.keys.sorted(by: >)
     }
 
     // MARK: 置顶卡片
@@ -138,64 +150,62 @@ struct ExamView: View {
             HStack {
                 Label("即将开始", systemImage: "alarm.fill")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(Color("AccentForeground").opacity(0.9))
                 Spacer()
                 if let d = exam.startDate {
                     Text(d, format: .relative(presentation: .named))
+                        .environment(\.locale, Locale(identifier: "zh_CN"))
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(Color("AccentForeground").opacity(0.85))
                 }
             }
 
             Text(exam.kcmc ?? "—")
                 .font(.title3.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color("AccentForeground"))
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
                 Label(timeText(exam), systemImage: "clock.fill")
                 if !exam.location.isEmpty {
                     Label(exam.location, systemImage: "mappin.and.ellipse")
                 }
             }
             .font(.caption)
-            .foregroundStyle(.white.opacity(0.92))
+            .foregroundStyle(Color("AccentForeground").opacity(0.92))
 
             if let seat = exam.zwh, !seat.isEmpty, seat != "0" {
                 Text("座位 \(seat)")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 9)
                     .padding(.vertical, 3)
-                    .background(.white.opacity(0.22), in: .capsule)
-                    .foregroundStyle(.white)
+                    .background(Color("AccentForeground").opacity(0.12), in: .capsule)
+                    .foregroundStyle(Color("AccentForeground"))
             }
         }
-        .padding(16)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [Color(red: 0.16, green: 0.42, blue: 0.92),
-                         Color(red: 0.36, green: 0.62, blue: 0.98)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: .rect(cornerRadius: 18)
-        )
+        .background(Color.accentColor, in: .rect(cornerRadius: 28))
         .padding(.horizontal, 16)
     }
 
-    private func termHeader(_ term: String, count: Int) -> some View {
-        HStack {
-            Text(term)
-                .font(.subheadline.weight(.semibold))
-            Spacer()
-            Text("\(count) 场")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+    private func termHeader(_ term: String, count: Int, onSelectTerm: @escaping (String) -> Void) -> some View {
+        AcademicTermStrip(term: term, tracker: termHeaderTracker) {
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(SchedulePresentation.termTitle(term))
+                        .font(.subheadline.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("\(count) 场")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if terms.count > 1 {
+                    AcademicTermJumpMenu(terms: terms, onSelect: onSelectTerm)
+                }
+            }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(.bar)
     }
 
     private func timeText(_ exam: ExamItem) -> String {
@@ -218,6 +228,22 @@ struct ExamView: View {
     // MARK: 加载
 
     private func load(force: Bool = false) async {
+        await loadGate.run { await fetch(force: force) }
+    }
+
+    private func fetch(force: Bool) async {
+        #if DEBUG
+        if InterfacePreview.enabled {
+            isLoading = true
+            defer { isLoading = false }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            items = InterfacePreview.emptyPage ? [] : InterfacePreview.exams
+            previewPublicationCount += 1
+            return
+        }
+        #endif
+
         guard !isLoading else { return }
         if !force, !items.isEmpty { return }
 
@@ -225,41 +251,35 @@ struct ExamView: View {
         errorText = nil
         defer { isLoading = false }
 
-        var collected: [ExamItem] = []
-        var firstError: Error?
-
-        for term in Self.terms {
-            do {
-                var list = try await APIClient.shared.examList(xnxq: term)
-                // 服务端的 dataXnxq 恒为当前学期，不能用来分组。
-                // 每条记录真正属于哪个学期，只有发起请求的人知道。
-                for i in list.indices { list[i].term = term }
-                collected.append(contentsOf: list)
-            } catch let e as APIError {
-                if case .notLoggedIn = e {
-                    await session.refresh()
-                    errorText = "会话过期，已尝试续期，请下拉刷新"
-                    return
-                }
-                if firstError == nil { firstError = e }
-            } catch {
-                if firstError == nil { firstError = error }
+        let generation = CookieJar.generation
+        var loadingStage = "读取考试学期"
+        do {
+            let terms = try await APIClient.shared.availableExamTerms()
+            let complete = try await ExamSnapshotLoader.load(terms: terms) { term in
+                guard CookieJar.generation == generation else { throw CancellationError() }
+                loadingStage = "读取\(SchedulePresentation.termTitle(term))考试"
+                return try await APIClient.shared.examList(xnxq: term)
             }
-        }
-
-        if collected.isEmpty, let firstError {
-            errorText = firstError.localizedDescription
-            return
-        }
-
-        // 按时间倒序，没有时间的排最后
-        items = collected.sorted { a, b in
-            switch (a.startDate, b.startDate) {
-            case let (x?, y?): return x > y
-            case (nil, _?): return false
-            case (_?, nil): return true
-            default: return false
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            items = complete
+            referenceDate = Date()
+        } catch {
+            guard CookieJar.generation == generation, !(error is CancellationError) else { return }
+            if let apiError = error as? APIError, case .notLoggedIn = apiError {
+                await session.refresh()
             }
+            guard CookieJar.generation == generation else { return }
+            let reason: String
+            if let contextError = error as? AcademicContextError {
+                reason = contextError.localizedDescription
+            } else if let apiError = error as? APIError {
+                reason = apiError.localizedDescription
+            } else if let networkError = error as? URLError, networkError.code == .timedOut {
+                reason = "请求超时，请稍后重试"
+            } else {
+                reason = "连接未完成，请检查网络后重试"
+            }
+            errorText = "\(loadingStage)失败：\(reason)" + (items.isEmpty ? "" : "。已保留上次完整的考试安排")
         }
     }
 }
@@ -269,6 +289,8 @@ struct ExamView: View {
 private struct ExamRow: View {
     let exam: ExamItem
     var showTerm: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .title3) private var dateColumnWidth: CGFloat = 34
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -285,24 +307,39 @@ private struct ExamRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 34)
+            .frame(width: dateColumnWidth)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(exam.kcmc ?? "—")
                     .font(.subheadline.weight(.medium))
                     .lineLimit(2)
 
-                HStack(spacing: 6) {
-                    Text(exam.qssj ?? "—")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    if !exam.location.isEmpty {
-                        Text("·")
-                            .foregroundStyle(.tertiary)
-                        Text(exam.location)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(exam.qssj ?? "—")
+                            .monospacedDigit()
                             .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                        if !exam.location.isEmpty {
+                            Text(exam.location)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                } else {
+                    HStack(spacing: 6) {
+                        Text(exam.qssj ?? "—")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        if !exam.location.isEmpty {
+                            Text("·")
+                                .foregroundStyle(.tertiary)
+                            Text(exam.location)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
                 }
 
@@ -312,8 +349,8 @@ private struct ExamRow: View {
                             .font(.caption2.weight(.medium))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(.blue.opacity(0.12), in: .capsule)
-                            .foregroundStyle(.blue)
+                            .background(Color.accentColor.opacity(0.12), in: .capsule)
+                            .foregroundStyle(Color.accentColor)
                     }
                     if exam.isMakeup {
                         Text("补缓考")

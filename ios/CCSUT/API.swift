@@ -9,26 +9,6 @@
 
 import Foundation
 
-// MARK: - 错误
-
-enum APIError: LocalizedError {
-    case notLoggedIn
-    case http(Int)
-    case business(Int, String)
-    case empty
-    case decoding(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .notLoggedIn: return "登录已失效，请重新登录"
-        case .http(let code): return "网络错误 HTTP \(code)"
-        case .business(let ret, let msg): return "接口返回错误 [\(ret)] \(msg)"
-        case .empty: return "接口返回空数据"
-        case .decoding(let what): return "数据解析失败：\(what)"
-        }
-    }
-}
-
 // MARK: - 客户端
 
 final class APIClient {
@@ -78,8 +58,8 @@ final class APIClient {
         return req
     }
 
-    private func send(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, http) = try await response(for: req)
+    private func send(_ req: URLRequest, expectedGeneration: UInt64? = nil) async throws -> (Data, HTTPURLResponse) {
+        let (data, http) = try await response(for: req, expectedGeneration: expectedGeneration)
 
         if let path = req.url?.path, path.contains("listjxbDataV2") || path.contains("listV2") {
             let body = String(data: data, encoding: .utf8) ?? ""
@@ -92,14 +72,13 @@ final class APIClient {
     /// 认证和业务共用同一条传输路径。禁止自动跳转，每跳重新匹配 Cookie。
     /// timeout 是整个跳转链的预算，避免冷启动被多次超时拖住。
     func response(for request: URLRequest, timeout: TimeInterval = 20,
-                  allowAuthenticationRedirects: Bool = false) async throws -> (Data, HTTPURLResponse) {
+                  allowAuthenticationRedirects: Bool = false,
+                  expectedGeneration: UInt64? = nil) async throws -> (Data, HTTPURLResponse) {
         var req = request
-        let generation = CookieJar.generation
+        let generation = expectedGeneration ?? CookieJar.generation
         let deadline = Date().addingTimeInterval(timeout)
         for _ in 0..<8 {
             try Task.checkCancellation()
-            guard CookieJar.generation == generation else { throw CancellationError() }
-            guard !CookieJar.shared.isEmpty else { throw APIError.notLoggedIn }
             guard let url = req.url, url.scheme == "https",
                   let host = url.host, host == "ccsut.cn" || host.hasSuffix(".ccsut.cn")
             else { throw APIError.notLoggedIn }
@@ -108,7 +87,9 @@ final class APIClient {
             guard remaining > 0 else { throw URLError(.timedOut) }
             req.timeoutInterval = remaining
             req.httpShouldHandleCookies = false
-            req.setValue(CookieJar.header(for: url), forHTTPHeaderField: "Cookie")
+            let requestCookies = try CookieJar.requestCookies(for: url, expectedGeneration: generation)
+            guard requestCookies.hasCookies else { throw APIError.notLoggedIn }
+            req.setValue(requestCookies.header, forHTTPHeaderField: "Cookie")
 
             let (data, resp) = try await session.data(for: req)
             try Task.checkCancellation()
@@ -161,23 +142,7 @@ final class APIClient {
 
     private func decode<T: Decodable>(_ result: (Data, HTTPURLResponse)) throws -> T {
         let (data, _) = result
-        guard !data.isEmpty else { throw APIError.empty }
-
-        // 先按统一壳解
-        if let env = try? JSONDecoder().decode(APIEnvelope<T>.self, from: data) {
-            if let payload = env.data { return payload }
-            if env.ret != 0 {
-                throw APIError.business(env.ret, env.msg ?? "")
-            }
-            throw APIError.empty
-        }
-        // 少数接口直接返回裸数据
-        do {
-            return try JSONDecoder().decode(T.self, from: data)
-        } catch {
-            let preview = String(data: data.prefix(200), encoding: .utf8) ?? ""
-            throw APIError.decoding(preview)
-        }
+        return try APIResponseDecoder.decode(T.self, from: data)
     }
 
     // MARK: HTML
@@ -191,13 +156,10 @@ final class APIClient {
 // MARK: - 业务接口
 
 extension APIClient {
-    /// 认证探测单独要求 ret=0；不改变其他业务接口现有的解码行为。
+    /// 会话探测也使用统一的严格包装响应校验。
     func authenticatedProfile() async throws -> ElectiveInit {
         let (data, _) = try await send(makeRequest("/admin/xsd/xk/listV2", method: "POST", form: [:]))
-        let envelope = try JSONDecoder().decode(APIEnvelope<ElectiveInit>.self, from: data)
-        guard envelope.ret == 0 else { throw APIError.business(envelope.ret, envelope.msg ?? "") }
-        guard let profile = envelope.data else { throw APIError.empty }
-        return profile
+        return try APIResponseDecoder.decodeEnvelope(ElectiveInit.self, from: data)
     }
 
     /// 选课页初始化：学生信息、字典、批次加密串
@@ -225,7 +187,9 @@ extension APIClient {
             form["pcid"] = batch.pcid
             form["pcenc"] = batch.pcenc
         }
-        return try await post("/admin/xsd/xk/listjxbDataV2", form: form)
+        let page: TeachingClassPage = try await post("/admin/xsd/xk/listjxbDataV2", form: form)
+        guard page.initData != nil else { throw APIError.decoding("教学班列表缺失") }
+        return page
     }
 
     /// 课表页骨架（HTML）。真正数据在 sdpkkbList，这个只用来取 xhid
@@ -292,12 +256,12 @@ extension APIClient {
     /// 注意：这不是 /admin/xsd/xsdzgcjcx/xscjdy（那条是 JSP 报表，学校缺 .rpx 文件），
     /// 而是移动端页面 /admin/ydd/inf/showScore 背后用的 JSON 接口。
     func scoreList() async throws -> [ScoreItem] {
-        struct Payload: Decodable { let xscjList: [ScoreItem]? }
+        struct Payload: Decodable { let xscjList: [ScoreItem] }
         let payload: Payload = try await get(
             "/admin/ydd/inf/getXscjJson",
             query: [URLQueryItem(name: "xnxq", value: "111")]
         )
-        return payload.xscjList ?? []
+        return payload.xscjList
     }
 
     /// 选课
@@ -305,32 +269,32 @@ extension APIClient {
     /// POST /admin/xsd/xk/xsdXkV2  { jxbid, pcid, sfqc }
     /// 实测：ret=0 "选课成功"；超限时 ret=-1 "当前批次已选门数超过【4门】"
     @discardableResult
-    func enroll(jxbid: String, pcid: String) async throws -> String {
+    func enroll(jxbid: String, pcid: String, expectedGeneration: UInt64) async throws -> String {
         struct Resp: Decodable { let ret: Int; let msg: String? }
         let (data, _) = try await send(makeRequest(
             "/admin/xsd/xk/xsdXkV2",
             method: "POST",
             form: ["jxbid": jxbid, "pcid": pcid, "sfqc": ""]
-        ))
-        let r = try JSONDecoder().decode(Resp.self, from: data)
-        guard r.ret == 0 else { throw APIError.business(r.ret, r.msg ?? "选课失败") }
-        return r.msg ?? "选课成功"
+        ), expectedGeneration: expectedGeneration)
+        let r = try APIResponseDecoder.decodeBare(Resp.self, from: data)
+        guard r.ret == 0 else { throw APIResponseDecoder.businessError(r.ret, message: r.msg) }
+        return "选课成功"
     }
 
     /// 退课
     ///
     /// POST /admin/xsd/xk/xsdTkV2  { jxbid, pcid }
     @discardableResult
-    func dropClass(jxbid: String, pcid: String) async throws -> String {
+    func dropClass(jxbid: String, pcid: String, expectedGeneration: UInt64) async throws -> String {
         struct Resp: Decodable { let ret: Int; let msg: String? }
         let (data, _) = try await send(makeRequest(
             "/admin/xsd/xk/xsdTkV2",
             method: "POST",
             form: ["jxbid": jxbid, "pcid": pcid]
-        ))
-        let r = try JSONDecoder().decode(Resp.self, from: data)
-        guard r.ret == 0 else { throw APIError.business(r.ret, r.msg ?? "退课失败") }
-        return r.msg ?? "退课成功"
+        ), expectedGeneration: expectedGeneration)
+        let r = try APIResponseDecoder.decodeBare(Resp.self, from: data)
+        guard r.ret == 0 else { throw APIResponseDecoder.businessError(r.ret, message: r.msg) }
+        return "退课成功"
     }
 
     /// 考试安排
@@ -342,14 +306,30 @@ extension APIClient {
             "/admin/xsd/kwglXsdKscx/getXsKsxx",
             form: ["xnxq": xnxq]
         )
-        return page.list ?? []
+        guard let list = page.list else { throw APIError.decoding("考试列表缺失") }
+        return list
     }
 
     /// 当前教学周（校历接口，实测返回 {"xlzc":"7"}）
     func currentTeachingWeek() async throws -> Int {
-        struct WeekInfo: Decodable { let xlzc: String? }
+        struct WeekInfo: Decodable {
+            let week: Int
+            enum CodingKeys: String, CodingKey { case xlzc }
+
+            init(from decoder: Decoder) throws {
+                let values = try decoder.container(keyedBy: CodingKeys.self)
+                let number = try? values.decode(Int.self, forKey: .xlzc)
+                let text = try? values.decode(String.self, forKey: .xlzc)
+                guard let week = number ?? text.flatMap({ Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }),
+                      (1...53).contains(week) else {
+                    throw DecodingError.dataCorruptedError(forKey: .xlzc, in: values,
+                                                          debugDescription: "教学周缺失或无效")
+                }
+                self.week = week
+            }
+        }
         let info: WeekInfo = try await get("/admin/api/getXlzc")
-        return Int(info.xlzc ?? "") ?? 1
+        return info.week
     }
 
     /// 校历周次
@@ -360,11 +340,7 @@ extension APIClient {
 
     private func getRaw(_ path: String, query: [URLQueryItem]) async throws -> [String] {
         let (data, _) = try await send(makeRequest(path, method: "GET", query: query))
-        if let arr = try? JSONDecoder().decode([String].self, from: data) { return arr }
-        if let env = try? JSONDecoder().decode(APIEnvelope<[String]>.self, from: data), let d = env.data {
-            return d
-        }
-        return []
+        return try APIResponseDecoder.decode([String].self, from: data)
     }
 }
 

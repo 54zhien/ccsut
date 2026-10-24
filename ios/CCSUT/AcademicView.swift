@@ -1,0 +1,211 @@
+import SwiftUI
+
+/// Stable, independently spaced entry cards; optional reminders follow the entries.
+struct AcademicView: View {
+    private enum Destination: Hashable { case scores, exams, electives, electricity }
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var nextExam: ExamItem?
+    @State private var upcomingError: String?
+    @State private var reminderGeneration: UInt64?
+    @State private var loadGate = PageLoadGate()
+    @State private var path: [Destination] = []
+    @State private var didNavigatePreview = false
+    @State private var headerScrollOffset: CGFloat = 0
+    @State private var scoreSummary: String?
+    @State private var electiveSummary: String?
+    @State private var summaryGeneration: UInt64?
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            GeometryReader { viewport in
+                let cardHeight: CGFloat = 96
+                ScrollView {
+                    VStack(spacing: 12) {
+                        NavigationLink(value: Destination.scores) {
+                            service("成绩查询", subtitle: scoreSummary ?? "课程成绩、学分与绩点", symbol: "chart.bar.doc.horizontal", tint: .accentColor, height: cardHeight)
+                        }
+                        .accessibilityIdentifier("academic-scores")
+                        NavigationLink(value: Destination.exams) {
+                            service("考试安排", subtitle: examSummary, symbol: "calendar.badge.clock", tint: .accentColor, height: cardHeight)
+                        }
+                        .accessibilityIdentifier("academic-exams")
+                        NavigationLink(value: Destination.electives) {
+                            service("选课", subtitle: electiveSummary ?? "浏览课程与管理已选课程", symbol: "list.bullet.rectangle.portrait", tint: .accentColor, height: cardHeight)
+                        }
+                        .accessibilityIdentifier("academic-electives")
+                        NavigationLink(value: Destination.electricity) {
+                            service("电费缴费", subtitle: "查询宿舍电表余额与充值", symbol: "bolt.fill", tint: .accentColor, height: cardHeight)
+                        }
+                        .accessibilityIdentifier("academic-electricity")
+                        if let nextExam {
+                            if let upcomingError {
+                                PageStatusNotice(message: upcomingError) { Task { await loadUpcomingExam() } }
+                            }
+                            NavigationLink(value: Destination.exams) { upcomingCard(nextExam) }
+                                .padding(.top, 8)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 24)
+                    .padding(.bottom, 28)
+                    .frame(maxWidth: 720)
+                    .frame(maxWidth: .infinity)
+                }
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                .scrollBounceBehavior(.always, axes: .vertical)
+                .pageRefreshable { await loadUpcomingExam() }
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
+                } action: { _, offset in headerScrollOffset = offset }
+            }
+            .background(Color(.systemGroupedBackground))
+            .nagiPageChrome(title: "教务", scrollOffset: headerScrollOffset) {
+                AccountButton()
+            }
+            .navigationTitle("教务")
+            .navigationDestination(for: Destination.self) { destination in
+                switch destination {
+                case .scores: ScoreView { items in
+                    resetSummariesIfNeeded()
+                    scoreSummary = items.isEmpty ? "暂无已公布成绩" : "已公布 \(items.count) 门成绩 · 点击查看详情"
+                }
+                case .exams: ExamView()
+                case .electives: ElectiveView { count, term in
+                    resetSummariesIfNeeded()
+                    electiveSummary = "已选 \(count) 门 · \(SchedulePresentation.termTitle(term))"
+                }
+                case .electricity: EcardPaymentView()
+                }
+            }
+            .task {
+                await loadUpcomingExam()
+                if InterfacePreview.enabled && !didNavigatePreview {
+                    didNavigatePreview = true
+                    switch InterfacePreview.page {
+                    case "scores": path = [.scores]
+                    case "exams": path = [.exams]
+                    case "electives": path = [.electives]
+                    default: break
+                    }
+                }
+            }
+            .task {
+                guard !InterfacePreview.enabled else { return }
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                    if scenePhase == .active, let date = nextExam?.startDate, date < Date() {
+                        nextExam = nil
+                        await loadUpcomingExam()
+                    }
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await loadUpcomingExam() } }
+            }
+        }
+    }
+
+    // Reuse successful child-page reads instead of issuing extra home-page requests.
+    private func resetSummariesIfNeeded() {
+        let generation = CookieJar.generation
+        if summaryGeneration != generation {
+            scoreSummary = nil
+            electiveSummary = nil
+            summaryGeneration = generation
+        }
+    }
+
+    private var examSummary: String {
+        guard let date = nextExam?.startDate else { return "考试时间、考场与座位" }
+        let formatted = date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened,
+                                                       locale: Locale(identifier: "zh_CN"),
+                                                       timeZone: TimeZone(identifier: "Asia/Shanghai")!))
+        return "最近一场 · \(formatted)"
+    }
+
+    private func service(_ title: String, subtitle: String, symbol: String, tint: Color, height: CGFloat) -> some View {
+        HStack(spacing: 16) {
+            Image(systemName: symbol)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: 46, height: 46)
+                .background(tint.opacity(0.09), in: .rect(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.headline).foregroundStyle(.primary)
+                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+        .contentShape(.rect(cornerRadius: 28))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func upcomingCard(_ exam: ExamItem) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("近期考试", systemImage: "calendar.badge.clock")
+                .font(.caption.weight(.medium)).foregroundStyle(Color.accentColor)
+            Text(exam.kcmc ?? "考试安排").font(.headline).foregroundStyle(.primary)
+            if let date = exam.startDate {
+                Text(date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened,
+                                                    locale: Locale(identifier: "zh_CN"),
+                                                    timeZone: TimeZone(identifier: "Asia/Shanghai")!)))
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            if !exam.location.isEmpty {
+                Text(exam.location).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+    }
+
+    private func loadUpcomingExam() async {
+        await loadGate.run { await fetchUpcomingExam() }
+    }
+
+    private func fetchUpcomingExam() async {
+        resetSummariesIfNeeded()
+        #if DEBUG
+        if InterfacePreview.enabled {
+            nextExam = ProcessInfo.processInfo.arguments.contains("--preview-no-upcoming") ? nil : InterfacePreview.exam
+            return
+        }
+        #endif
+        let generation = CookieJar.generation
+        if let reminderGeneration, reminderGeneration != generation {
+            nextExam = nil
+            upcomingError = nil
+        }
+        do {
+            let context = try await APIClient.shared.timetableContext()
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            let exams = try await APIClient.shared.examList(xnxq: context.term)
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            let now = Date()
+            let limit = now.addingTimeInterval(60 * 86400)
+            nextExam = exams.filter {
+                guard let date = $0.startDate else { return false }
+                return date >= now && date <= limit
+            }.min { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
+            reminderGeneration = generation
+            upcomingError = nil
+        } catch {
+            // An optional reminder never prevents access to the full academic pages.
+            guard CookieJar.generation == generation, !(error is CancellationError) else { return }
+            if let date = nextExam?.startDate, date >= Date() {
+                upcomingError = "近期考试暂未更新，当前显示上次记录"
+            } else {
+                nextExam = nil
+                upcomingError = nil
+            }
+        }
+    }
+}

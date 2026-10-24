@@ -32,6 +32,8 @@ enum EcardError: LocalizedError {
     /// 网络层错误（断网、超时、TLS 等），统一收口成这一种
     case transport(String)
     case noToken
+    case authenticationRequired
+    case sessionSynchronization
     case canceled
     /// 建单被拒（code 非 200 或 success=false）
     case orderRejected(String)
@@ -51,6 +53,8 @@ enum EcardError: LocalizedError {
         case .decoding(let what):          return "数据解析失败：\(what)"
         case .transport(let what):         return "网络异常：\(what)"
         case .noToken:                     return "未获取到缴费凭证，请重新登录"
+        case .authenticationRequired:      return "一卡通或学校访问网关登录已失效，请重新认证"
+        case .sessionSynchronization:      return "同步一卡通登录状态失败，请重新认证后再试"
         case .canceled:                    return "操作已取消"
         case .orderRejected(let msg):      return "建单失败：\(msg)"
         case .paymentChannelUnavailable:   return "当前没有可用的余额支付方式"
@@ -94,6 +98,20 @@ struct FeeItem: Decodable {
         case maxmoney, daymaxmoney, dayout
         case implInterface = "impl_interface"
         case feeitemImplBean
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        feeitemid = try c.ecardText(forKey: .feeitemid)
+        name = try c.decode(String.self, forKey: .name)
+        flag = try c.decode(String.self, forKey: .flag)
+        view = try c.decodeIfPresent(String.self, forKey: .view)
+        billingUnit = try c.decodeIfPresent(String.self, forKey: .billingUnit)
+        maxmoney = try c.ecardTextIfPresent(forKey: .maxmoney, allowsDecimal: true)
+        daymaxmoney = try c.ecardTextIfPresent(forKey: .daymaxmoney, allowsDecimal: true)
+        dayout = try c.decodeIfPresent(String.self, forKey: .dayout)
+        implInterface = try c.decodeIfPresent(String.self, forKey: .implInterface)
+        feeitemImplBean = try c.decodeIfPresent(FeeItemImpl.self, forKey: .feeitemImplBean)
     }
 
     // flag[4] → 0 选择模式 / 1 输入模式 / 4 IEC 电表模式
@@ -229,11 +247,49 @@ struct ThirdLevel: Decodable {
     let code: String
     let level: String
     let name: String
+
+    enum CodingKeys: String, CodingKey { case code, level, name }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        code = try c.ecardText(forKey: .code)
+        level = try c.ecardText(forKey: .level)
+        name = try c.decode(String.self, forKey: .name)
+    }
 }
 
 struct ThirdOption: Decodable {
     let name: String
     let value: String
+
+    enum CodingKeys: String, CodingKey { case name, value }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        value = try c.ecardText(forKey: .value)
+    }
+}
+
+// The backend can encode numeric IDs/limits as JSON numbers or strings.
+// Preserve strings (including leading zeroes); never pass IDs through Double,
+// or coerce booleans/objects/missing values into usable room selections.
+private extension KeyedDecodingContainer {
+    func ecardText(forKey key: Key, allowsDecimal: Bool = false) throws -> String {
+        if let value = try? decode(String.self, forKey: key) { return value }
+        if let value = try? decode(Int64.self, forKey: key) { return String(value) }
+        if let value = try? decode(UInt64.self, forKey: key) { return String(value) }
+        if allowsDecimal, let value = try? decode(Decimal.self, forKey: key) {
+            return NSDecimalNumber(decimal: value).stringValue
+        }
+        // Retain the decoder's precise missing/null/type error and coding path.
+        return try decode(String.self, forKey: key)
+    }
+
+    func ecardTextIfPresent(forKey key: Key, allowsDecimal: Bool = false) throws -> String? {
+        guard contains(key), try !decodeNil(forKey: key) else { return nil }
+        return try ecardText(forKey: key, allowsDecimal: allowsDecimal)
+    }
 }
 
 // MARK: - 房间 / 电表上下文
@@ -302,10 +358,9 @@ struct MeterContext {
     }
 
     static func jsonQuoted(_ s: String) -> String {
-        let escaped = s
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
+        // A String is always JSON-encodable; let the encoder escape control
+        // characters as well as quotes/backslashes without changing its value.
+        String(decoding: try! JSONEncoder().encode(s), as: UTF8.self)
     }
 }
 
@@ -457,16 +512,21 @@ final class EcardClient {
     static let electricityFeeItemID = "408"
 
     private let token: String
-    private let session: URLSession
+    typealias Transport = (URLRequest) async throws -> (Data, URLResponse)
+    private let transport: Transport
 
-    init(token: String, configuration: URLSessionConfiguration = .default) {
+    init(token: String, configuration: URLSessionConfiguration = .default,
+         transport: Transport? = nil) {
         self.token = token
-
-        let cfg = configuration
-        cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
-        cfg.timeoutIntervalForRequest = 20
-        cfg.timeoutIntervalForResource = 30
-        self.session = URLSession(configuration: cfg)
+        if let transport { self.transport = transport }
+        else {
+            let cfg = configuration
+            cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+            cfg.timeoutIntervalForRequest = 20
+            cfg.timeoutIntervalForResource = 30
+            let session = URLSession(configuration: cfg)
+            self.transport = { try await session.data(for: $0) }
+        }
     }
 
     // MARK: 基础请求
@@ -510,7 +570,11 @@ final class EcardClient {
         let data: Data
         let resp: URLResponse
         do {
-            (data, resp) = try await session.data(for: req)
+            (data, resp) = try await transport(req)
+        } catch let error as EcardError {
+            throw error
+        } catch is CancellationError {
+            throw EcardError.canceled
         } catch let error as URLError {
             if error.code == .cancelled { throw EcardError.canceled }
             throw EcardError.transport(error.localizedDescription)
@@ -518,20 +582,78 @@ final class EcardClient {
             throw EcardError.transport(error.localizedDescription)
         }
 
+        // A gateway may return JSON with code=500 after forwarding a payment.
+        // Preserve its HTTP failure so recharge can reconcile the existing order.
+        guard let http = resp as? HTTPURLResponse else { throw EcardError.http(-1) }
+        if [301, 302, 303, 307, 308, 401, 403].contains(http.statusCode) {
+            throw EcardError.authenticationRequired
+        }
+        guard (200..<300).contains(http.statusCode) else { throw EcardError.http(http.statusCode) }
+
         // 业务异常时后端仍返回 200，错误在 body 的 code 里
         if let probe = try? JSONDecoder().decode(CodeProbe.self, from: data),
            let code = probe.code, code != 200, code != 0 {
             throw EcardError.business(code, probe.msg ?? "未知错误")
         }
-        guard let http = resp as? HTTPURLResponse else { throw EcardError.http(-1) }
-        guard (200..<300).contains(http.statusCode) else { throw EcardError.http(http.statusCode) }
-
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch let error as DecodingError {
-            throw EcardError.decoding(Self.describe(error))
+            throw EcardError.decoding(Self.responseDescription(req, http: http, data: data, error: error))
         } catch {
-            throw EcardError.decoding(error.localizedDescription)
+            throw EcardError.decoding("\(Self.operationName(req))：无法读取接口响应")
+        }
+    }
+
+    /// Only report fixed classifications. Never include the response body, URL
+    /// query, cookies or headers: these can contain credentials and student data.
+    private static func responseDescription(_ request: URLRequest, http: HTTPURLResponse,
+                                            data: Data, error: DecodingError) -> String {
+        let prefix = String(decoding: data.prefix(128), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}")))
+            .lowercased()
+        let content: String
+        if data.isEmpty { content = "响应为空" }
+        else if http.mimeType?.lowercased() == "text/html" || prefix.hasPrefix("<!doctype html") || prefix.hasPrefix("<html") {
+            content = "接口返回了网页，未收到 JSON 数据"
+        } else { content = describe(error) }
+
+        let destination: String
+        switch http.url?.host?.lowercased() {
+        case "ecard.ccsut.cn":
+            if http.url?.path == request.url?.path { destination = "一卡通接口" }
+            else if http.url?.path.hasPrefix("/plat") == true { destination = "一卡通门户" }
+            else { destination = "一卡通其他页面" }
+        case "auth.ccsut.cn": destination = "CAS 登录页"
+        case "zts.ccsut.cn": destination = "学校访问网关"
+        default: destination = "其他地址"
+        }
+        let format: String
+        switch http.mimeType?.lowercased() {
+        case "application/json", "text/json": format = "JSON"
+        case "text/html": format = "HTML"
+        case "text/plain": format = "纯文本"
+        case nil: format = "未声明类型"
+        default: format = "其他类型"
+        }
+        return "\(operationName(request))：\(content)（HTTP \(http.statusCode)，\(format)，\(destination)）"
+    }
+
+    private static func operationName(_ request: URLRequest) -> String {
+        switch request.url?.path {
+        case "/charge/feeitem/singleFeeitem": return "加载缴费项目"
+        case "/charge/feeitem/getThirdData":
+            var form = URLComponents()
+            form.percentEncodedQuery = request.httpBody.flatMap { String(data: $0, encoding: .utf8) }
+            switch form.queryItems?.first(where: { $0.name == "level" })?.value {
+            case "0": return "加载校区"
+            case "1": return "加载楼栋"
+            case "2": return "加载房间"
+            case "3": return "查询电表"
+            default: return "加载房间选项"
+            }
+        case "/blade-pay/pay": return "提交缴费订单"
+        case "/charge/pay/getpayinfo": return "查询支付结果"
+        default: return "请求一卡通"
         }
     }
 
@@ -544,7 +666,8 @@ final class EcardClient {
         case .valueNotFound(_, let ctx):
             return "值为空 @\(ctx.codingPath.map(\.stringValue).joined(separator: "."))"
         case .dataCorrupted(let ctx):
-            return "数据损坏 @\(ctx.codingPath.map(\.stringValue).joined(separator: "."))"
+            return ctx.codingPath.isEmpty ? "响应不是有效的 JSON 数据" :
+                "字段内容无法解析 @\(ctx.codingPath.map(\.stringValue).joined(separator: "."))"
         @unknown default:
             return "未知解析错误"
         }
@@ -728,20 +851,23 @@ final class EcardClient {
 
         // 一次筛出「余额 + 免密 + id/code 完整」，
         // 不能先取第一个再判免密 —— 第一个要密码、第二个免密时会误拒。
-        guard let channel = balanceChannels.first(where: {
-            $0.isPasswordFree && $0.id != nil && $0.code != nil
-        }) else {
+        let completeChannels = balanceChannels.filter {
+            $0.id?.isEmpty == false && $0.code?.isEmpty == false
+        }
+        guard !completeChannels.isEmpty else { throw EcardError.paymentChannelUnavailable }
+        guard let channel = completeChannels.first(where: { $0.isPasswordFree }) else {
             throw EcardError.passwordRequired
         }
         guard let payTypeID = channel.id, let payTypeCode = channel.code else {
             throw EcardError.paymentChannelUnavailable
         }
 
+        guard !Task.isCancelled else { throw EcardError.canceled }
         do {
             _ = try await pay(orderID: orderID, payTypeID: payTypeID, payTypeCode: payTypeCode)
         } catch let error as EcardError {
             switch error {
-            case .transport, .http:
+            case .transport, .http, .decoding, .canceled, .authenticationRequired, .sessionSynchronization:
                 // 支付可能已被服务端处理（超时 / 网关 5xx）。
                 // 先查单；查不到也把订单号交给 UI 显示「结果待确认」，
                 // 绝不直接抛错，否则用户会再缴一次。

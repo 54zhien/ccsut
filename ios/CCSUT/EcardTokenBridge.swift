@@ -5,16 +5,17 @@
 //  用 WKWebView 拿一卡通缴费的 access_token
 //
 //  原理：
-//    平台登录态（统一身份认证 SSO）存在 WKWebsiteDataStore 里，我们复用它，
-//    直接访问换票接口 GET /charge/feeitem/toAppitem?feeitemid=408
-//      → 服务端校验登录态
-//      → 302 到 https://ecard.ccsut.cn/charge-app/?token=<access_token>&name=pays&id=408
+//    先打开官方 /plat/login，用户完成一卡通登录并进入电费项目。
+//    /charge/feeitem/toAppitem 是需要令牌的换票接口，不能作为未登录入口：
+//    实际会直接返回「缺失令牌，鉴权失败」，并不会自动重定向到登录页。
+//    由官方门户带着它自己的认证上下文进入电费项目后，跳转到：
+//      https://ecard.ccsut.cn/charge-app/?token=<access_token>&name=pays&id=408
 //    在 302 被应用的那一刻从 URL 里截出 token（charge-app 加载后会立刻
 //    history.replaceState 把参数抹掉，所以不能等页面加载完再看地址栏）。
 //
 //  使用方式（重要）：
-//    bridge 自己不弹任何界面。调用方必须把 `bridge.webView` 放进视图层级
-//    （sheet / 容器），再 `await bridge.fetchToken(forAccount: sno)`。
+//    bridge 不弹界面，可先在后台 `await fetchToken(forAccount: sno)`。
+//    onNeedsInteraction 通知调用方把同一个 webView 放进 sheet；不要重启请求。
 //
 //  凭证安全：
 //    - token 只在内存缓存，绑定 `sno`，并校验 JWT `exp` 未过期
@@ -31,33 +32,45 @@ final class EcardTokenBridge: NSObject {
 
     /// 展示给用户的 WebView（调用方负责放进视图层级）
     let webView: WKWebView
+    var onNeedsInteraction: (() -> Void)?
 
     private let feeitemID: String
     private let timeout: TimeInterval
 
     /// 请求代数：每次新请求自增，用于丢弃迟到回调
     private var generation = 0
-    /// 本次导航所属的代数：导航回调只对同代请求生效
-    private var navigationGeneration = 0
+    // Keep each navigation's owner, including retired navigations: a late error
+    // must never be relabelled with the current request's generation.
+    private var navigationGenerations: [WKNavigation: Int] = [:]
+    private var currentNavigation: WKNavigation?
+    private var requestCacheRevision = 0
 
     private var continuation: CheckedContinuation<String, Error>?
     private var timeoutTask: Task<Void, Never>?
     private var pendingAccount: String?
+    private var attemptedPortalActions: Set<String> = []
+    private var advancingPortal = false
+    private var reportedInteraction = false
 
     init(feeitemID: String = EcardClient.electricityFeeItemID,
          timeout: TimeInterval = 120,
-         dataStore: WKWebsiteDataStore = .default()) {
+         dataStore: WKWebsiteDataStore? = nil,
+         webView: WKWebView? = nil) {
         self.feeitemID = feeitemID
         self.timeout = timeout
 
         let cfg = WKWebViewConfiguration()
-        cfg.websiteDataStore = dataStore
+        cfg.websiteDataStore = dataStore ?? .default()
 
-        let wv = WKWebView(frame: .zero, configuration: cfg)
+        // Give the invisible page a real viewport for responsive login/portal
+        // layouts. WebPanel supplies its actual size if interaction is needed.
+        let wv = webView ?? WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: cfg)
         wv.allowsBackForwardNavigationGestures = false
+        wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
         self.webView = wv
         super.init()
         wv.navigationDelegate = self
+        wv.uiDelegate = self
     }
 
     // MARK: 对外入口
@@ -65,8 +78,14 @@ final class EcardTokenBridge: NSObject {
     /// 加载 + 等 token
     /// - Parameter account: 当前登录学号。传了就只在同学号缓存上复用；传 nil 不复用缓存。
     func fetchToken(forAccount account: String?) async throws -> String {
+        guard !Task.isCancelled else { throw EcardError.canceled }
         if let cached = Self.cachedToken(forAccount: account) { return cached }
-        return try await startRequest(account: account)
+        let revision = Self.cacheRevision
+        let token = try await startRequest(account: account)
+        // Logout/cancellation may happen after finish resumes the continuation
+        // but before this caller is scheduled to consume its result.
+        guard revision == Self.cacheRevision, !Task.isCancelled else { throw EcardError.canceled }
+        return token
     }
 
     // MARK: 缓存
@@ -78,6 +97,28 @@ final class EcardTokenBridge: NSObject {
     }
 
     private static var cache: CacheEntry?
+    private static var cacheRevision = 0
+    private static var preparation: (id: UUID, account: String, task: Task<Void, Never>)?
+
+    /// Best effort SSO after the main account has been verified. A gateway that
+    /// requires interaction simply times out; it must not block the App login.
+    static func prepareSession(forAccount account: String, dataStore: WKWebsiteDataStore) {
+        guard !account.isEmpty, cachedToken(forAccount: account) == nil,
+              preparation?.account != account else { return }
+        cancelPreparation()
+        let id = UUID()
+        let task = Task { @MainActor in
+            let bridge = EcardTokenBridge(timeout: 20, dataStore: dataStore)
+            _ = try? await bridge.fetchToken(forAccount: account)
+            if preparation?.id == id { preparation = nil }
+        }
+        preparation = (id, account, task)
+    }
+
+    static func cancelPreparation() {
+        preparation?.task.cancel()
+        preparation = nil
+    }
 
     static func cachedToken(forAccount account: String?) -> String? {
         guard let entry = cache else { return nil }
@@ -91,7 +132,11 @@ final class EcardTokenBridge: NSObject {
         return entry.token
     }
 
-    static func clearCachedToken() { cache = nil }
+    static func clearCachedToken() {
+        cancelPreparation()
+        cache = nil
+        cacheRevision &+= 1
+    }
 
     /// 只有「结构合法 + 未过期」才入缓存
     private static func store(token: String) {
@@ -109,19 +154,21 @@ final class EcardTokenBridge: NSObject {
             timeoutTask?.cancel()
             old.resume(throwing: EcardError.canceled)
         }
+        webView.stopLoading()
 
         generation &+= 1
         let myGeneration = generation
         pendingAccount = account
-
-        // 导航与本次请求绑定
-        navigationGeneration = myGeneration
-        refresh()
+        attemptedPortalActions = []
+        advancingPortal = false
+        reportedInteraction = false
+        requestCacheRevision = Self.cacheRevision
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { cont in
                 self.continuation = cont
                 self.startTimeout(generation: myGeneration)
+                self.refresh(generation: myGeneration)
             }
         } onCancel: {
             Task { @MainActor [weak self] in
@@ -131,20 +178,21 @@ final class EcardTokenBridge: NSObject {
         }
     }
 
-    private func refresh() {
-        let url = URL(string:
-            "https://ecard.ccsut.cn/charge/feeitem/toAppitem?feeitemid=\(feeitemID)")!
-        webView.load(URLRequest(url: url))
+    private func refresh(generation: Int) {
+        let url = URL(string: "https://ecard.ccsut.cn/plat/login")!
+        load(URLRequest(url: url), generation: generation)
+    }
+
+    private func load(_ request: URLRequest, generation: Int) {
+        if let navigation = webView.load(request) {
+            navigationGenerations[navigation] = generation
+            currentNavigation = navigation
+        }
     }
 
     private func cancel(generation gen: Int) {
-        guard gen == generation, let cont = continuation else { return }
-        continuation = nil
-        timeoutTask?.cancel()
-        timeoutTask = nil
-        // 让这一代之后的所有回调失效
-        generation &+= 1
-        cont.resume(throwing: EcardError.canceled)
+        guard gen == generation, continuation != nil else { return }
+        finish(.failure(EcardError.canceled), generation: gen)
     }
 
     private func finish(_ result: Result<String, Error>, generation gen: Int) {
@@ -152,6 +200,13 @@ final class EcardTokenBridge: NSObject {
         continuation = nil
         timeoutTask?.cancel()
         timeoutTask = nil
+        generation &+= 1
+        webView.stopLoading()
+
+        guard requestCacheRevision == Self.cacheRevision else {
+            cont.resume(throwing: EcardError.canceled)
+            return
+        }
 
         switch result {
         case .success(let token):
@@ -175,11 +230,7 @@ final class EcardTokenBridge: NSObject {
 
     /// 只认缴费网关这一条路径，且 JWT 未过期
     private func token(from url: URL?, account: String?) -> String? {
-        guard let url,
-              url.scheme?.lowercased() == "https",
-              url.host?.lowercased() == "ecard.ccsut.cn",
-              url.path.hasPrefix("/charge-app")
-        else { return nil }
+        guard Self.isPaymentPage(url), let url else { return nil }
 
         guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let raw = comps.queryItems?.first(where: { $0.name == "token" })?.value,
@@ -187,6 +238,97 @@ final class EcardTokenBridge: NSObject {
         else { return nil }
 
         return validate(raw, account: account)
+    }
+
+    private static func isPaymentPage(_ url: URL?) -> Bool {
+        guard let url, url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "ecard.ccsut.cn",
+              url.port == nil || url.port == 443 else { return false }
+        return url.path == "/charge-app" || url.path.hasPrefix("/charge-app/")
+    }
+
+    private static func isPortalPage(_ url: URL?) -> Bool {
+        guard let url, url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "ecard.ccsut.cn",
+              url.port == nil || url.port == 443 else { return false }
+        return url.path == "/plat" || url.path.hasPrefix("/plat/")
+    }
+
+    /// Only follow the observed official SSO/project entries. Never match or
+    /// activate payment/confirmation controls. Manual login remains available.
+    private func advancePortal(pageURL: URL, generation gen: Int) async {
+        guard !advancingPortal else { return }
+        advancingPortal = true
+        defer { if gen == generation { advancingPortal = false } }
+        let script = """
+        for (let attempt = 0; attempt < 20; attempt++) {
+          if (location.origin !== 'https://ecard.ccsut.cn' ||
+              !(location.pathname === '/plat' || location.pathname.startsWith('/plat/'))) return '';
+          const entries = [...document.querySelectorAll('a, button, [role="button"], span, div')];
+          const exact = labels => {
+            const matches = entries.filter(el => {
+            const text = (el.textContent || '').replace(/\\s+/g, '').toLowerCase();
+            return labels.includes(text) && el.getClientRects().length > 0 &&
+              el.getAttribute('aria-disabled') !== 'true' && !el.disabled;
+            });
+            return matches.find(el => el.matches('a, button, [role="button"]')) ||
+              matches.find(el => !matches.some(child => child !== el && el.contains(child)));
+          };
+          const electricity = allowElectricity ? exact(['电表缴费', '电费缴费']) : null;
+          const cas = allowCAS ? exact(['智林cas']) : null;
+          const entry = electricity || cas;
+          if (entry) {
+            entry.click();
+            return electricity ? 'electricity' : 'cas';
+          }
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
+        return '';
+        """
+        let value = try? await webView.callAsyncJavaScript(script, arguments: [
+            "allowCAS": !attemptedPortalActions.contains("cas"),
+            "allowElectricity": !attemptedPortalActions.contains("electricity")
+        ], in: nil, in: .page)
+        guard gen == generation, continuation != nil else { return }
+        if let action = value as? String, ["cas", "electricity"].contains(action) {
+            attemptedPortalActions.insert(action)
+        }
+    }
+
+    private func reportInteractionIfNeeded(pageURL: URL?, navigation: WKNavigation, generation gen: Int) async {
+        guard onNeedsInteraction != nil, !reportedInteraction, let pageURL,
+              pageURL.scheme?.lowercased() == "https", pageURL.port == nil || pageURL.port == 443,
+              let host = pageURL.host?.lowercased(),
+              host == "auth.ccsut.cn" || host == "zts.ccsut.cn" || Self.isPortalPage(pageURL),
+              gen == generation, continuation != nil, webView.url == pageURL,
+              currentNavigation === navigation else { return }
+        // Inspect controls only, never their values or authentication payloads.
+        // A network delay alone is not proof that a login window is necessary.
+        let script = """
+        const selector = portalOnly ? 'input[type="password"]' :
+          'input[type="password"], input[autocomplete="one-time-code"], input[name*="code" i], ' +
+          'input[placeholder*="验证码"], canvas, img[src*="qrcode" i], img[alt*="二维码"], ' +
+          '[id*="qrcode" i], [class*="qrcode" i], [class*="qr-code" i]';
+        const visibleControl = () => [...document.querySelectorAll(selector)].some(el =>
+          el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden');
+        for (let attempt = 0; attempt < 15; attempt++) {
+          if (location.href !== expectedURL) return false;
+          if (visibleControl()) {
+            await new Promise(resolve => setTimeout(resolve, 800));
+            return location.href === expectedURL && visibleControl();
+          }
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
+        return false;
+        """
+        let needsInteraction = try? await webView.callAsyncJavaScript(script, arguments: [
+            "portalOnly": Self.isPortalPage(pageURL), "expectedURL": pageURL.absoluteString
+        ], in: nil, in: .page)
+        guard gen == generation, continuation != nil, webView.url == pageURL,
+              currentNavigation === navigation, !webView.isLoading,
+              needsInteraction as? Bool == true else { return }
+        reportedInteraction = true
+        onNeedsInteraction?()
     }
 
     /// 结构 + 过期 + 账号一致性
@@ -204,44 +346,62 @@ final class EcardTokenBridge: NSObject {
 
 extension EcardTokenBridge: WKNavigationDelegate {
 
-    nonisolated func webView(_ webView: WKWebView,
+    func webView(_ webView: WKWebView,
                              decidePolicyFor navigationAction: WKNavigationAction,
                              decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        decisionHandler(.allow)
-
+        // A canceled/retired background SSO must not continue navigating the
+        // shared website session after the interactive flow takes over.
+        guard continuation != nil else { decisionHandler(.cancel); return }
         let url = navigationAction.request.url
-        Task { @MainActor [weak self] in
-            guard let self, self.navigationGeneration == self.generation else { return }
-            guard let token = self.token(from: url, account: self.pendingAccount) else { return }
-            self.finish(.success(token), generation: self.generation)
-            webView.stopLoading()
+        if let token = token(from: url, account: pendingAccount) {
+            decisionHandler(.cancel)
+            finish(.success(token), generation: generation)
+        } else {
+            decisionHandler(.allow)
         }
     }
 
-    nonisolated func webView(_ webView: WKWebView,
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard let navigation, continuation != nil else { return }
+        if navigationGenerations[navigation] == nil {
+            navigationGenerations[navigation] = generation
+        }
+        if navigationGenerations[navigation] == generation { currentNavigation = navigation }
+    }
+
+    func webView(_ webView: WKWebView,
                              didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
-        let url = webView.url
-        Task { @MainActor [weak self] in
-            guard let self, self.navigationGeneration == self.generation else { return }
-            guard let token = self.token(from: url, account: self.pendingAccount) else { return }
-            self.finish(.success(token), generation: self.generation)
-            webView.stopLoading()
-        }
+        guard let navigation, navigationGenerations[navigation] == generation,
+              let token = token(from: webView.url, account: pendingAccount) else { return }
+        finish(.success(token), generation: generation)
     }
 
-    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard let navigation, navigationGenerations[navigation] == generation,
+              currentNavigation === navigation, continuation != nil else { return }
+        let gen = generation
+        let account = pendingAccount
         let pageURL = webView.url
         Task { @MainActor [weak self] in
-            guard let self, self.navigationGeneration == self.generation,
+            guard let self, gen == self.generation,
                   self.continuation != nil else { return }
 
-            if let token = self.token(from: pageURL, account: self.pendingAccount) {
-                self.finish(.success(token), generation: self.generation)
+            if let token = self.token(from: pageURL, account: account) {
+                self.finish(.success(token), generation: gen)
+                return
+            }
+
+            if Self.isPortalPage(pageURL), let pageURL, webView.url == pageURL {
+                await self.advancePortal(pageURL: pageURL, generation: gen)
+                await self.reportInteractionIfNeeded(pageURL: pageURL, navigation: navigation, generation: gen)
                 return
             }
 
             // 兜底只读固定键，且必须确认还在缴费域名下
-            guard let pageURL, pageURL.host?.lowercased() == "ecard.ccsut.cn" else { return }
+            guard Self.isPaymentPage(pageURL), webView.url == pageURL else {
+                await self.reportInteractionIfNeeded(pageURL: pageURL, navigation: navigation, generation: gen)
+                return
+            }
 
             let js = """
             (function () {
@@ -254,25 +414,37 @@ extension EcardTokenBridge: WKNavigationDelegate {
             })();
             """
             guard let value = try? await webView.evaluateJavaScript(js),
+                  gen == self.generation, self.currentNavigation === navigation,
+                  webView.url == pageURL,
                   let raw = value as? String,
-                  let token = self.validate(raw, account: self.pendingAccount)
+                  let token = self.validate(raw, account: account)
             else { return }
 
-            self.finish(.success(token), generation: self.generation)
+            self.finish(.success(token), generation: gen)
         }
     }
 
-    nonisolated func webView(_ webView: WKWebView,
+    func webView(_ webView: WKWebView,
                              didFailProvisionalNavigation navigation: WKNavigation!,
                              withError error: Error) {
-        let code = (error as NSError).code
-        let message = error.localizedDescription
-        Task { @MainActor [weak self] in
-            guard let self, code != NSURLErrorCancelled else { return }
-            // 用导航所属的代数：旧导航的错误不能落到新请求上
-            self.finish(.failure(EcardError.transport(message)),
-                        generation: self.navigationGeneration)
-        }
+        guard let navigation, let gen = navigationGenerations[navigation],
+              (error as NSError).code != NSURLErrorCancelled else { return }
+        finish(.failure(EcardError.transport(error.localizedDescription)), generation: gen)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        self.webView(webView, didFailProvisionalNavigation: navigation, withError: error)
+    }
+}
+
+// The portal may open its electricity project with target=_blank/window.open.
+// Keep that official flow in this sheet instead of silently discarding the tab.
+extension EcardTokenBridge: WKUIDelegate {
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        guard continuation != nil, navigationAction.targetFrame == nil else { return nil }
+        load(navigationAction.request, generation: generation)
+        return nil
     }
 }
 

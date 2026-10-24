@@ -260,19 +260,36 @@ enum WeekParser {
     /// "1-4,6-11" → [1,2,3,4,6,7,8,9,10,11]
     /// "1-3,5-7,9-9,11-11" → 单双周也在这里展开
     static func parse(_ raw: String) -> [Int] {
+        (try? parseValidated(raw)) ?? []
+    }
+
+    enum ParseError: Error { case invalidRange }
+
+    /// Invalid nonempty input must be rejected before publishing a timetable.
+    static func parseValidated(_ raw: String) throws -> [Int] {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return [] }
+        let normalized = text.replacingOccurrences(of: "，", with: ",")
+            .replacingOccurrences(of: "、", with: ",")
+            .replacingOccurrences(of: "；", with: ",")
+            .replacingOccurrences(of: ";", with: ",")
+        let pattern = #"^\s*([0-9]{1,2})(?:\s*[-~至]\s*([0-9]{1,2}))?\s*(?:周)?\s*(?:[（(]?(单|双)(?:周)?[）)]?)?\s*$"#
+        let regex = try NSRegularExpression(pattern: pattern)
         var set = Set<Int>()
-        for part in raw.split(separator: ",") {
-            let p = part.trimmingCharacters(in: .whitespaces)
-            guard !p.isEmpty else { continue }
-            if p.contains("-") {
-                let nums = p.split(separator: "-").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-                if nums.count == 2, nums[0] <= nums[1], nums[1] - nums[0] < 60 {
-                    set.formUnion(nums[0]...nums[1])
+        for part in normalized.components(separatedBy: ",") {
+            let value = part as NSString
+            guard let match = regex.firstMatch(in: part, range: NSRange(location: 0, length: value.length)),
+                  let start = Int(value.substring(with: match.range(at: 1))) else { throw ParseError.invalidRange }
+            let end = match.range(at: 2).location == NSNotFound ? start : Int(value.substring(with: match.range(at: 2)))!
+            guard (1...53).contains(start), (start...53).contains(end) else { throw ParseError.invalidRange }
+            let parity = match.range(at: 3).location == NSNotFound ? "" : value.substring(with: match.range(at: 3))
+            for week in start...end {
+                if parity.isEmpty || (parity == "单" && week % 2 == 1) || (parity == "双" && week % 2 == 0) {
+                    set.insert(week)
                 }
-            } else if let n = Int(p), n > 0 {
-                set.insert(n)
             }
         }
+        guard !set.isEmpty else { throw ParseError.invalidRange }
         return set.sorted()
     }
 
