@@ -302,10 +302,9 @@ struct MeterContext {
     }
 
     static func jsonQuoted(_ s: String) -> String {
-        let escaped = s
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
+        // A String is always JSON-encodable; let the encoder escape control
+        // characters as well as quotes/backslashes without changing its value.
+        String(decoding: try! JSONEncoder().encode(s), as: UTF8.self)
     }
 }
 
@@ -518,14 +517,16 @@ final class EcardClient {
             throw EcardError.transport(error.localizedDescription)
         }
 
+        // A gateway may return JSON with code=500 after forwarding a payment.
+        // Preserve its HTTP failure so recharge can reconcile the existing order.
+        guard let http = resp as? HTTPURLResponse else { throw EcardError.http(-1) }
+        guard (200..<300).contains(http.statusCode) else { throw EcardError.http(http.statusCode) }
+
         // 业务异常时后端仍返回 200，错误在 body 的 code 里
         if let probe = try? JSONDecoder().decode(CodeProbe.self, from: data),
            let code = probe.code, code != 200, code != 0 {
             throw EcardError.business(code, probe.msg ?? "未知错误")
         }
-        guard let http = resp as? HTTPURLResponse else { throw EcardError.http(-1) }
-        guard (200..<300).contains(http.statusCode) else { throw EcardError.http(http.statusCode) }
-
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch let error as DecodingError {
@@ -728,20 +729,23 @@ final class EcardClient {
 
         // 一次筛出「余额 + 免密 + id/code 完整」，
         // 不能先取第一个再判免密 —— 第一个要密码、第二个免密时会误拒。
-        guard let channel = balanceChannels.first(where: {
-            $0.isPasswordFree && $0.id != nil && $0.code != nil
-        }) else {
+        let completeChannels = balanceChannels.filter {
+            $0.id?.isEmpty == false && $0.code?.isEmpty == false
+        }
+        guard !completeChannels.isEmpty else { throw EcardError.paymentChannelUnavailable }
+        guard let channel = completeChannels.first(where: { $0.isPasswordFree }) else {
             throw EcardError.passwordRequired
         }
         guard let payTypeID = channel.id, let payTypeCode = channel.code else {
             throw EcardError.paymentChannelUnavailable
         }
 
+        guard !Task.isCancelled else { throw EcardError.canceled }
         do {
             _ = try await pay(orderID: orderID, payTypeID: payTypeID, payTypeCode: payTypeCode)
         } catch let error as EcardError {
             switch error {
-            case .transport, .http:
+            case .transport, .http, .decoding, .canceled:
                 // 支付可能已被服务端处理（超时 / 网关 5xx）。
                 // 先查单；查不到也把订单号交给 UI 显示「结果待确认」，
                 // 绝不直接抛错，否则用户会再缴一次。

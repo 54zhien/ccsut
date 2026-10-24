@@ -18,6 +18,7 @@ jobs:
         run: |
           xcrun swiftc -parse-as-library \
             ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/Models.swift \
+            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift \
             ios/Tests/SessionRegressionTests.swift \
             -o "$RUNNER_TEMP/session-tests"
       - name: Run Swift session regressions
@@ -25,3 +26,25 @@ jobs:
       - name: Run embedded login script regressions
         if: always()
         run: node --test ios/Tests/login-script.test.mjs
+
+  ecard:
+    name: Offline ecard regressions
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run ecard regressions against native WebKit
+        run: python3 ios/Tests/run-ecard-tests.py
+
+  ios-build:
+    name: Compile iOS app
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build unsigned iOS application
+        run: |
+          xcodebuild build -project ios/CCSUT.xcodeproj -scheme CCSUT \
+            -configuration Debug -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ecard-derived-data" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
