@@ -79,11 +79,11 @@ struct TeachingClass: Decodable, Identifiable, Hashable {
     var creditValue: Double { Double(xf ?? "") ?? 0 }
 
     var enrolled: Int {
-        Int((yxrl ?? "").split(separator: "/").first ?? "") ?? 0
+        Int(((yxrl ?? "").split(separator: "/").first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
     }
 
     var capacity: Int {
-        Int((yxrl ?? "").split(separator: "/").last ?? "") ?? 0
+        Int(((yxrl ?? "").split(separator: "/").last ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
     }
 
     var isFull: Bool { capacity > 0 && enrolled >= capacity }

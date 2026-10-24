@@ -36,6 +36,16 @@ enum EcardSSOError: LocalizedError, Sendable, Equatable {
     }
 }
 
+/// Memory-only diagnostics. Never retain a request URL or the underlying error text.
+struct EcardSSODiagnostic: Error, Sendable, Equatable {
+    enum Stage: String, Sendable {
+        case starting, portal, cas, gatewayConfiguration, gatewayAuthentication, gatewayVerification
+        case ticketExchange, paymentToken
+    }
+    let stage: Stage
+    let reason: EcardSSOError
+}
+
 private final class EcardSSONoRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(
         _ session: URLSession,
@@ -72,6 +82,8 @@ final class EcardSSOURLTransport: EcardSSOTransport, @unchecked Sendable {
 }
 
 actor EcardSSOClient {
+    private(set) var lastFailure: EcardSSODiagnostic?
+    private var diagnosticStage: EcardSSODiagnostic.Stage = .starting
     private static let ecardHost = "ecard.ccsut.cn"
     private static let ztsHost = "zts.ccsut.cn"
     private static let authHost = "auth.ccsut.cn"
@@ -104,6 +116,20 @@ actor EcardSSOClient {
     }
 
     func fetchPaymentToken() async throws -> String {
+        lastFailure = nil
+        diagnosticStage = .starting
+        do {
+            return try await performAuthentication()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            lastFailure = EcardSSODiagnostic(stage: diagnosticStage,
+                                            reason: error as? EcardSSOError ?? .serviceUnavailable)
+            throw error
+        }
+    }
+
+    private func performAuthentication() async throws -> String {
         guard !account.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw EcardSSOError.identityMismatch
         }
@@ -306,6 +332,7 @@ actor EcardSSOClient {
         generation: UInt64,
         deadline: Date
     ) async throws -> (Data, HTTPURLResponse) {
+        diagnosticStage = Self.diagnosticStage(for: request.url)
         try check(generation)
         let remaining = deadline.timeIntervalSinceNow
         guard remaining > 0 else { throw EcardSSOError.serviceUnavailable }
@@ -332,6 +359,26 @@ actor EcardSSOClient {
             throw error
         } catch {
             throw EcardSSOError.serviceUnavailable
+        }
+    }
+
+    private static func diagnosticStage(for url: URL?) -> EcardSSODiagnostic.Stage {
+        guard let url else { return .starting }
+        switch url.host?.lowercased() {
+        case authHost: return .cas
+        case ztsHost:
+            switch url.path {
+            case "/passport/v1/public/authConfig": return .gatewayConfiguration
+            case "/controller/v1/public/verify", "/passport/v1/auth/authCheck": return .gatewayVerification
+            default: return .gatewayAuthentication
+            }
+        case ecardHost:
+            switch url.path {
+            case "/berserker-auth/oauth/token": return .ticketExchange
+            case "/charge/feeitem/toAppitem": return .paymentToken
+            default: return .portal
+            }
+        default: return .starting
         }
     }
 

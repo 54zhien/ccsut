@@ -155,7 +155,7 @@ struct ScheduleView: View {
                                 Text(slot.course).font(.headline).foregroundStyle(.primary)
                                 Text([slot.teacher, slot.room].filter { !$0.isEmpty }.joined(separator: " · "))
                                     .font(.subheadline).foregroundStyle(.secondary)
-                                Text("第 \(slot.startPeriod)–\(slot.endPeriod) 节 · \(slot.weeks.isEmpty ? "周次未标注" : "第 \(WeekParser.compress(slot.weeks.sorted())) 周")")
+                                Text("\(SchedulePresentation.periodCaption(slot)) · \(slot.weeks.isEmpty ? "周次未标注" : "第 \(WeekParser.compress(slot.weeks.sorted())) 周")")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             .padding(.vertical, 4)

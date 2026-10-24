@@ -63,8 +63,13 @@ final class EcardTokenBridge: NSObject {
         self.feeitemID = feeitemID
         self.timeout = timeout
         self.nativeTokenProvider = nativeTokenProvider ?? { account, timeout in
-            try await EcardSSOClient(account: account, credentials: EcardCookieCredentials(),
-                timeout: timeout, feeItemAuthorization: EcardClient.basicAuth).fetchPaymentToken()
+            let client = EcardSSOClient(account: account, credentials: EcardCookieCredentials(),
+                                       timeout: timeout, feeItemAuthorization: EcardClient.basicAuth)
+            do { return try await client.fetchPaymentToken() }
+            catch {
+                if let diagnostic = await client.lastFailure { throw diagnostic }
+                throw error
+            }
         }
 
         let cfg = WKWebViewConfiguration()
@@ -89,6 +94,7 @@ final class EcardTokenBridge: NSObject {
         guard !Task.isCancelled else { throw EcardError.canceled }
         if let cached = Self.cachedToken(forAccount: account) {
             usesNativeCookies = Self.cachedTokenUsesNativeCookies(forAccount: account)
+            if usesNativeCookies { Self.lastNativeSSOFailure = nil }
             return cached
         }
         let revision = Self.cacheRevision
@@ -103,17 +109,19 @@ final class EcardTokenBridge: NSObject {
                 }
                 guard validate(token, account: account) != nil else { throw EcardSSOError.invalidResponse }
                 usesNativeCookies = true
+                Self.lastNativeSSOFailure = nil
                 Self.store(token: token, nativeCookies: true)
                 return token
-            } catch is CancellationError {
-                throw EcardError.canceled
-            } catch EcardSSOError.identityMismatch {
-                throw EcardSSOError.identityMismatch
-            } catch EcardSSOError.untrustedRedirect {
-                throw EcardSSOError.untrustedRedirect
             } catch {
                 guard revision == Self.cacheRevision, CookieJar.generation == cookieGeneration,
                       !Task.isCancelled else { throw EcardError.canceled }
+                if error is CancellationError { throw EcardError.canceled }
+                let diagnostic = error as? EcardSSODiagnostic
+                    ?? EcardSSODiagnostic(stage: .starting, reason: error as? EcardSSOError ?? .serviceUnavailable)
+                Self.lastNativeSSOFailure = diagnostic
+                if diagnostic.reason == .identityMismatch || diagnostic.reason == .untrustedRedirect {
+                    throw diagnostic.reason
+                }
                 // No native credential is persisted here. The official browser
                 // can handle interactive authentication or a changed deployment.
             }
@@ -149,6 +157,8 @@ final class EcardTokenBridge: NSObject {
     }
 
     private static var cache: CacheEntry?
+    /// Fixed metadata only, retained across WebView fallback and failed prewarming.
+    private(set) static var lastNativeSSOFailure: EcardSSODiagnostic?
     private static var cacheRevision = 0
     private static var preparation: (id: UUID, account: String, task: Task<Void, Never>)?
     private static var preparationSuspensions = 0
@@ -211,6 +221,7 @@ final class EcardTokenBridge: NSObject {
     static func clearCachedToken() {
         cancelPreparation()
         cache = nil
+        lastNativeSSOFailure = nil
         cacheRevision &+= 1
     }
 

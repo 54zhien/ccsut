@@ -30,6 +30,12 @@ struct ScheduleCell: Identifiable {
 }
 
 enum SchedulePresentation {
+    static func periodCaption(_ slot: ScheduleSlot) -> String {
+        slot.startPeriod == slot.endPeriod
+            ? "第 \(slot.startPeriod) 节"
+            : "第 \(slot.startPeriod)–\(slot.endPeriod) 节"
+    }
+
     /// The API keeps its raw term code; only the visible caption is normalized.
     static func termTitle(_ raw: String) -> String {
         let parts = raw.split(separator: "-")

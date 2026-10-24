@@ -11,6 +11,12 @@ struct AcademicReliabilityTests {
         func score(_ json: String) throws -> ScoreItem {
             try JSONDecoder().decode(ScoreItem.self, from: Data(json.utf8))
         }
+        for counts in ["40/40", "40 / 40", " 40 / 40 ", "40\t/\t40"] {
+            let data = try JSONSerialization.data(withJSONObject: ["id": "fixture", "yxrl": counts, "sfkxk": "1"])
+            let item = try JSONDecoder().decode(TeachingClass.self, from: data)
+            check(item.enrolled == 40 && item.capacity == 40 && item.isFull && !item.canSelect,
+                  "full elective remains unselectable with whitespace around its counts")
+        }
         let passedScore = try score(#"{"xf":"2","jd":4,"sfjg":"1"}"#)
         let failedScore = try score(#"{"xf":"2","jd":0,"sfjg":"0"}"#)
         let pendingScore = try score(#"{"xf":"2","jd":null,"sfjg":null}"#)

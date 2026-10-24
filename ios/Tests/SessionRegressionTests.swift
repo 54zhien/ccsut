@@ -189,6 +189,36 @@ struct SessionRegressionTests {
             check(fallbackWebView.loadedRequests.count == 1 &&
                   fallbackWebView.loadedRequests.first?.url == URL(string: "https://ecard.ccsut.cn/plat/login") &&
                   !fallbackBridge.usesNativeCookies, "native interaction requirement falls back to the official WebView entry")
+            check(EcardTokenBridge.lastNativeSSOFailure?.reason == .requiresInteraction,
+                  "WebView fallback preserves the classified native failure in memory")
+        }
+
+        let recoveredBridge = EcardTokenBridge(webView: inertWebView(), nativeTokenProvider: { _, _ in expectedNativeToken })
+        do {
+            _ = try await recoveredBridge.fetchToken(forAccount: "fixture-native")
+            check(EcardTokenBridge.lastNativeSSOFailure == nil, "native recovery clears the previous failure diagnosis")
+        } catch { check(false, "native recovery completes") }
+
+        EcardTokenBridge.clearCachedToken()
+        let diagnosticBridge = EcardTokenBridge(timeout: 0.01, webView: inertWebView(), nativeTokenProvider: { _, _ in
+            throw EcardSSODiagnostic(stage: .ticketExchange, reason: .serviceUnavailable)
+        })
+        do { _ = try await diagnosticBridge.fetchToken(forAccount: "fixture-native"); check(false, "diagnostic fallback must terminate") }
+        catch {
+            check(EcardTokenBridge.lastNativeSSOFailure == EcardSSODiagnostic(stage: .ticketExchange, reason: .serviceUnavailable),
+                  "protocol stage survives the bridge and failed WebView fallback")
+        }
+
+        EcardTokenBridge.clearCachedToken()
+        check(EcardTokenBridge.lastNativeSSOFailure == nil, "session invalidation clears native failure diagnostics")
+        let classifiedMismatchWebView = inertWebView()
+        let classifiedMismatchBridge = EcardTokenBridge(webView: classifiedMismatchWebView, nativeTokenProvider: { _, _ in
+            throw EcardSSODiagnostic(stage: .gatewayVerification, reason: .identityMismatch)
+        })
+        do { _ = try await classifiedMismatchBridge.fetchToken(forAccount: "fixture-native"); check(false, "classified account mismatch must fail") }
+        catch {
+            check(error as? EcardSSOError == .identityMismatch && classifiedMismatchWebView.loadedRequests.isEmpty,
+                  "classified native identity mismatch stays terminal without WebView fallback")
         }
 
         EcardTokenBridge.clearCachedToken()
@@ -228,6 +258,7 @@ struct SessionRegressionTests {
         do { _ = try await clearedBridge.fetchToken(forAccount: "fixture-native"); check(false, "late native result after cache clear must fail") }
         catch { check(clearedWebView.loadedRequests.isEmpty && EcardTokenBridge.cachedToken(forAccount: "fixture-native") == nil,
                       "cache clear discards a late native result without fallback or caching") }
+        check(EcardTokenBridge.lastNativeSSOFailure == nil, "late result cannot republish a diagnosis after session invalidation")
 
         EcardTokenBridge.clearCachedToken()
         let canceledWebView = inertWebView()
@@ -239,6 +270,19 @@ struct SessionRegressionTests {
         do { _ = try await canceledFetch.value; check(false, "canceled native request must fail") }
         catch { check(canceledWebView.loadedRequests.isEmpty && EcardTokenBridge.cachedToken(forAccount: "fixture-native") == nil,
                       "caller cancellation discards a late native token without fallback or caching") }
+        check(EcardTokenBridge.lastNativeSSOFailure == nil, "cancellation never publishes a failure diagnosis")
+
+        EcardTokenBridge.clearCachedToken()
+        let staleFailureWebView = inertWebView()
+        let staleFailureBridge = EcardTokenBridge(webView: staleFailureWebView, nativeTokenProvider: { _, _ in
+            CookieJar.shared = []
+            throw EcardSSODiagnostic(stage: .ticketExchange, reason: .serviceUnavailable)
+        })
+        do { _ = try await staleFailureBridge.fetchToken(forAccount: "fixture-native"); check(false, "stale native failure must fail") }
+        catch {
+            check(staleFailureWebView.loadedRequests.isEmpty && EcardTokenBridge.lastNativeSSOFailure == nil,
+                  "account switch discards a late failure diagnosis without fallback")
+        }
 
         EcardTokenBridge.clearCachedToken()
         let switchedWebView = inertWebView()

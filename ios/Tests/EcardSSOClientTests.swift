@@ -513,14 +513,31 @@ struct EcardSSOClientTests {
         let unauthorizedTransport = ScriptedTransport([
             StubResponse(401, path: "/berserker-auth/cas/login/wisedu", query: ["targetUrl": transitTarget])
         ])
+        let unauthorizedClient = EcardSSOClient(account: account, credentials: SyntheticCredentials(),
+                                                transport: unauthorizedTransport, timeout: 2)
         do {
-            _ = try await EcardSSOClient(account: account, credentials: SyntheticCredentials(),
-                                         transport: unauthorizedTransport, timeout: 2).fetchPaymentToken()
+            _ = try await unauthorizedClient.fetchPaymentToken()
             check(false, "HTTP 401 maps to service unavailable")
         } catch let error as EcardSSOError {
             check(error == .serviceUnavailable, "HTTP 401 maps to service unavailable")
         } catch {
             check(false, "HTTP 401 has a fixed SSO error")
+        }
+        check(await unauthorizedClient.lastFailure == EcardSSODiagnostic(stage: .portal, reason: .serviceUnavailable),
+              "native failure retains only its fixed stage and error classification")
+
+        let failedExchangeTransport = ScriptedTransport([
+            StubResponse(302, headers: ["Location": transitLocation],
+                         path: "/berserker-auth/cas/login/wisedu", query: ["targetUrl": transitTarget]),
+            StubResponse(503, body: "https://untrusted.invalid/?ticket=private-fixture-value",
+                         path: "/berserker-auth/oauth/token", method: "POST")
+        ])
+        let failedExchangeClient = EcardSSOClient(account: account, credentials: SyntheticCredentials(),
+                                                  transport: failedExchangeTransport, timeout: 2)
+        do { _ = try await failedExchangeClient.fetchPaymentToken(); check(false, "failed token exchange must fail") }
+        catch {
+            check(await failedExchangeClient.lastFailure == EcardSSODiagnostic(stage: .ticketExchange, reason: .serviceUnavailable),
+                  "token exchange failure records the exchange stage without response content")
         }
 
         let loopTransport = ScriptedTransport([

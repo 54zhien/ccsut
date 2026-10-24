@@ -15,7 +15,7 @@ struct ScheduleDetailSheet: View {
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityAddTraits(.isHeader)
-                        Text("\(weekdayName) · 第 \(slot.startPeriod)–\(slot.endPeriod) 节")
+                        Text("\(weekdayName) · \(SchedulePresentation.periodCaption(slot))")
                             .font(.subheadline)
                             .foregroundStyle(Color.accentColor)
                     }
