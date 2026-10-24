@@ -204,6 +204,11 @@ actor FormTransport: CampusTransport {
             let c = try await CampusClient(account:"fixture-account",credentials:FormCredentials(),transport:paddedHidden).loadForm(.leave)
             check(!c.needsFiles && c.needsLeaveTime && !c.roleFallback, "padded hidden optional flag loads without weakening required-time or reviewer defaults")
         } catch { check(false, "padded hidden optional flag loads without weakening required-time or reviewer defaults") }
+        let paddedScope = FormTransport { req,_ in
+            req.url!.path.hasSuffix("querySysConfigItems") ? (200,#"{"data":[{"configKey":"leaveadminApplyPowerUser","configContent":" 隐藏 "}]}"#) : nil
+        }
+        do { _ = try await CampusClient(account:"fixture-account",credentials:FormCredentials(),transport:paddedScope).loadForm(.leave); check(false,"noncanonical reviewer scope never broadens eligibility") }
+        catch { check(error as? CampusFormError == .invalidResponse,"noncanonical reviewer scope never broadens eligibility") }
         if failures > 0 { exit(1) }
     }
 }

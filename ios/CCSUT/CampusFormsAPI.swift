@@ -58,6 +58,10 @@ extension CampusClient: CampusFormServing {
             }
             func flag(_ key: String, fallback: Bool = false) throws -> Bool {
                 guard let value = values[key] else { return fallback }
+                // The live school configuration pads an optional hidden flag with whitespace.
+                // For off-by-default options this has the same result as the public component.
+                // Keep strict parsing for required defaults and reviewer-scope rules.
+                if !fallback && value.trimmingCharacters(in: .whitespacesAndNewlines) == "隐藏" { return false }
                 guard ["显示", "隐藏"].contains(value) else { throw CampusFormError.invalidResponse }
                 return value == "显示"
             }
