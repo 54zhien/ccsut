@@ -84,6 +84,7 @@ final class EcardPaymentModel {
         receipt = pendingReceipt(for: account)
         campus = nil; building = nil; room = nil; detail = nil
         campuses = []; buildings = []; rooms = []; fee = nil
+        client = nil
         amountText = ""; errorText = nil; isStarting = true
         if force { EcardTokenBridge.clearCachedToken() }
         if let token = EcardTokenBridge.cachedToken(forAccount: account) {
@@ -118,7 +119,8 @@ final class EcardPaymentModel {
         loginRequest = nil; isStarting = false
     }
     func loginDismissed() {
-        if loginRequest != nil {
+        // SwiftUI clears the sheet item before calling onDismiss.
+        if isStarting, client == nil {
             loginRequest = nil; isStarting = false
             errorText = EcardError.canceled.localizedDescription
         }
