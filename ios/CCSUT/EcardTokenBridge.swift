@@ -5,10 +5,11 @@
 //  用 WKWebView 拿一卡通缴费的 access_token
 //
 //  原理：
-//    平台登录态（统一身份认证 SSO）存在 WKWebsiteDataStore 里，我们复用它，
-//    直接访问换票接口 GET /charge/feeitem/toAppitem?feeitemid=408
-//      → 服务端校验登录态
-//      → 302 到 https://ecard.ccsut.cn/charge-app/?token=<access_token>&name=pays&id=408
+//    先打开官方 /plat/login，用户完成一卡通登录并进入电费项目。
+//    /charge/feeitem/toAppitem 是需要令牌的换票接口，不能作为未登录入口：
+//    实际会直接返回「缺失令牌，鉴权失败」，并不会自动重定向到登录页。
+//    由官方门户带着它自己的认证上下文进入电费项目后，跳转到：
+//      https://ecard.ccsut.cn/charge-app/?token=<access_token>&name=pays&id=408
 //    在 302 被应用的那一刻从 URL 里截出 token（charge-app 加载后会立刻
 //    history.replaceState 把参数抹掉，所以不能等页面加载完再看地址栏）。
 //
@@ -62,6 +63,7 @@ final class EcardTokenBridge: NSObject {
         self.webView = wv
         super.init()
         wv.navigationDelegate = self
+        wv.uiDelegate = self
     }
 
     // MARK: 对外入口
@@ -145,9 +147,12 @@ final class EcardTokenBridge: NSObject {
     }
 
     private func refresh(generation: Int) {
-        let url = URL(string:
-            "https://ecard.ccsut.cn/charge/feeitem/toAppitem?feeitemid=\(feeitemID)")!
-        if let navigation = webView.load(URLRequest(url: url)) {
+        let url = URL(string: "https://ecard.ccsut.cn/plat/login")!
+        load(URLRequest(url: url), generation: generation)
+    }
+
+    private func load(_ request: URLRequest, generation: Int) {
+        if let navigation = webView.load(request) {
             navigationGenerations[navigation] = generation
             currentNavigation = navigation
         }
@@ -302,6 +307,17 @@ extension EcardTokenBridge: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         self.webView(webView, didFailProvisionalNavigation: navigation, withError: error)
+    }
+}
+
+// The portal may open its electricity project with target=_blank/window.open.
+// Keep that official flow in this sheet instead of silently discarding the tab.
+extension EcardTokenBridge: WKUIDelegate {
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        guard continuation != nil, navigationAction.targetFrame == nil else { return nil }
+        load(navigationAction.request, generation: generation)
+        return nil
     }
 }
 

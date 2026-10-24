@@ -304,6 +304,15 @@ private struct EcardLoginSheet: View {
                 .padding(.horizontal, SheetLayout.controlInset(cornerRadius, diameter: controlHeight))
                 .padding(.top, SheetLayout.controlInset(cornerRadius, diameter: controlHeight))
             }
+            .overlay(alignment: .bottom) {
+                Text("请先登录一卡通，再进入电费缴费。\n获取缴费凭证后会自动返回。")
+                    .font(.footnote).foregroundStyle(.primary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20).padding(.vertical, 14)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 24))
+                    .padding(.horizontal, 24).padding(.bottom, 32)
+                    .allowsHitTesting(false)
+            }
             .ignoresSafeArea(.container)
             .presentationDetents([.large]).presentationDragIndicator(.visible)
             .presentationCornerRadius(SheetLayout.cornerRadius(cornerRadius))
