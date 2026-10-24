@@ -11,10 +11,11 @@ on:
 jobs:
   campus:
     runs-on: macos-26
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - name: Build simulator app
+        id: build
         run: |
           set -o pipefail
           xcodebuild build -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug \
@@ -37,17 +38,28 @@ jobs:
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusRecordsSurviveFormDismissal \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusFormKeyboardKeepsEditorVisible \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusAdaptiveLayout \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/campus-tests.log"
       - name: Capture campus light and dark screens
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           for appearance in light dark; do
             xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance "$appearance"
-            for page in campus campus-leave campus-travel campus-form-leave campus-form-departure; do
+            for page in campus campus-leave campus-travel campus-form-leave campus-form-departure campus-electricity campus-electricity-confirmation campus-electricity-result campus-electricity-pending; do
               xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$page"
               sleep 3
               xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$RUNNER_TEMP/ui-screenshots/$page-$appearance.png"
             done
           done
+          xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
+          for page in campus-form-leave campus-form-departure campus-electricity; do
+            xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$page" --preview-reduce-motion
+            sleep 3
+            xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$RUNNER_TEMP/ui-screenshots/$page-reduce-motion.png"
+          done
+      - name: Capture compact phone and iPad
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: bash ios/Tests/render-campus-adaptive.sh
       - name: Export test screenshots
         if: always()
         run: |

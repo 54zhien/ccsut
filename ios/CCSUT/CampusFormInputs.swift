@@ -8,6 +8,7 @@ struct CampusMaskedEditor: UIViewRepresentable {
     @Binding var text: String
     let label: String
     var identifier = ""
+    var onFocus: ((Bool) -> Void)? = nil
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> CampusPrivateTextView {
         let view = CampusPrivateTextView(usingTextLayoutManager: false)
@@ -39,6 +40,8 @@ struct CampusMaskedEditor: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate, NSLayoutManagerDelegate, UITextDragDelegate {
         var parent: CampusMaskedEditor
         init(_ parent: CampusMaskedEditor) { self.parent = parent }
+        func textViewDidBeginEditing(_ textView: UITextView) { parent.onFocus?(true) }
+        func textViewDidEndEditing(_ textView: UITextView) { parent.onFocus?(false) }
         func textDraggableView(_ textDraggableView: any UIView & UITextDraggable, itemsForDrag dragRequest: any UITextDragRequest) -> [UIDragItem] { return [] }
         func textViewDidChange(_ textView: UITextView) { parent.text = textView.text; refresh(textView) }
         func refresh(_ textView: UITextView) {

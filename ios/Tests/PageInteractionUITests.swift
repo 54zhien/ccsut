@@ -111,6 +111,27 @@ final class PageInteractionUITests: XCTestCase {
         capture(app, "campus-electricity-amount")
     }
 
+    func testCampusAdaptiveLayout() {
+        defer { XCUIDevice.shared.orientation = .portrait }
+        for page in ["campus-form-leave", "campus-form-departure", "campus-electricity"] {
+            XCUIDevice.shared.orientation = .portrait
+            var app = launch(page, largeText: true)
+            let action = app.buttons[page == "campus-electricity" ? "立即缴费" : "campus-form-review"]
+            XCTAssertTrue(action.waitForExistence(timeout: 8))
+            XCTAssertTrue(action.isHittable)
+            XCTAssertGreaterThanOrEqual(action.frame.height, 44)
+            capture(app, "campus-largest-type-\(page)")
+            app.terminate()
+            app = launch(page)
+            XCUIDevice.shared.orientation = .landscapeLeft
+            let landscape = NSPredicate { _, _ in app.frame.width > app.frame.height }
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: landscape, evaluatedWith: app)], timeout: 5), .completed)
+            XCTAssertTrue(app.buttons[page == "campus-electricity" ? "立即缴费" : "campus-form-review"].isHittable)
+            capture(app, "campus-landscape-\(page)")
+            app.terminate()
+        }
+    }
+
     func testCampusRecordsSurviveFormDismissal() {
         for page in ["campus-leave", "campus-travel"] {
             let app = launch(page)

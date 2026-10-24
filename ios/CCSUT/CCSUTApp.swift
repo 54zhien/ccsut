@@ -24,12 +24,19 @@ struct CCSUTApp: App {
                     case "campus-privacy": CampusPrivacyPreview()
                     case "campus-form-leave": CampusFormView(kind: .leave, account: "preview-account")
                     case "campus-form-departure": CampusFormView(kind: .departure, account: "preview-account")
+                    case "campus-electricity", "campus-electricity-confirmation", "campus-electricity-result", "campus-electricity-pending":
+                        NavigationStack { EcardPaymentView() }
                     #endif
                     default: MainTabs()
                     }
                 } else { RootView() }
             }
                 .environment(session)
+                .transformEnvironment(\.accessibilityReduceMotion) { reduced in
+                    #if DEBUG
+                    if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-reduce-motion") { reduced = true }
+                    #endif
+                }
                 .tint(.accentColor)
                 .environment(\.deviceCornerRadius, deviceCornerRadius)
                 .background {

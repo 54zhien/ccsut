@@ -200,7 +200,6 @@ private struct CampusRecordContent: View {
                 Text(label).font(.subheadline).foregroundStyle(.secondary)
                 Text(value).font(.subheadline).fixedSize(horizontal: false, vertical: true).privacySensitive()
             }
-            .accessibilityElement(children: .combine)
         }
     }
 

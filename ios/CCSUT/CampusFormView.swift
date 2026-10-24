@@ -6,12 +6,15 @@ import ImageIO
 @MainActor struct CampusFormView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(SessionStore.self) private var session
+    @Environment(\.dynamicTypeSize) private var textSize
     @State private var model: CampusFormModel
     @State private var location = CampusLocation()
     @State private var photo: PhotosPickerItem?
     @State private var importingFile = false
     @State private var isImporting = false
     @State private var isLocating = false
+    @State private var activeEditor: String?
+    @FocusState private var focusedPhone: String?
     @ScaledMetric private var editorHeight: CGFloat = 108
     @ScaledMetric private var shortEditorHeight: CGFloat = 44
     private let onSubmitted: () -> Void
@@ -36,16 +39,27 @@ import ImageIO
             VStack(spacing: 0) {
                 SheetHeader(title: model.kind.title) { dismiss() }
                     .disabled(model.state == .submitting)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        content
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 24) {
+                            content
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 24)
+                        .frame(maxWidth: 720).frame(maxWidth: .infinity)
                     }
-                    .padding(.horizontal, 16).padding(.vertical, 24)
-                    .frame(maxWidth: 720).frame(maxWidth: .infinity)
+                    .scrollDismissesKeyboard(.interactively)
+                    .scrollEdgeEffectStyle(.soft, for: .top)
+                    .disabled(model.state == .submitting || model.state == .unknown)
+                    .onChange(of: activeEditor) { _, value in
+                        if let value { proxy.scrollTo(value, anchor: .center) }
+                    }
+                    .onChange(of: focusedPhone) { _, value in
+                        if let value { activeEditor = nil; proxy.scrollTo(value, anchor: .center) }
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                        if let identifier = activeEditor ?? focusedPhone { proxy.scrollTo(identifier, anchor: .center) }
+                    }
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .scrollEdgeEffectStyle(.soft, for: .top)
-                .disabled(model.state == .submitting || model.state == .unknown)
             }
             .background(Color(.systemGroupedBackground))
             .safeAreaInset(edge: .bottom, spacing: 0) { footer }
@@ -98,8 +112,8 @@ import ImageIO
 
     private func dates(_ c: CampusFormConfiguration) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            DatePicker("开始时间", selection: binding(\.begin), displayedComponents: [.date, .hourAndMinute])
-            DatePicker("结束时间", selection: binding(\.end), displayedComponents: [.date, .hourAndMinute])
+            dateControl("开始时间", selection: binding(\.begin))
+            dateControl("结束时间", selection: binding(\.end))
             fieldError("时间")
             if model.kind == .leave {
                 LabeledContent("请假天数", value: model.draft.duration.formatted() + " 天")
@@ -108,15 +122,27 @@ import ImageIO
                     if model.draft.actualLeaveTime == nil {
                         Button("选择离校时间") { model.update { $0.actualLeaveTime = $0.begin } }
                     } else {
-                        DatePicker("离校时间", selection: Binding(get: { model.draft.actualLeaveTime ?? model.draft.begin }, set: { date in model.update { $0.actualLeaveTime = date } }), displayedComponents: [.date,.hourAndMinute])
+                        dateControl("离校时间", selection: Binding(get: { model.draft.actualLeaveTime ?? model.draft.begin }, set: { date in model.update { $0.actualLeaveTime = date } }))
                     }
                 }
             }
         }
     }
 
+    @ViewBuilder private func dateControl(_ title: String, selection: Binding<Date>) -> some View {
+        if textSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(.subheadline).foregroundStyle(.secondary)
+                DatePicker(title, selection: selection, displayedComponents: [.date, .hourAndMinute])
+                    .labelsHidden().accessibilityLabel(title)
+            }
+        } else {
+            DatePicker(title, selection: selection, displayedComponents: [.date, .hourAndMinute])
+        }
+    }
+
     @ViewBuilder private func leaveFields(_ c: CampusFormConfiguration) -> some View {
-        section("请假事由") { editor("请假事由", key: \.reason, identifier: "campus-form-reason"); fieldError("事由") }
+        section("请假事由") { editor("请假事由", key: \.reason, identifier: "campus-form-reason", showLabel: false); fieldError("事由") }
         section("联系与审批") {
             phone("紧急联系人电话", key: \.contactPhone, identifier: "campus-form-contact")
             if !c.contacts.isEmpty { choice("常用联系人", options: c.contacts, selection: binding(\.contactPhone)) }
@@ -236,43 +262,65 @@ import ImageIO
             SheetHeader(title: "核对申请") { model.confirmation = nil }.disabled(model.state == .submitting)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    safeText(snapshot.configuration.displayName).font(.headline)
-                    safeText(snapshot.configuration.choices.first { $0.id == snapshot.draft.typeID }?.name ?? "")
-                        .font(.title3.weight(.semibold))
-                    LabeledContent("是否离校", value: snapshot.draft.leaving == true ? "离校" : (snapshot.kind == .leave ? "不离校" : "留校"))
-                    if snapshot.kind == .leave || snapshot.draft.leaving == true {
-                        LabeledContent("开始", value: dateText(snapshot.draft.begin))
-                        LabeledContent("结束", value: dateText(snapshot.draft.end))
-                    }
-                    if snapshot.kind == .leave {
-                        LabeledContent("天数", value: snapshot.draft.duration.formatted())
-                        if snapshot.draft.leaving == true, snapshot.configuration.needsLeaveTime, let time = snapshot.draft.actualLeaveTime {
-                            LabeledContent("离校时间", value: dateText(time))
+                    CampusSection("申请内容") {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                safeText(snapshot.configuration.choices.first { $0.id == snapshot.draft.typeID }?.name ?? "")
+                                    .font(.title3.weight(.semibold))
+                                safeText(snapshot.configuration.displayName).font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            CampusStatusBadge(text: snapshot.draft.leaving == true ? "离校" : (snapshot.kind == .leave ? "不离校" : "留校"))
                         }
-                        safeText("审批人：" + (snapshot.approvers?.users.first { $0.id == snapshot.draft.approverID }?.name ?? ""))
-                        safeText("紧急联系人电话：" + snapshot.draft.contactPhone)
-                    } else {
-                        safeText("本人联系电话：" + snapshot.draft.phone)
-                        safeText("家长联系电话：" + snapshot.draft.parentPhone)
-                        if snapshot.draft.leaving == true { safeText("目的地：" + snapshot.draft.area.joined(separator: " / ")) }
-                        if snapshot.draft.leaving == true {
+                        if snapshot.kind == .leave || snapshot.draft.leaving == true {
+                            Divider()
+                            CampusDateRange(start: dateText(snapshot.draft.begin), end: dateText(snapshot.draft.end))
+                        }
+                        if snapshot.kind == .leave {
+                            CampusInfoRow("请假天数", value: snapshot.draft.duration.formatted() + " 天")
+                            if snapshot.draft.leaving == true, snapshot.configuration.needsLeaveTime, let time = snapshot.draft.actualLeaveTime {
+                                CampusInfoRow("离校时间", value: dateText(time))
+                            }
+                        }
+                    }
+                    CampusSection(snapshot.kind == .leave ? "联系与审批" : "联系方式") {
+                        if snapshot.kind == .leave {
+                            CampusInfoRow("审批人", value: snapshot.approvers?.users.first { $0.id == snapshot.draft.approverID }?.name ?? "")
+                            CampusInfoRow("紧急联系人电话", value: snapshot.draft.contactPhone)
+                        } else {
+                            CampusInfoRow("本人联系电话", value: snapshot.draft.phone)
+                            CampusInfoRow("家长联系电话", value: snapshot.draft.parentPhone)
+                        }
+                    }
+                    if snapshot.kind == .departure && snapshot.draft.leaving == true {
+                        CampusSection("离校去向") {
+                            CampusInfoRow("目的地", value: snapshot.draft.area.joined(separator: " / "))
                             safeText(snapshot.draft.detailAddress)
-                            safeText("交通方式：" + snapshot.draft.travelMethod)
-                            safeText("车次 / 航班：" + snapshot.draft.tripNumber)
+                            CampusInfoRow("交通方式", value: snapshot.draft.travelMethod)
+                            CampusInfoRow("车次 / 航班", value: snapshot.draft.tripNumber)
                         }
                     }
-                    if !snapshot.draft.reason.isEmpty { safeText(snapshot.draft.reason) }
-                    if !snapshot.draft.destinationDetails.isEmpty { safeText("去向：" + snapshot.draft.destinationDetails) }
-                    if snapshot.configuration.needsDestination {
-                        safeText("去向类型：" + (snapshot.configuration.destinationTypes.first { $0.id == snapshot.draft.destinationTypeID }?.name ?? ""))
+                    if !snapshot.draft.reason.isEmpty {
+                        CampusSection("事由") { safeText(snapshot.draft.reason) }
                     }
-                    if let address = snapshot.draft.locationAddress { safeText("当前位置：" + address) }
+                    if snapshot.configuration.needsDestination {
+                        CampusSection("去向") {
+                            CampusInfoRow("去向类型", value: snapshot.configuration.destinationTypes.first { $0.id == snapshot.draft.destinationTypeID }?.name ?? "")
+                            if !snapshot.draft.destinationDetails.isEmpty { safeText(snapshot.draft.destinationDetails) }
+                        }
+                    } else if !snapshot.draft.destinationDetails.isEmpty {
+                        CampusSection("去向") { safeText(snapshot.draft.destinationDetails) }
+                    }
+                    if let address = snapshot.draft.locationAddress {
+                        CampusSection("当前位置") { safeText(address) }
+                    }
                     if !snapshot.draft.attachments.isEmpty {
-                        Text("证明材料：\(snapshot.draft.attachments.count) 项")
-                        ForEach(snapshot.draft.attachments) { safeText($0.name).font(.footnote) }
+                        CampusSection("证明材料 · \(snapshot.draft.attachments.count) 项") {
+                            ForEach(snapshot.draft.attachments) { safeText($0.name).font(.subheadline) }
+                        }
                     }
                     Text("确认后将提交学校审核。").font(.footnote).foregroundStyle(.secondary)
-                }.padding(20).frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
             }
             Button { Task { await model.submit(snapshot) } } label: {
                 HStack { if model.state == .submitting { ProgressView() }; Text(model.state == .submitting ? "正在提交…" : "确认提交") }
@@ -280,6 +328,7 @@ import ImageIO
             }.buttonStyle(.glassProminent).padding(16).disabled(model.state == .submitting)
                 .accessibilityIdentifier("campus-form-confirm")
         }
+        .background(Color(.systemGroupedBackground))
         .presentationDetents([.large]).interactiveDismissDisabled(model.state == .submitting)
     }
 
@@ -288,17 +337,28 @@ import ImageIO
         Binding(get: { model.draft[keyPath: path] }, set: { value in model.update { $0[keyPath:path] = value } })
     }
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 16) { Text(title).font(.headline); content() }
-            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+        CampusSection(title, content: content)
     }
     private func safeText(_ value: String) -> some View { Text(CampusPrivacy.redact(value)).fixedSize(horizontal: false, vertical: true).privacySensitive() }
     private func choice(_ title: String, options: [CampusFormChoice], selection: Binding<String>) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                safeText(title).foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                choicePicker(title, options: options, selection: selection).fixedSize(horizontal: true, vertical: false)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                safeText(title).foregroundStyle(.secondary)
+                choicePicker(title, options: options, selection: selection)
+            }
+        }.frame(minHeight: 44)
+    }
+    private func choicePicker(_ title: String, options: [CampusFormChoice], selection: Binding<String>) -> some View {
         Picker(selection: selection) {
             Text("请选择").tag("")
             ForEach(options) { value in safeText(value.name).tag(value.id) }
         } label: { safeText(title) }
-        .pickerStyle(.menu).disabled(options.isEmpty).frame(minHeight: 44)
+        .pickerStyle(.menu).labelsHidden().accessibilityLabel(title).disabled(options.isEmpty)
     }
     private func phone(_ title: String, key: WritableKeyPath<CampusFormDraft,String>, identifier: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -306,15 +366,25 @@ import ImageIO
             SecureField("请输入联系电话", text: binding(key)).keyboardType(.phonePad)
                 .textContentType(nil).autocorrectionDisabled().privacySensitive().accessibilityLabel(title)
                 .accessibilityIdentifier(identifier).frame(minHeight: 44)
+                .focused($focusedPhone, equals: identifier)
             fieldError("电话")
-        }
+        }.id(identifier)
     }
-    private func editor(_ title: String, key: WritableKeyPath<CampusFormDraft,String>, identifier: String, short: Bool = false) -> some View {
+    private func editor(_ title: String, key: WritableKeyPath<CampusFormDraft,String>, identifier: String, short: Bool = false, showLabel: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.subheadline).foregroundStyle(.secondary)
-            CampusMaskedEditor(text: binding(key), label: title, identifier: identifier)
+            if showLabel { Text(title).font(.subheadline).foregroundStyle(.secondary) }
+            CampusMaskedEditor(text: binding(key), label: title, identifier: identifier, onFocus: { focused in
+                if focused { activeEditor = identifier }
+                else if activeEditor == identifier { activeEditor = nil }
+            })
                 .frame(height: short ? shortEditorHeight : editorHeight)
-        }
+                .overlay(alignment: .topLeading) {
+                    if model.draft[keyPath: key].isEmpty {
+                        Text(short ? "请填写" : "请填写具体事由")
+                            .foregroundStyle(.tertiary).padding(.top, 8).allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                }
+        }.id(identifier)
     }
     @ViewBuilder private func fieldError(_ contains: String) -> some View {
         if let error = model.error, error.contains(contains) { Text(error).font(.footnote).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
