@@ -249,6 +249,12 @@ final class SessionStore {
         do {
             try await verifySession()
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            // WebStore is deliberately non-persistent. The native session may
+            // still be valid after a cold launch, but CAS/ecard WebViews start
+            // empty until the restored (and verified) cookies are injected.
+            // Do this before exposing MainTabs or starting the ecard prefetch.
+            await injectToWebKit(allCookies())
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
             phase = .loggedIn
             await loadProfile()
             await refreshIfNeeded()
