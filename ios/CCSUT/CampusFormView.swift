@@ -39,6 +39,13 @@ import ImageIO
             VStack(spacing: 0) {
                 SheetHeader(title: model.kind.title) { dismiss() }
                     .disabled(model.state == .submitting)
+                if model.state == .loading {
+                    VStack(spacing: 14) {
+                        ProgressView().accessibilityIdentifier("campus-form-loading-indicator")
+                        Text("正在加载学校表单…").font(.subheadline).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center).accessibilityIdentifier("campus-form-loading-message")
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 24) {
@@ -60,15 +67,17 @@ import ImageIO
                         if let identifier = activeEditor ?? focusedPhone { proxy.scrollTo(identifier, anchor: .center) }
                     }
                 }
+                }
             }
             .background(Color(.systemGroupedBackground))
-            .safeAreaInset(edge: .bottom, spacing: 0) { footer }
+            .safeAreaInset(edge: .bottom, spacing: 0) { if model.state != .loading { footer } }
             .toolbar(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) { Spacer(); Button("完成") { endEditing() } }
             }
         }
         .environment(\.timeZone, TimeZone(identifier: "Asia/Shanghai")!)
+        .environment(\.locale, Locale(identifier: "zh_CN"))
         .presentationDetents([.large])
         .interactiveDismissDisabled(model.state == .submitting)
         .sheet(item: $model.confirmation) { confirmation($0) }
@@ -80,9 +89,7 @@ import ImageIO
     }
 
     @ViewBuilder private var content: some View {
-        if model.state == .loading {
-            ProgressView("正在加载学校表单…").frame(maxWidth: .infinity).padding(.vertical, 60)
-        } else if model.state == .submitted {
+        if model.state == .submitted {
             ContentUnavailableView("已提交，等待审核", systemImage: "checkmark.circle", description: Text("可返回记录页查看学校处理结果。"))
                 .accessibilityIdentifier("campus-form-submitted")
         } else if let c = model.configuration {
@@ -228,6 +235,7 @@ import ImageIO
     }
 
     @ViewBuilder private var footer: some View {
+        CampusActionDock {
         VStack(alignment: .leading, spacing: 10) {
             if let error = model.error {
                 Text(error).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -243,18 +251,18 @@ import ImageIO
             if model.state == .unknown {
                 Button { Task { await model.checkResult() } } label: {
                     HStack { if model.isChecking { ProgressView() }; Text("查询提交结果") }.frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.glassProminent).disabled(model.isChecking)
+                }.buttonStyle(.glassProminent).campusActionControl().disabled(model.isChecking)
             } else if model.state == .submitted {
-                Button("完成") { onSubmitted(); dismiss() }.frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.glassProminent)
+                Button("完成") { onSubmitted(); dismiss() }.frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.glassProminent).campusActionControl()
             } else if model.configuration != nil {
                 Button { endEditing(); model.prepareConfirmation() } label: {
                     Text("核对并提交").frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.glassProminent).disabled(!model.canReview || isImporting || isLocating)
+                }.buttonStyle(.glassProminent).campusActionControl().disabled(!model.canReview || isImporting || isLocating)
                     .accessibilityIdentifier("campus-form-review")
             }
         }
         .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
-        .background(.bar)
+        }
     }
 
     private func confirmation(_ snapshot: CampusSubmission) -> some View {
@@ -322,11 +330,13 @@ import ImageIO
                     Text("确认后将提交学校审核。").font(.footnote).foregroundStyle(.secondary)
                 }.padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
             }
+            CampusActionDock {
             Button { Task { await model.submit(snapshot) } } label: {
                 HStack { if model.state == .submitting { ProgressView() }; Text(model.state == .submitting ? "正在提交…" : "确认提交") }
                     .frame(maxWidth: .infinity, minHeight: 44)
-            }.buttonStyle(.glassProminent).padding(16).disabled(model.state == .submitting)
+            }.buttonStyle(.glassProminent).campusActionControl().padding(16).disabled(model.state == .submitting)
                 .accessibilityIdentifier("campus-form-confirm")
+            }
         }
         .background(Color(.systemGroupedBackground))
         .presentationDetents([.large]).interactiveDismissDisabled(model.state == .submitting)
@@ -457,6 +467,9 @@ private actor CampusFormPreviewAPI: CampusFormServing {
     let account: String; let generation: UInt64
     init(account: String, generation: UInt64) { self.account = account; self.generation = generation }
     func loadForm(_ kind: CampusFormKind) async throws -> CampusFormConfiguration {
+        if ProcessInfo.processInfo.arguments.contains("--preview-form-loading") {
+            try await Task.sleep(for: .seconds(30))
+        }
         var c = CampusFormConfiguration(kind:kind,account:account,userId:"preview-user",generation:generation)
         c.choices = [.init(id:"preview-type",name:kind == .leave ? "病假" : "示例假期")]
         c.phone = "18000000000"; c.parentPhone = "18000000001"; c.displayName = "示例学生"

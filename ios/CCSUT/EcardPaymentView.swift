@@ -214,6 +214,7 @@ struct EcardPaymentView: View {
         return text
     }
     private var payBar: some View {
+        CampusActionDock {
         VStack(spacing: 10) {
             Button {
                 amountFocused = false
@@ -222,12 +223,13 @@ struct EcardPaymentView: View {
                 Text("立即缴费").font(.headline).frame(maxWidth: .infinity, minHeight: 32)
             }
             .buttonStyle(.glassProminent).buttonBorderShape(.capsule).controlSize(.large)
+            .campusActionControl()
             .disabled(!model.canPay)
             Text("从一卡通余额扣款，确认后即支付")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 12)
-        .background(.bar)
+        }
     }
     private func confirmation(_ confirmed: EcardPaymentModel.Confirmation) -> some View {
         VStack(spacing: 0) {
@@ -243,6 +245,7 @@ struct EcardPaymentView: View {
                 }
                 .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
             }
+            CampusActionDock {
             VStack(spacing: 12) {
                 if model.isSubmitting {
                     HStack(spacing: 10) { ProgressView(); Text("正在提交，请勿重复缴费").font(.subheadline) }
@@ -254,9 +257,11 @@ struct EcardPaymentView: View {
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .buttonStyle(.glassProminent).buttonBorderShape(.capsule)
+                    .campusActionControl()
                 }
             }
-            .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity).background(.bar)
+            .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
+            }
         }
         .background(Color(.systemGroupedBackground))
     }

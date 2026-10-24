@@ -1,5 +1,40 @@
 import SwiftUI
 
+/// The dock's upper corners follow the rendered capsule control, including Dynamic Type.
+struct CampusActionDock<Content: View>: View {
+    @State private var controlHeight: CGFloat = 52
+    private let content: Content
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
+    var body: some View {
+        content
+            .onPreferenceChange(CampusActionHeight.self) { if $0 > 0 { controlHeight = $0 } }
+            .background {
+                Color.clear
+                    .glassEffect(.regular, in: UnevenRoundedRectangle(
+                        topLeadingRadius: controlHeight / 2, bottomLeadingRadius: 0,
+                        bottomTrailingRadius: 0, topTrailingRadius: controlHeight / 2))
+                    .ignoresSafeArea(.container, edges: .bottom)
+                    .allowsHitTesting(false)
+            }
+    }
+}
+
+private struct CampusActionHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+extension View {
+    func campusActionControl() -> some View {
+        buttonBorderShape(.capsule)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: CampusActionHeight.self, value: geometry.size.height)
+                }.allowsHitTesting(false).accessibilityHidden(true)
+            }
+    }
+}
+
 struct CampusSection<Content: View>: View {
     let title: String
     private let content: Content

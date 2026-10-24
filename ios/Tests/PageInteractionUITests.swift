@@ -77,6 +77,37 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["已提交，等待审核"].waitForExistence(timeout: 5))
     }
 
+    func testCampusFormLoadingIsCentered() {
+        for page in ["campus-form-leave", "campus-form-departure"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--preview-ui", "--preview-page", page, "--preview-form-loading"]
+            app.launch()
+            let message = app.staticTexts["campus-form-loading-message"]
+            let indicator = app.activityIndicators["campus-form-loading-indicator"]
+            let close = app.buttons[page == "campus-form-leave" ? "关闭申请请假" : "关闭离校登记"]
+            XCTAssertTrue(message.waitForExistence(timeout: 8))
+            XCTAssertTrue(indicator.exists)
+            XCTAssertEqual(message.frame.midX, app.frame.midX, accuracy: 2)
+            XCTAssertEqual(indicator.frame.midX, app.frame.midX, accuracy: 2)
+            let groupCenter = (indicator.frame.minY + message.frame.maxY) / 2
+            XCTAssertEqual(groupCenter, (close.frame.maxY + app.frame.maxY) / 2, accuracy: 60)
+            XCTAssertFalse(app.buttons["campus-form-review"].exists)
+            capture(app, "campus-centered-loading-\(page)")
+            app.terminate()
+        }
+    }
+
+    func testCampusLeaveDatesUseChinese() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-ui", "--preview-page", "campus-form-leave", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let dates = app.datePickers
+        XCTAssertTrue(dates.firstMatch.waitForExistence(timeout: 8))
+        let labels = dates.firstMatch.descendants(matching: .any).allElementsBoundByIndex.map { $0.label }.joined(separator: " ")
+        XCTAssertTrue(labels.contains("年") && labels.contains("月"), "Native date controls must retain Chinese units under an English system language: \(labels)")
+        capture(app, "campus-chinese-date-picker")
+    }
+
     func testCampusNativeFormLargeText() {
         let app = launch("campus-form-leave", largeText: true)
         let review = app.buttons["campus-form-review"]

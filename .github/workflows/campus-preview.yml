@@ -7,6 +7,11 @@ on:
       - 'ios/**'
       - '.github/workflows/campus-preview.yml'
   workflow_dispatch:
+    inputs:
+      adaptive_devices:
+        description: 'Also capture compact phone and iPad'
+        type: boolean
+        default: false
 
 jobs:
   campus:
@@ -34,6 +39,8 @@ jobs:
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusOfficialWebPrivacy \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeLeaveForm \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeDepartureForm \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusFormLoadingIsCentered \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusLeaveDatesUseChinese \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeFormLargeText \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusRecordsSurviveFormDismissal \
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusFormKeyboardKeepsEditorVisible \
@@ -62,7 +69,7 @@ jobs:
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusReducedMotion \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/campus-motion.log"
       - name: Capture compact phone and iPad
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.adaptive_devices == true }}
         run: bash ios/Tests/render-campus-adaptive.sh
       - name: Export test screenshots
         if: always()
