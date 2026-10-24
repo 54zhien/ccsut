@@ -292,12 +292,12 @@ import ImageIO
                         }
                         if snapshot.kind == .leave || snapshot.draft.leaving == true {
                             Divider()
-                            CampusDateRange(start: dateText(snapshot.draft.begin), end: dateText(snapshot.draft.end))
+                            CampusDateRange(start: dateText(snapshot.draft.begin), end: dateText(snapshot.draft.end), chineseDates: true)
                         }
                         if snapshot.kind == .leave {
                             CampusInfoRow("请假天数", value: snapshot.draft.duration.formatted() + " 天")
                             if snapshot.draft.leaving == true, snapshot.configuration.needsLeaveTime, let time = snapshot.draft.actualLeaveTime {
-                                CampusInfoRow("离校时间", value: dateText(time))
+                                CampusInfoRow("离校时间", value: CampusDisplayDate.timestamp(dateText(time), chinese: true))
                             }
                         }
                     }
@@ -378,7 +378,7 @@ import ImageIO
             Text("请选择").tag("")
             ForEach(options) { value in safeText(value.name).tag(value.id) }
         } label: { safeText(title) }
-        .pickerStyle(.menu).labelsHidden().accessibilityLabel(title).disabled(options.isEmpty)
+        .pickerStyle(.menu).labelsHidden().accessibilityIdentifier("campus-form-choice-" + title).disabled(options.isEmpty)
     }
     private func phone(_ title: String, key: WritableKeyPath<CampusFormDraft,String>, identifier: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -412,7 +412,7 @@ import ImageIO
     private func endEditing() { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
     private func dateText(_ date: Date) -> String {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
-        formatter.dateFormat = "yyyy年M月d日 HH:mm"; return formatter.string(from: date)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"; return formatter.string(from: date)
     }
     private func locate() {
         isLocating = true

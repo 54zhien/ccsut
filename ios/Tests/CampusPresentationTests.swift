@@ -14,6 +14,8 @@ import Foundation
         check(["2026-02-30T08:00:00Z", "2026-02-30T08:00:00.000Z", "2026-02-29T08:00:00Z"].allSatisfy { CampusDisplayDate.date($0) == $0 && CampusDisplayDate.time($0).isEmpty }, "invalid ISO calendar days retain the original text")
         check(CampusDisplayDate.date("2026-10-24T08:00:00Zgarbage") == "2026-10-24T08:00:00Zgarbage", "ISO input must consume the entire string")
         check(CampusDisplayDate.timestamp("2026-10-24T08:30:00+08:00") == "2026.10.24 08:30", "valid ISO offsets still display the school timezone")
+        check(CampusDisplayDate.date("2026-10-24 08:30", chinese: true) == "2026年10月24日" && CampusDisplayDate.time("2026-10-24 08:30") == "08:30", "Chinese form dates retain a separately readable clock")
+        check(CampusDisplayDate.timestamp("2026-10-24T00:30:00Z", chinese: true) == "2026年10月24日 08:30", "Chinese confirmation timestamps retain the school timezone")
         if failures > 0 { exit(1) }
     }
 }

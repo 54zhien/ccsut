@@ -30,8 +30,8 @@ enum CampusDisplayDate {
         value.dateFormat = pattern; value.isLenient = false
         return value
     }
-    static func date(_ raw: String?) -> String {
-        if let (date, _) = parsed(raw) { return formatter("yyyy.MM.dd").string(from: date) }
+    static func date(_ raw: String?, chinese: Bool = false) -> String {
+        if let (date, _) = parsed(raw) { return formatter(chinese ? "yyyy年M月d日" : "yyyy.MM.dd").string(from: date) }
         let safe = CampusPrivacy.redact(raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
         return safe.isEmpty ? "未设置" : safe
     }
@@ -39,8 +39,8 @@ enum CampusDisplayDate {
         guard let (date, hasTime) = parsed(raw), hasTime else { return "" }
         return formatter("HH:mm").string(from: date)
     }
-    static func timestamp(_ raw: String?) -> String {
+    static func timestamp(_ raw: String?, chinese: Bool = false) -> String {
         let clock = time(raw)
-        return date(raw) + (clock.isEmpty ? "" : " " + clock)
+        return date(raw, chinese: chinese) + (clock.isEmpty ? "" : " " + clock)
     }
 }

@@ -88,6 +88,7 @@ struct CampusDateRange: View {
     @Environment(\.dynamicTypeSize) private var textSize
     let start: String?
     let end: String?
+    var chineseDates = false
     var body: some View {
         Group {
             if textSize.isAccessibilitySize {
@@ -104,7 +105,7 @@ struct CampusDateRange: View {
     private func point(_ title: String, _ raw: String?) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(CampusDisplayDate.date(raw)).font(.subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+            Text(CampusDisplayDate.date(raw, chinese: chineseDates)).font(.subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
             let time = CampusDisplayDate.time(raw)
             if !time.isEmpty { Text(time).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary) }
         }.accessibilityElement(children: .combine)
