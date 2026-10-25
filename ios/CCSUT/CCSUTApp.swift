@@ -21,7 +21,7 @@ struct CCSUTApp: App {
                     case "login": LoginView()
                     case "launch": LaunchView()
                     #if DEBUG
-                    case "refresh-reference-scroll", "refresh-reference-wrapper", "refresh-reference-list":
+                    case "refresh-reference-scroll", "refresh-reference-wrapper", "refresh-reference-list", "refresh-reference-native-subview":
                         MinimalRefreshReferenceView(kind: InterfacePreview.page)
                     case "campus-privacy": CampusPrivacyPreview()
                     case "campus-form-leave": CampusFormView(kind: .leave, account: "preview-account")

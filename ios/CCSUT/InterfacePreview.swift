@@ -27,6 +27,8 @@ struct MinimalRefreshReferenceView: View {
             if kind == "refresh-reference-list" {
                 List(0..<30) { index in Text("样例 \(index)") }
                     .refreshable { await read() }
+            } else if kind == "refresh-reference-native-subview" {
+                rows
             } else if kind == "refresh-reference-wrapper" {
                 rows.pageRefreshable { await read() }
             } else {
@@ -51,6 +53,11 @@ struct MinimalRefreshReferenceView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(0..<30) { index in
                     Text("样例 \(index)").frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).padding(.horizontal, 16)
+                }
+            }
+            .background {
+                if kind == "refresh-reference-native-subview" {
+                    NativeRefreshSubviewReference(action: { await read() }).allowsHitTesting(false)
                 }
             }
         }

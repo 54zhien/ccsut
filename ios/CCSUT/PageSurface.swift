@@ -227,6 +227,75 @@ private struct PageRefreshable: ViewModifier {
 }
 
 #if DEBUG
+/// Diagnostic native owner: register as a legacy subview so SwiftUI cannot clear it
+/// through UIScrollView.refreshControl when updating its RefreshAction environment.
+struct NativeRefreshSubviewReference: UIViewRepresentable {
+    let action: @MainActor () async -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+    func makeUIView(context: Context) -> AnchorView {
+        let view = AnchorView()
+        view.coordinator = context.coordinator
+        view.isUserInteractionEnabled = false
+        return view
+    }
+    func updateUIView(_ view: AnchorView, context: Context) {
+        context.coordinator.action = action
+        view.connect()
+    }
+    static func dismantleUIView(_ view: AnchorView, coordinator: Coordinator) { coordinator.detach() }
+    @MainActor final class AnchorView: UIView {
+        weak var coordinator: Coordinator?
+        override func didMoveToWindow() { super.didMoveToWindow(); connect() }
+        override func didMoveToSuperview() { super.didMoveToSuperview(); connect() }
+        override func layoutSubviews() { super.layoutSubviews(); connect() }
+        func connect() {
+            guard window != nil else { return }
+            var parent = superview
+            while let view = parent {
+                if let scroll = view as? UIScrollView { coordinator?.attach(to: scroll); return }
+                parent = view.superview
+            }
+        }
+    }
+    @MainActor final class Coordinator: NSObject {
+        var action: @MainActor () async -> Void
+        private let control = UIRefreshControl()
+        private weak var scroll: UIScrollView?
+        private var task: Task<Void, Never>?
+        init(action: @escaping @MainActor () async -> Void) {
+            self.action = action
+            super.init()
+            control.addTarget(self, action: #selector(refresh), for: .valueChanged)
+        }
+        func attach(to scroll: UIScrollView) {
+            guard self.scroll !== scroll else { return }
+            detach()
+            self.scroll = scroll
+            scroll.alwaysBounceVertical = true
+            scroll.addSubview(control)
+            print("[NativeRefreshSubview] attached; propertyMatches=\(scroll.refreshControl === control)")
+        }
+        @objc private func refresh() {
+            guard task == nil else { return }
+            print("[NativeRefreshSubview] entered; attached=\(control.superview != nil)")
+            task = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await action()
+                control.endRefreshing()
+                task = nil
+                print("[NativeRefreshSubview] completed")
+            }
+        }
+        func detach() {
+            task?.cancel()
+            task = nil
+            control.endRefreshing()
+            control.removeFromSuperview()
+            scroll = nil
+        }
+    }
+}
+
 /// Reference-only observations avoid publishing @State from the refresh callback.
 /// The probe never installs/replaces a refresh control or changes any gesture delegate.
 @MainActor private final class RefreshFeedbackObservation {

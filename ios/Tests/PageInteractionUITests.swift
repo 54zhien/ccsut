@@ -462,6 +462,7 @@ final class PageInteractionUITests: XCTestCase {
     func testMinimalNativeScrollRefreshFeedback() { assertMinimalRefreshFeedback("refresh-reference-scroll") }
     func testMinimalWrappedScrollRefreshFeedback() { assertMinimalRefreshFeedback("refresh-reference-wrapper") }
     func testMinimalListRefreshFeedback() { assertMinimalRefreshFeedback("refresh-reference-list") }
+    func testNativeSubviewRefreshFeedback() { assertMinimalRefreshFeedback("refresh-reference-native-subview") }
 
     private func assertMinimalRefreshFeedback(_ page: String) {
         let app = launch(page)
