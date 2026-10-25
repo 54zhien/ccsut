@@ -1,5 +1,72 @@
 import XCTest
 
+// Pure sampling contract, also exercised by the local observation regression probe.
+private struct RefreshObservationSample {
+    let report: String
+    private let fields: [String: String]
+
+    init?(_ report: String) {
+        // activeNative is historical evidence, never the current native geometry.
+        let current = report.components(separatedBy: "; activeNative=[")[0]
+        var fields: [String: String] = [:]
+        for field in current.components(separatedBy: ";") {
+            let pair = field.trimmingCharacters(in: .whitespaces).split(separator: "=", maxSplits: 1)
+            guard pair.count == 2, fields[String(pair[0])] == nil else { return nil }
+            fields[String(pair[0])] = String(pair[1])
+        }
+        for key in ["entered", "completed"] {
+            guard let value = fields[key], let number = Int(value), number >= 0 else { return nil }
+        }
+        for key in ["cancelled", "active", "refreshingSeen", "prematurelyStopped", "refreshing", "hidden"] {
+            guard let value = fields[key], ["true", "false"].contains(value) else { return nil }
+        }
+        for key in ["alpha", "controlY", "controlH", "maxPull", "scrollY", "offsetY", "adjustedTop", "insetTop"] {
+            guard let value = fields[key], let number = Double(value), number.isFinite else { return nil }
+        }
+        guard let control = fields["control"], !control.isEmpty, control != "nil" else { return nil }
+        self.report = report
+        self.fields = fields
+    }
+
+    func value(_ key: String) -> Double { Double(fields[key] ?? "") ?? .nan }
+
+    var isInitialRest: Bool {
+        fields["entered"] == "0" && fields["completed"] == "0" &&
+        fields["cancelled"] == "false" && fields["active"] == "false" && fields["refreshing"] == "false" &&
+        abs(value("offsetY") + value("adjustedTop")) < 1
+    }
+
+    func isHeld(restingInset: Double) -> Bool {
+        fields["entered"] == "1" && fields["completed"] == "0" &&
+        fields["cancelled"] == "false" && fields["active"] == "true" && fields["refreshing"] == "true" &&
+        fields["refreshingSeen"] == "true" && fields["prematurelyStopped"] == "false" &&
+        fields["hidden"] == "false" && value("alpha") > 0 &&
+        value("adjustedTop") - restingInset > 40 && -value("offsetY") - restingInset > 40 &&
+        value("controlH") > 0 && value("controlY") + 1 >= value("scrollY") + restingInset
+    }
+
+    func hasReturned(restingInset: Double) -> Bool {
+        fields["entered"] == "1" && fields["completed"] == "1" &&
+        fields["cancelled"] == "false" && fields["active"] == "false" && fields["refreshing"] == "false" &&
+        fields["refreshingSeen"] == "true" && fields["prematurelyStopped"] == "false" &&
+        abs(value("adjustedTop") - restingInset) < 1 && abs(value("offsetY") + restingInset) < 1
+    }
+}
+
+private struct RefreshObservationPoll {
+    private(set) var attempts = 0
+    private(set) var lastReport = "not sampled"
+    private(set) var matched: RefreshObservationSample?
+
+    mutating func evaluate(read: () -> String?, matching: (RefreshObservationSample) -> Bool) -> Bool {
+        attempts += 1
+        lastReport = read() ?? "missing observation"
+        guard let sample = RefreshObservationSample(lastReport), matching(sample) else { return false }
+        matched = sample
+        return true
+    }
+}
+
 final class PageInteractionUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
@@ -602,7 +669,7 @@ final class PageInteractionUITests: XCTestCase {
                 let app = launch(page, refresh: true, empty: empty, arguments:["--preview-refresh-observation"])
                 let counter = app.descendants(matching: .any).matching(identifier: "academic-publication-count").firstMatch
                 let stage = "\(page)-empty-\(empty)"
-                guard waitForInitialPublication(counter, in:app, stage:stage) else { app.terminate(); continue }
+                guard waitForPublication(in:app, expected:"1", stage:stage) else { app.terminate(); continue }
                 let expectedContent: String
                 switch (page, empty) {
                 case ("scores", true): expectedContent = "暂无成绩"
@@ -616,22 +683,19 @@ final class PageInteractionUITests: XCTestCase {
                 XCTAssertTrue(content.waitForExistence(timeout: 3))
                 XCTAssertFalse(app.buttons["page-refresh"].exists)
                 XCTAssertFalse(app.buttons["刷新"].exists)
-                let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
-                guard let restingInset = waitForNativeRefreshAtRest(observation, stage:stage) else { app.terminate(); continue }
+                guard let restingInset = waitForNativeRefreshAtRest(in:app, stage:stage) else { app.terminate(); continue }
                 logPageRefreshDiagnostic(app, "\(page)-empty-\(empty)-before-pull")
                 // Use the native proof's body gesture, below the pinned term header.
                 let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
                 let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
                 start.press(forDuration: 0.1, thenDragTo: end)
-                let refreshed = XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '2'"), evaluatedWith: counter)], timeout: 5) == .completed
-                let completed = XCTWaiter.wait(for: [expectation(for: NSPredicate(format:"label BEGINSWITH 'entered=1; completed=1;'"), evaluatedWith:observation)], timeout:5) == .completed
-                let report = observation.exists ? observation.label : "missing observation"
-                print("[RefreshFeedback] \(stage) after-pull: restingInset=\(restingInset); \(report)")
+                let refreshed = waitForPublication(in:app, expected:"2", stage:stage)
+                let returned = waitForRefreshObservation(in:app, stage:"\(stage) returned") {
+                    $0.hasReturned(restingInset:restingInset)
+                }
                 logPageRefreshDiagnostic(app, "\(page)-empty-\(empty)-after-pull")
                 XCTAssertTrue(refreshed, "\(page) must publish exactly one refreshed snapshot even when empty=\(empty)")
-                XCTAssertTrue(completed, "\(stage): the single pull must enter and complete exactly once: \(report)")
-                XCTAssertTrue(report.contains("cancelled=false"), "\(stage): refresh must complete without cancellation: \(report)")
-                assertNativeRefreshReturned(observation, restingInset:restingInset)
+                XCTAssertNotNil(returned, "\(stage): the single pull must complete exactly once and return to its native rest")
                 XCTAssertTrue(content.waitForExistence(timeout: 3))
                 capture(app, "pull-refresh-\(page)-empty-\(empty)")
                 XCTAssertEqual(counter.label, "2")
@@ -686,21 +750,22 @@ final class PageInteractionUITests: XCTestCase {
             } else if page == "campus-travel" {
                 XCTAssertTrue(app.staticTexts["示例区县"].waitForExistence(timeout: 8))
             }
-            let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
-            XCTAssertTrue(observation.waitForExistence(timeout: 5))
-            let restingInset = nativeRefreshValue(observation.label, "adjustedTop")
+            guard let restingInset = waitForNativeRefreshAtRest(in:app, stage:page) else { app.terminate(); continue }
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
             start.press(forDuration: 0.1, thenDragTo: end)
-            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label CONTAINS 'entered=1; completed=0'"), evaluatedWith: observation)], timeout: 5), .completed, page)
-            assertNativeHeldRefresh(observation.label, restingInset: restingInset, page: page)
+            guard let held = waitForRefreshObservation(in:app, stage:"\(page) held", matching:{
+                $0.isHeld(restingInset:restingInset)
+            }) else { app.terminate(); continue }
+            assertNativeHeldRefresh(held.report, restingInset: restingInset, page: page)
             let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = "\(page)-held-refresh"
             screenshot.lifetime = .keepAlways
             add(screenshot)
             app.buttons["complete-controlled-refresh"].tap()
-            let completedObservation = waitForCompletedRefreshObservation(in:app, captured:observation, stage:page)
-            assertNativeRefreshReturned(completedObservation, restingInset: restingInset)
+            _ = waitForRefreshObservation(in:app, stage:"\(page) returned") {
+                $0.hasReturned(restingInset:restingInset)
+            }
             app.terminate()
         }
     }
@@ -710,73 +775,82 @@ final class PageInteractionUITests: XCTestCase {
         let app = launch("scores", arguments:["--preview-refresh", "--preview-long-list", "--preview-slow-refresh", "--preview-controlled-refresh"])
         defer { app.terminate() }
         let counter = app.descendants(matching: .any).matching(identifier: "academic-publication-count").firstMatch
-        guard waitForInitialPublication(counter, in:app, stage:"score-\(mode)") else { return }
-        let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
-        guard let restingInset = waitForNativeRefreshAtRest(observation, stage:"score-\(mode)") else { return }
+        guard waitForPublication(in:app, expected:"1", stage:"score-\(mode)") else { return }
+        guard let restingInset = waitForNativeRefreshAtRest(in:app, stage:"score-\(mode)") else { return }
         let topContent = app.staticTexts["学业概览"]
         XCTAssertTrue(topContent.exists)
-        print("[RefreshFeedback] \(mode) before-pull: \(observation.label)")
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
         start.press(forDuration: 0.1, thenDragTo: end)
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label CONTAINS 'entered=1; completed=0'"), evaluatedWith: observation)], timeout: 5), .completed)
+        guard let held = waitForRefreshObservation(in:app, stage:"score-\(mode) held", matching:{
+            $0.isHeld(restingInset:restingInset)
+        }) else { return }
         XCTAssertEqual(counter.label, "1", "The controlled read cannot publish before the test releases it")
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "score-controlled-refresh-\(mode)-before-completion"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        print("[RefreshFeedback] \(mode) after-release: \(observation.label)")
-        assertNativeHeldRefresh(observation.label, restingInset: restingInset, page: "scores")
+        print("[RefreshFeedback] \(mode) after-release: \(held.report)")
+        assertNativeHeldRefresh(held.report, restingInset: restingInset, page: "scores")
         let completion = app.buttons["complete-controlled-refresh"]
         XCTAssertTrue(completion.isHittable)
         completion.tap()
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '2'"), evaluatedWith: counter)], timeout: 8), .completed)
-        let report = observation.label
-        print("[RefreshFeedback] \(mode) after-publication: \(report)")
+        XCTAssertTrue(waitForPublication(in:app, expected:"2", stage:"score-\(mode)"))
+        guard let returned = waitForRefreshObservation(in:app, stage:"score-\(mode) returned", matching:{
+            $0.hasReturned(restingInset:restingInset)
+        }) else { return }
+        print("[RefreshFeedback] \(mode) after-publication: \(returned.report)")
         capture(app, "score-slow-refresh-\(mode)-after-publication")
-        XCTAssertTrue(report.contains("entered=1; completed=1"), "The refresh callback must finish exactly once: \(report)")
-        XCTAssertTrue(report.contains("refreshingSeen=true"), "The native refresh control must become active: \(report)")
-        XCTAssertTrue(report.contains("prematurelyStopped=false"), "The native refresh control must remain active until the awaited load finishes: \(report)")
-        assertNativeRefreshReturned(observation, restingInset: restingInset)
     }
 
-    /// Fixture publication has no performance deadline. Bound readiness once,
-    /// and report its actual state before deciding whether a gesture is valid.
-    private func waitForInitialPublication(_ counter: XCUIElement, in app: XCUIApplication, stage: String) -> Bool {
-        let initial = NSPredicate { _, _ in counter.exists && counter.label == "1" }
-        let result = XCTWaiter.wait(for:[expectation(for:initial,evaluatedWith:counter)],timeout:30)
-        let count = counter.exists ? counter.label : "missing"
-        let observation = app.descendants(matching:.any).matching(identifier:"refresh-feedback-observation").firstMatch
-        let native = observation.exists ? observation.label : "missing observation"
-        print("[RefreshReadiness] \(stage): result=\(result.rawValue); counter=\(count); applicationState=\(app.state.rawValue); \(native)")
-        XCTAssertEqual(result,.completed,"\(stage): initial publication must be exactly 1 before any pull; actual counter=\(count), appState=\(app.state.rawValue), \(native)")
+    /// These are AX delivery bounds, not refresh-performance deadlines. The
+    /// native controlled gate stays held until the single explicit tap.
+    private func waitForPublication(in app: XCUIApplication, expected: String, stage: String) -> Bool {
+        var lastCount = "not sampled"
+        var attempts = 0
+        let started = Date()
+        let predicate = NSPredicate { _, _ in
+            attempts += 1
+            let current = app.descendants(matching:.any).matching(identifier:"academic-publication-count").firstMatch
+            lastCount = current.exists ? current.label : "missing"
+            return lastCount == expected
+        }
+        let result = XCTWaiter.wait(for:[expectation(for:predicate,evaluatedWith:app)],timeout:30)
+        let diagnostic = "\(stage): expected publication=\(expected); result=\(result.rawValue); polls=\(attempts); elapsed=\(Date().timeIntervalSince(started)); lastCount=\(lastCount)"
+        print("[RefreshPublication] \(diagnostic)")
+        XCTAssertEqual(result,.completed,diagnostic)
         return result == .completed
     }
 
-    private func waitForNativeRefreshAtRest(_ observation: XCUIElement, stage: String) -> Double? {
-        let atRest = NSPredicate { _, _ in
-            guard observation.exists else { return false }
-            let report = observation.label
-            return report.contains("control=") && !report.contains("control=nil") &&
-                report.contains("refreshing=false") && report.hasPrefix("entered=0; completed=0;") &&
-                abs(self.nativeRefreshValue(report,"offsetY") + self.nativeRefreshValue(report,"adjustedTop")) < 1
+    private func waitForNativeRefreshAtRest(in app: XCUIApplication, stage: String) -> Double? {
+        waitForRefreshObservation(in:app, stage:"\(stage) initial-rest", matching:{ $0.isInitialRest })?.value("adjustedTop")
+    }
+
+    /// Re-query at every poll and retain the exact satisfying sample. Re-reading
+    /// a captured element after success can resolve a different SwiftUI AX proxy.
+    /// Each native state is stable until the next test action; no action is retried.
+    private func waitForRefreshObservation(in app: XCUIApplication, stage: String,
+                                           matching: @escaping (RefreshObservationSample) -> Bool) -> RefreshObservationSample? {
+        var poll = RefreshObservationPoll()
+        let started = Date()
+        let predicate = NSPredicate { _, _ in
+            poll.evaluate(read:{
+                let current = app.descendants(matching:.any).matching(identifier:"refresh-feedback-observation").firstMatch
+                return current.exists ? current.label : nil
+            }, matching:matching)
         }
-        let result = XCTWaiter.wait(for:[expectation(for:atRest,evaluatedWith:observation)],timeout:10)
-        let report = observation.exists ? observation.label : "missing observation"
-        print("[RefreshReadiness] \(stage) native-rest: result=\(result.rawValue); \(report)")
-        XCTAssertEqual(result,.completed,"\(stage): wait for an attached native control at its resting offset before one pull: \(report)")
-        return result == .completed ? nativeRefreshValue(report,"adjustedTop") : nil
+        let result = XCTWaiter.wait(for:[expectation(for:predicate,evaluatedWith:app)],timeout:30)
+        let diagnostic = "\(stage): result=\(result.rawValue); polls=\(poll.attempts); elapsed=\(Date().timeIntervalSince(started)); last-sample=\(poll.lastReport)"
+        print("[RefreshObservation] \(diagnostic)")
+        XCTAssertEqual(result,.completed,diagnostic)
+        return result == .completed ? poll.matched : nil
     }
 
     // SwiftUI AX frames can remain unchanged while UIKit adjusts the refresh
-    // inset. Verify the native held space and actual indicator placement, and
-    // retain a screen screenshot for the visible result.
+    // inset. Check the native region/indicator from the SAME matched sample;
+    // retain a screenshot separately for the visible result.
     private func nativeRefreshValue(_ report: String, _ key: String) -> Double {
-        let prefix = key + "="
-        guard let field = report.components(separatedBy: ";")
-            .map({ $0.trimmingCharacters(in: .whitespaces) })
-            .first(where: { $0.hasPrefix(prefix) }) else { return .nan }
-        return Double(field.dropFirst(prefix.count)) ?? .nan
+        RefreshObservationSample(report)?.value(key) ?? .nan
     }
 
     private func assertNativeHeldRefresh(_ report: String, restingInset: Double, page: String) {
@@ -786,41 +860,6 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(nativeRefreshValue(report, "controlY") + 1,
                                    nativeRefreshValue(report, "scrollY") + restingInset,
                                    "\(page): indicator is below the page header")
-    }
-
-    private func waitForCompletedRefreshObservation(in app: XCUIApplication, captured: XCUIElement,
-                                                    stage: String) -> XCUIElement {
-        // Native layout return can leave an earlier SwiftUI AX element stale.
-        // Query the app again for each delivery check; never repeat the tap.
-        var lastFreshReport = "not sampled"
-        let completed = NSPredicate { object, _ in
-            guard let currentApp = object as? XCUIApplication else { return false }
-            let current = currentApp.descendants(matching:.any).matching(identifier:"refresh-feedback-observation").firstMatch
-            let report = current.exists ? current.label : "missing fresh observation"
-            lastFreshReport = report
-            return report.hasPrefix("entered=1; completed=1;") && report.contains("cancelled=false")
-        }
-        let result = XCTWaiter.wait(for:[expectation(for:completed,evaluatedWith:app)],timeout:30)
-        let capturedReport = captured.exists ? captured.label : "missing captured observation"
-        let current = app.descendants(matching:.any).matching(identifier:"refresh-feedback-observation").firstMatch
-        let freshReport = current.exists ? current.label : "missing fresh observation"
-        print("[RefreshCompletion] \(stage): result=\(result.rawValue); applicationState=\(app.state.rawValue)")
-        print("[RefreshCompletion] \(stage) captured: \(capturedReport)")
-        print("[RefreshCompletion] \(stage) last-fresh-poll: \(lastFreshReport)")
-        print("[RefreshCompletion] \(stage) fresh-after: \(freshReport)")
-        XCTAssertEqual(result,.completed,
-                       "\(stage): exactly one completed, uncancelled callback must reach AX; captured=\(capturedReport); fresh=\(freshReport)")
-        return current
-    }
-
-    private func assertNativeRefreshReturned(_ observation: XCUIElement, restingInset: Double) {
-        let restored = NSPredicate { _, _ in
-            let report = observation.label
-            return abs(self.nativeRefreshValue(report, "adjustedTop") - restingInset) < 1 &&
-                abs(self.nativeRefreshValue(report, "offsetY") + restingInset) < 1
-        }
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: restored, evaluatedWith: observation)], timeout: 5), .completed,
-                       "Return to the resting native inset and offset after completion")
     }
 
     func testAcademicTitlesAndTermStripsRemainStableWhenPinned() {
