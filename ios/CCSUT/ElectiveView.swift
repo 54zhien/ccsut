@@ -524,7 +524,6 @@ struct ElectiveView: View {
         if let expectedGeneration, handleCookieGenerationChange(expected: expectedGeneration) { return }
         activeLoadRequests += 1
         isLoading = true
-        enrolledModel.invalidate()
         defer {
             activeLoadRequests -= 1
             isLoading = activeLoadRequests > 0
@@ -532,6 +531,7 @@ struct ElectiveView: View {
         await loadGate.run {
             if let expectedGeneration,
                handleCookieGenerationChange(expected: expectedGeneration) { return }
+            enrolledModel.invalidate()
             await fetch(force: force, refreshAuthentication: refreshAuthentication,
                         expectedGeneration: expectedGeneration)
             if let expectedGeneration, handleCookieGenerationChange(expected:expectedGeneration) { return }
