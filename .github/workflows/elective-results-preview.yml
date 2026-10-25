@@ -29,6 +29,9 @@ jobs:
             -only-testing:CCSUTUITests/PageInteractionUITests/testSelectedHistoryIsReadOnlyWithEmptyCatalog \
             -only-testing:CCSUTUITests/PageInteractionUITests/testSelectedReadFailureDoesNotPretendToBeComplete \
             -only-testing:CCSUTUITests/PageInteractionUITests/testSelectedHistoryLargeTextAndDarkAppearance \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testSelectedCatalogFailureShowsNoticeAndReadOnlyResults \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testSelectedCatalogRetryRecoversCatalogCard \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testSelectedCatalogRetryPreservesReadOnlyHistory \
             -only-testing:CCSUTUITests/PageInteractionUITests/testElectiveEmptySearchCanResetAndDisabledReasonIsVisible \
             -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicPagesPullToRefreshIncludingEmptyStates \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/selected-tests.log"

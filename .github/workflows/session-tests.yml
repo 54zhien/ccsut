@@ -125,6 +125,15 @@ jobs:
           "$RUNNER_TEMP/schedule-tests"
           xcrun swiftc -parse-as-library ios/CCSUT/InterfacePreview.swift ios/Tests/ReleasePreviewTests.swift -o "$RUNNER_TEMP/release-preview-tests"
           "$RUNNER_TEMP/release-preview-tests" --preview-ui --preview-page academic
+      - name: Run selected-course load ownership regressions
+        if: always()
+        run: python3 ios/Tests/run-elective-load-tests.py
+      - name: Run retained material top blur regressions
+        if: always()
+        run: |
+          set -e
+          xcrun swiftc -parse-as-library ios/CCSUT/TopBarBlurProfile.swift ios/Tests/TopBarBlurTests.swift -o "$RUNNER_TEMP/top-blur-tests"
+          "$RUNNER_TEMP/top-blur-tests"
       - name: Build iOS simulator app with debug fixtures
         run: |
           xcodebuild build -quiet -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug \
