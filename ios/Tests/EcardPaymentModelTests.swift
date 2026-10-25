@@ -128,30 +128,32 @@ private actor PaymentReadFixture {
         check(offlineRenewals == 0 && offlineModel.errorText != nil, "ecard server errors do not trigger authentication")
         offlineModel.stopQueries()
 
-        let later = PaymentReadFixture()
-        await later.setExpired(false)
-        await seed(token("stale"))
-        let firstRenewedToken = token("renewed-1"), secondRenewedToken = token("renewed-2")
-        var laterRenewals = 0
-        let laterModel = EcardPaymentModel(clientFactory: { value, _, _ in
-            EcardClient(token: value, transport: { await later.reply($0, token: value) })
-        }, bridgeFactory: {
-            laterRenewals += 1
-            return bridge(laterRenewals == 1 ? firstRenewedToken : secondRenewedToken)
-        })
-        laterModel.start(account: "fixture-payment-recovery")
-        await settle(laterModel)
-        await later.setExpired(true)
-        laterModel.selectCampus("north")
-        await settle(laterModel)
-        check(laterRenewals == 1 && laterModel.fee != nil && laterModel.errorText == nil && laterModel.room == nil,
-              "ecard selection reads also recover expiry and discard stale payment context")
-        await later.reject(firstRenewedToken)
-        laterModel.selectCampus("north")
-        await settle(laterModel)
-        check(laterRenewals == 2 && laterModel.fee != nil && laterModel.errorText == nil,
-              "a later expiry can renew again after the previous read recovery succeeded")
-        laterModel.stopQueries()
+        for singleCampus in [false, true] {
+            let later = PaymentReadFixture(singleCampus: singleCampus)
+            await later.setExpired(false)
+            await seed(token("stale"))
+            let firstRenewedToken = token("renewed-1"), secondRenewedToken = token("renewed-2")
+            var laterRenewals = 0
+            let laterModel = EcardPaymentModel(clientFactory: { value, _, _ in
+                EcardClient(token: value, transport: { await later.reply($0, token: value) })
+            }, bridgeFactory: {
+                laterRenewals += 1
+                return bridge(laterRenewals == 1 ? firstRenewedToken : secondRenewedToken)
+            })
+            laterModel.start(account: "fixture-payment-recovery")
+            await settle(laterModel)
+            await later.setExpired(true)
+            laterModel.selectCampus("north")
+            await settle(laterModel)
+            check(laterRenewals == 1 && laterModel.fee != nil && laterModel.errorText == nil && laterModel.room == nil,
+                  "ecard selection reads recover expiry and discard stale payment context (single campus: \(singleCampus))")
+            await later.reject(firstRenewedToken)
+            laterModel.selectCampus("north")
+            await settle(laterModel)
+            check(laterRenewals == 2 && laterModel.fee != nil && laterModel.errorText == nil,
+                  "a later expiry can renew after the previous read recovery succeeded (single campus: \(singleCampus))")
+            laterModel.stopQueries()
+        }
 
         let cascade = PaymentReadFixture(singleCampus: true, rejectSelectionReads: true)
         await cascade.setExpired(false)

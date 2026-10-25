@@ -187,7 +187,10 @@ final class EcardPaymentModel {
                 fee = loadedFee; campuses = loadedCampuses
                 isStarting = false
                 if loadedCampuses.count == 1 { selectCampus(loadedCampuses[0].value) }
-                else if loadedCampuses.isEmpty { errorText = "暂无可选校区，请稍后重新加载" }
+                else {
+                    canRecoverReadSession = true
+                    if loadedCampuses.isEmpty { errorText = "暂无可选校区，请稍后重新加载" }
+                }
             } catch {
                 if current == revision, CookieJar.generation == generation, !Task.isCancelled {
                     handleLoadError(error, recoverReadSession: true)
@@ -320,14 +323,21 @@ final class EcardPaymentModel {
         queryTask?.cancel()
         revision &+= 1
         let current = revision
+        let generation = CookieJar.generation
         loadingText = label; errorText = nil
         queryTask = Task {
             defer { if current == revision { loadingText = nil } }
             do {
                 guard let client else { return }
                 try await action(client)
+                guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
+                // A one-campus startup includes its automatic building read.
+                // Rearm only after that whole chain succeeds, not between them.
+                canRecoverReadSession = true
             } catch {
-                if current == revision, !Task.isCancelled { handleLoadError(error, recoverReadSession: true) }
+                if current == revision, CookieJar.generation == generation, !Task.isCancelled {
+                    handleLoadError(error, recoverReadSession: true)
+                }
             }
         }
     }
