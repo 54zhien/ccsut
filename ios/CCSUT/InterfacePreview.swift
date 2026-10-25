@@ -57,6 +57,7 @@ enum InterfacePreview {
 
     static var completeSelected: Bool { ProcessInfo.processInfo.arguments.contains("--preview-complete-selected") }
     static var selectedReadFailure: Bool { ProcessInfo.processInfo.arguments.contains("--preview-selected-failure") }
+    static var catalogReadFailureOnce: Bool { ProcessInfo.processInfo.arguments.contains("--preview-catalog-failure-once") }
     static var emptyCatalog: Bool { ProcessInfo.processInfo.arguments.contains("--preview-empty-catalog") }
 
     static var enrolledContext: EnrolledCoursesContext {

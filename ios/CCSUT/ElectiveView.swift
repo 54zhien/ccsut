@@ -33,6 +33,7 @@ struct ElectiveView: View {
     @State private var actionMessage: String?
 #if DEBUG
     @State private var previewPublicationCount = 0
+    @State private var previewCatalogFailureInjected = false
 #endif
 
     private var classes: [TeachingClass] { electiveState.snapshot?.courses ?? [] }
@@ -560,6 +561,13 @@ struct ElectiveView: View {
                 try? await Task.sleep(for: InterfacePreview.refreshFixtureDelay)
             }
             guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
+            if InterfacePreview.catalogReadFailureOnce && !previewCatalogFailureInjected {
+                previewCatalogFailureInjected = true
+                errorText = "教学班读取失败，请重试核实操作条件"
+                electiveState.refreshFailed()
+                return
+            }
+            errorText = nil
             let previewClasses = InterfacePreview.emptyPage ? [] : InterfacePreview.classes
             var builder = ElectiveSnapshotBuilder<TeachingClass>()
             builder.append(records(for: previewClasses))

@@ -4,16 +4,7 @@ final class PageInteractionUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
     func testCompleteSelectedIncludesClosedBatch() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected"]
-        #if CCSUT_TEST_LEGACY_TOP_BLUR
-        let useLegacy = true
-        #else
-        let useLegacy = legacyBlur
-        #endif
-        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
-        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
-        app.launch()
+        let app = launch("electives", arguments:["--preview-complete-selected"])
         XCTAssertTrue(app.staticTexts["示例线上已选课"].waitForExistence(timeout:8))
         app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch.tap()
         let search = app.textFields["课程名 / 教师"]
@@ -25,16 +16,7 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testSelectedHistoryIsReadOnlyWithEmptyCatalog() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected","--preview-empty-catalog"]
-        #if CCSUT_TEST_LEGACY_TOP_BLUR
-        let useLegacy = true
-        #else
-        let useLegacy = legacyBlur
-        #endif
-        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
-        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
-        app.launch()
+        let app = launch("electives", arguments:["--preview-complete-selected","--preview-empty-catalog"])
         let selected = app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch
         XCTAssertTrue(selected.waitForExistence(timeout:8)); selected.tap()
         let menu = app.buttons["enrolled-term-menu"]
@@ -48,16 +30,7 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testSelectedReadFailureDoesNotPretendToBeComplete() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected","--preview-selected-failure"]
-        #if CCSUT_TEST_LEGACY_TOP_BLUR
-        let useLegacy = true
-        #else
-        let useLegacy = legacyBlur
-        #endif
-        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
-        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
-        app.launch()
+        let app = launch("electives", arguments:["--preview-complete-selected","--preview-selected-failure"])
         XCTAssertTrue(app.staticTexts["示例线上已选课"].waitForExistence(timeout:8))
         app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch.tap()
         XCTAssertTrue(app.staticTexts["enrolled-read-error"].waitForExistence(timeout:5))
@@ -66,17 +39,7 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testSelectedHistoryLargeTextAndDarkAppearance() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected",
-                               "-UIPreferredContentSizeCategoryName","UICTContentSizeCategoryAccessibilityXXXL"]
-        #if CCSUT_TEST_LEGACY_TOP_BLUR
-        let useLegacy = true
-        #else
-        let useLegacy = legacyBlur
-        #endif
-        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
-        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
-        app.launch()
+        let app = launch("electives", largeText:true, arguments:["--preview-complete-selected","-AppleInterfaceStyle","Dark"])
         let selected = app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch
         XCTAssertTrue(selected.waitForExistence(timeout:8)); selected.tap()
         let menu = app.buttons["enrolled-term-menu"]
@@ -88,6 +51,56 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(historical.isHittable)
         XCTAssertFalse(app.buttons["退课"].exists)
         capture(app,"complete-selected-history-large-dark")
+    }
+
+    func testSelectedCatalogFailureShowsNoticeAndReadOnlyResults() {
+        let app = launch("electives", arguments:["--preview-complete-selected","--preview-catalog-failure-once"])
+        XCTAssertTrue(app.staticTexts["教学班读取失败，请重试核实操作条件"].waitForExistence(timeout:8))
+        let selected = app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch
+        selected.tap()
+        XCTAssertTrue(app.staticTexts["示例线上已选课"].waitForExistence(timeout:5))
+        XCTAssertTrue(app.staticTexts["教学班读取失败，请重试核实操作条件"].exists)
+        XCTAssertTrue(app.buttons["重试"].exists)
+        XCTAssertFalse(app.staticTexts["enrolled-read-error"].exists)
+        XCTAssertFalse(app.buttons["退课"].exists)
+        XCTAssertFalse(app.buttons["选课"].exists)
+        capture(app,"selected-catalog-failure-read-only")
+    }
+
+    func testSelectedCatalogRetryRecoversCatalogCard() {
+        let app = launch("electives", arguments:["--preview-complete-selected","--preview-catalog-failure-once"])
+        XCTAssertTrue(app.staticTexts["教学班读取失败，请重试核实操作条件"].waitForExistence(timeout:8))
+        app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["示例线上已选课"].waitForExistence(timeout:5))
+        XCTAssertFalse(app.buttons["退课"].exists)
+        let retry = app.buttons["重试"]
+        XCTAssertTrue(retry.waitForExistence(timeout:5)); retry.tap()
+        let drop = app.buttons["退课"]
+        XCTAssertTrue(drop.waitForExistence(timeout:8))
+        // The fixture supplies no active batch: recovering the catalog must not
+        // bypass the existing action permission checks or issue a mutation.
+        XCTAssertFalse(drop.isEnabled)
+        XCTAssertFalse(app.staticTexts["教学班读取失败，请重试核实操作条件"].exists)
+        XCTAssertTrue(app.staticTexts["示例线上已选课"].exists)
+        capture(app,"selected-catalog-retry-recovered")
+    }
+
+    func testSelectedCatalogRetryPreservesReadOnlyHistory() {
+        let app = launch("electives", arguments:["--preview-complete-selected","--preview-catalog-failure-once"])
+        XCTAssertTrue(app.staticTexts["教学班读取失败，请重试核实操作条件"].waitForExistence(timeout:8))
+        app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch.tap()
+        let menu = app.buttons["enrolled-term-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout:5)); menu.tap()
+        app.buttons["enrolled-term-2024-2025-1"].tap()
+        XCTAssertTrue(app.staticTexts["历史学期示例课程"].waitForExistence(timeout:5))
+        XCTAssertTrue(app.staticTexts["教学班读取失败，请重试核实操作条件"].exists)
+        app.buttons["重试"].tap()
+        let notice = app.staticTexts["教学班读取失败，请重试核实操作条件"]
+        XCTAssertTrue(notice.waitForNonExistence(timeout:8))
+        XCTAssertTrue(app.staticTexts["历史学期示例课程"].exists)
+        XCTAssertFalse(app.buttons["退课"].exists)
+        XCTAssertFalse(app.buttons["选课"].exists)
+        capture(app,"selected-catalog-retry-history")
     }
 
     func testCampusEntryAndRecords() {
@@ -374,9 +387,10 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     private func launch(_ page: String, longList: Bool = false, transition: Bool = false, withoutUpcoming: Bool = false,
-                        refresh: Bool = false, empty: Bool = false, legacyBlur: Bool = false, largeText: Bool = false) -> XCUIApplication {
+                        refresh: Bool = false, empty: Bool = false, legacyBlur: Bool = false, largeText: Bool = false,
+                        arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-ui", "--preview-page", page]
+        app.launchArguments = ["--preview-ui", "--preview-page", page] + arguments
         if longList { app.launchArguments.append("--preview-long-list") }
         if transition { app.launchArguments.append("--preview-transition") }
         if withoutUpcoming { app.launchArguments.append("--preview-no-upcoming") }
