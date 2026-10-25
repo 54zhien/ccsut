@@ -1,5 +1,22 @@
 import Foundation
 
+#if DEBUG
+/// UI tests release the second score load explicitly, so screenshots cannot race completion.
+@MainActor final class PreviewRefreshCompletionGate {
+    static let shared = PreviewRefreshCompletionGate()
+    private var pending: CheckedContinuation<Void, Never>?
+    func waitForRelease() async {
+        await withCheckedContinuation { pending = $0 }
+    }
+    func release() {
+        let continuation = pending
+        pending = nil
+        continuation?.resume()
+    }
+}
+
+#endif
+
 /// Simulator-only screenshot fixtures. Release builds cannot enable this route.
 enum InterfacePreview {
     static var enabled: Bool {

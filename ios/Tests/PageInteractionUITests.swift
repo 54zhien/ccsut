@@ -452,6 +452,100 @@ final class PageInteractionUITests: XCTestCase {
         }
     }
 
+    func testScoreRefreshControlRemainsActiveDuringSlowLoad() { assertScoreRefreshFeedback() }
+
+    func testTimetableControlledRefreshAnimationReference() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-ui", "--preview-page", "interactions", "--preview-refresh", "--preview-slow-refresh", "--preview-controlled-refresh"]
+        app.launch()
+        defer { app.terminate() }
+        let counter = app.staticTexts["refresh-count"]
+        XCTAssertTrue(counter.waitForExistence(timeout: 5))
+        XCTAssertEqual(counter.label, "0")
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertEqual(counter.label, "0")
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "timetable-controlled-refresh-before-completion"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        print("[RefreshFeedback] timetable: \(app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch.label)")
+        app.buttons["complete-controlled-refresh"].tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5), .completed)
+    }
+
+    func testOtherPagesRetainTimetableRefreshAnimation() {
+        for page in ["exams", "electives", "academic", "campus-leave", "campus-travel"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--preview-ui", "--preview-page", page, "--preview-refresh", "--preview-slow-refresh", "--preview-controlled-refresh"]
+            app.launch()
+            let anchor: XCUIElement
+            switch page {
+            case "exams": anchor = app.staticTexts.matching(identifier: "机械设计基础").firstMatch
+            case "electives": anchor = app.textFields["课程名 / 教师"]
+            case "academic": anchor = app.buttons["academic-scores"]
+            case "campus-leave": anchor = app.buttons["申请请假"]
+            default: anchor = app.segmentedControls.firstMatch
+            }
+            XCTAssertTrue(anchor.waitForExistence(timeout: 8), page)
+            let restingY = anchor.frame.minY
+            let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
+            start.press(forDuration: 0.1, thenDragTo: end)
+            XCTAssertTrue(observation.label.contains("entered=1; completed=0"), page)
+            XCTAssertGreaterThan(anchor.frame.minY - restingY, 40, "\(page): retain the native refresh region until completion")
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            screenshot.name = "\(page)-held-refresh"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+            app.buttons["complete-controlled-refresh"].tap()
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label CONTAINS 'entered=1; completed=1'"), evaluatedWith: observation)], timeout: 8), .completed, page)
+            XCTAssertEqual(anchor.frame.minY, restingY, accuracy: 3, "\(page): return to the original position")
+            app.terminate()
+        }
+    }
+
+    private func assertScoreRefreshFeedback() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-ui", "--preview-page", "scores", "--preview-refresh", "--preview-long-list", "--preview-slow-refresh", "--preview-controlled-refresh"]
+        let mode = "with-top-bar"
+        app.launch()
+        defer { app.terminate() }
+        let counter = app.descendants(matching: .any).matching(identifier: "academic-publication-count").firstMatch
+        XCTAssertTrue(counter.waitForExistence(timeout: 8))
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 8), .completed)
+        let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
+        XCTAssertTrue(observation.waitForExistence(timeout: 3))
+        let topContent = app.staticTexts["学业概览"]
+        XCTAssertTrue(topContent.exists)
+        let restingY = topContent.frame.minY
+        print("[RefreshFeedback] \(mode) before-pull: \(observation.label)")
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label CONTAINS 'entered=1; completed=0'"), evaluatedWith: observation)], timeout: 5), .completed)
+        XCTAssertEqual(counter.label, "1", "The controlled read cannot publish before the test releases it")
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "score-controlled-refresh-\(mode)-before-completion"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        print("[RefreshFeedback] \(mode) after-release: \(observation.label)")
+        XCTAssertGreaterThan(topContent.frame.minY - restingY, 40,
+                             "Like the timetable, keep the content below a visible refresh region until loading completes")
+        let completion = app.buttons["complete-controlled-refresh"]
+        XCTAssertTrue(completion.isHittable)
+        completion.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '2'"), evaluatedWith: counter)], timeout: 8), .completed)
+        let report = observation.label
+        print("[RefreshFeedback] \(mode) after-publication: \(report)")
+        capture(app, "score-slow-refresh-\(mode)-after-publication")
+        XCTAssertTrue(report.contains("entered=1; completed=1"), "The refresh callback must finish exactly once: \(report)")
+        XCTAssertTrue(report.contains("refreshingSeen=true"), "The native refresh control must become active: \(report)")
+        XCTAssertTrue(report.contains("prematurelyStopped=false"), "The native refresh control must remain active until the awaited load finishes: \(report)")
+    }
+
     func testAcademicTitlesAndTermStripsRemainStableWhenPinned() {
         var stripWidths: [CGFloat] = []
         for (page, title) in [("scores", "成绩单"), ("exams", "考试")] {

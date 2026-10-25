@@ -14,48 +14,43 @@ struct AcademicView: View {
     @State private var scoreSummary: String?
     @State private var electiveSummary: String?
     @State private var summaryGeneration: UInt64?
+#if DEBUG
+    @State private var previewLoaded = false
+#endif
 
     var body: some View {
         NavigationStack(path: $path) {
-            GeometryReader { viewport in
+            PageScrollSurface(refresh: { await loadUpcomingExam() },
+                              onOffsetChange: { headerScrollOffset = $0 }) { _, _ in
                 let cardHeight: CGFloat = 96
-                ScrollView {
-                    VStack(spacing: 12) {
-                        NavigationLink(value: Destination.scores) {
-                            service("成绩查询", subtitle: scoreSummary ?? "课程成绩、学分与绩点", symbol: "chart.bar.doc.horizontal", tint: .accentColor, height: cardHeight)
-                        }
-                        .accessibilityIdentifier("academic-scores")
-                        NavigationLink(value: Destination.exams) {
-                            service("考试安排", subtitle: examSummary, symbol: "calendar.badge.clock", tint: .accentColor, height: cardHeight)
-                        }
-                        .accessibilityIdentifier("academic-exams")
-                        NavigationLink(value: Destination.electives) {
-                            service("选课", subtitle: electiveSummary ?? "浏览课程与管理已选课程", symbol: "list.bullet.rectangle.portrait", tint: .accentColor, height: cardHeight)
-                        }
-                        .accessibilityIdentifier("academic-electives")
-                        if let nextExam {
-                            if let upcomingError {
-                                PageStatusNotice(message: upcomingError) { Task { await loadUpcomingExam() } }
-                            }
-                            NavigationLink(value: Destination.exams) { upcomingCard(nextExam) }
-                                .padding(.top, 8)
-                        }
+                VStack(spacing: 12) {
+                    NavigationLink(value: Destination.scores) {
+                        service("成绩查询", subtitle: scoreSummary ?? "课程成绩、学分与绩点", symbol: "chart.bar.doc.horizontal", tint: .accentColor, height: cardHeight)
                     }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 24)
-                    .padding(.bottom, 28)
-                    .frame(maxWidth: 720)
-                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("academic-scores")
+                    NavigationLink(value: Destination.exams) {
+                        service("考试安排", subtitle: examSummary, symbol: "calendar.badge.clock", tint: .accentColor, height: cardHeight)
+                    }
+                    .accessibilityIdentifier("academic-exams")
+                    NavigationLink(value: Destination.electives) {
+                        service("选课", subtitle: electiveSummary ?? "浏览课程与管理已选课程", symbol: "list.bullet.rectangle.portrait", tint: .accentColor, height: cardHeight)
+                    }
+                    .accessibilityIdentifier("academic-electives")
+                    if let nextExam {
+                        if let upcomingError {
+                            PageStatusNotice(message: upcomingError) { Task { await loadUpcomingExam() } }
+                        }
+                        NavigationLink(value: Destination.exams) { upcomingCard(nextExam) }
+                            .padding(.top, 8)
+                    }
                 }
-                .scrollEdgeEffectStyle(.soft, for: .top)
-                .scrollBounceBehavior(.always, axes: .vertical)
-                .pageRefreshable { await loadUpcomingExam() }
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
-                } action: { _, offset in headerScrollOffset = offset }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.top, 24)
+                .padding(.bottom, 28)
+                .frame(maxWidth: 720)
+                .frame(maxWidth: .infinity)
             }
-            .background(Color(.systemGroupedBackground))
             .nagiPageChrome(title: "教务", scrollOffset: headerScrollOffset) {
                 AccountButton()
             }
@@ -170,6 +165,10 @@ struct AcademicView: View {
         resetSummariesIfNeeded()
         #if DEBUG
         if InterfacePreview.enabled {
+            if previewLoaded && InterfacePreview.page == "academic" && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
+                await PreviewRefreshCompletionGate.shared.waitForRelease()
+            }
+            previewLoaded = true
             nextExam = ProcessInfo.processInfo.arguments.contains("--preview-no-upcoming") ? nil : InterfacePreview.exam
             return
         }

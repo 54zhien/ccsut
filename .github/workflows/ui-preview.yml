@@ -15,13 +15,13 @@ on:
       test_scope:
         description: 'Interaction checks to run (focused checks preserve full-suite failure evidence)'
         type: choice
-        options: [all, refresh-and-search]
+        options: [all, refresh-and-search, refresh-animation]
         default: all
 
 jobs:
   preview:
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Test timetable presentation
@@ -44,7 +44,7 @@ jobs:
         if: failure()
         run: xcrun simctl list devices > "$RUNNER_TEMP/ui-screenshots/simulator-state.txt"
       - name: Verify initial and selected week positioning
-        if: ${{ inputs.test_scope != 'refresh-and-search' }}
+        if: ${{ inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' }}
         run: |
           set -o pipefail
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
@@ -86,6 +86,16 @@ jobs:
               -only-testing:CCSUTUITests/PageInteractionUITests/testPullingTimetableRefreshesWholePageOnce
               -only-testing:CCSUTUITests/PageInteractionUITests/testElectiveEmptySearchCanResetAndDisabledReasonIsVisible
               -only-testing:CCSUTUITests/PageInteractionUITests/testLargeTextKeepsAcademicControlsAccessible
+            )
+          fi
+          if [ "$TEST_SCOPE" = 'refresh-animation' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testScoreRefreshControlRemainsActiveDuringSlowLoad
+              -only-testing:CCSUTUITests/PageInteractionUITests/testOtherPagesRetainTimetableRefreshAnimation
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTimetableControlledRefreshAnimationReference
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicPagesPullToRefreshIncludingEmptyStates
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicTitlesAndTermStripsRemainStableWhenPinned
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicDetailSupportsContentSwipeBack
             )
           fi
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \

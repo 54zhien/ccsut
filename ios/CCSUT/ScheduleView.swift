@@ -377,6 +377,11 @@ struct ScheduleView: View {
                 try? await Task.sleep(for: .seconds(30))
                 return
             }
+            if force && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
+                isLoading = true
+                await PreviewRefreshCompletionGate.shared.waitForRelease()
+                isLoading = false
+            }
             bundle = InterfacePreview.schedule
             currentWeek = 7
             selectedWeek = 7
