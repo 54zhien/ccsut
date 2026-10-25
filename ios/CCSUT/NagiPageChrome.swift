@@ -203,7 +203,15 @@ private struct AcademicDetailChrome: ViewModifier {
                 }
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle(title)
-            .background { AcademicPopSupport() }
+            .background {
+                #if DEBUG
+                if !(InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh-without-pop-support")) {
+                    AcademicPopSupport()
+                }
+                #else
+                AcademicPopSupport()
+                #endif
+            }
             .background {
                 #if DEBUG
                 if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-transition") {

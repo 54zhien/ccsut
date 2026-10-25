@@ -68,13 +68,19 @@ struct ScoreView: View {
                     .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
                 }
                 .scrollEdgeEffectStyle(.soft, for: .top)
+                #if DEBUG
+                .scrollEdgeEffectHidden(InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh-without-scroll-edge"), for: .top)
+                .modifier(ScoreRefreshDiagnosticPlacement(outer: false, action: { await load(force: true) }))
+                #else
                 .pageRefreshable { await load(force: true) }
+                #endif
                 .coordinateSpace(name: "academic-scroll")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemGroupedBackground))
             .academicDetailChrome(title: "成绩单")
 #if DEBUG
+            .modifier(ScoreRefreshDiagnosticPlacement(outer: true, action: { await load(force: true) }))
             .overlay(alignment: .topTrailing) {
                 PageRefreshPublicationDiagnostics(count: previewPublicationCount)
             }
@@ -286,6 +292,18 @@ struct ScoreView: View {
 }
 
 // MARK: - 单行
+
+#if DEBUG
+private struct ScoreRefreshDiagnosticPlacement: ViewModifier {
+    let outer: Bool
+    let action: @MainActor () async -> Void
+    @ViewBuilder func body(content: Content) -> some View {
+        let useOuter = InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh-outer-attachment")
+        if outer == useOuter { content.pageRefreshable(action: action) }
+        else { content }
+    }
+}
+#endif
 
 private struct ScoreRow: View {
     let item: ScoreItem

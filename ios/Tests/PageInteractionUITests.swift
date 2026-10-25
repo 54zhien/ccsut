@@ -467,11 +467,24 @@ final class PageInteractionUITests: XCTestCase {
         assertScoreRefreshFeedback(omitTopBar: true)
     }
 
-    private func assertScoreRefreshFeedback(omitTopBar: Bool) {
+    func testScoreRefreshWithoutPopSupport() {
+        assertScoreRefreshFeedback(experiment: "without-pop-support")
+    }
+
+    func testScoreRefreshWithoutScrollEdge() {
+        assertScoreRefreshFeedback(experiment: "without-scroll-edge")
+    }
+
+    func testScoreRefreshWithOuterAttachment() {
+        assertScoreRefreshFeedback(experiment: "outer-attachment")
+    }
+
+    private func assertScoreRefreshFeedback(omitTopBar: Bool = false, experiment: String? = nil) {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", "scores", "--preview-refresh", "--preview-long-list", "--preview-slow-refresh"]
         if omitTopBar { app.launchArguments.append("--preview-omit-top-bar") }
-        let mode = omitTopBar ? "without-top-bar" : "with-top-bar"
+        if let experiment { app.launchArguments.append("--preview-refresh-\(experiment)") }
+        let mode = experiment ?? (omitTopBar ? "without-top-bar" : "with-top-bar")
         app.launch()
         defer { app.terminate() }
         let counter = app.descendants(matching: .any).matching(identifier: "academic-publication-count").firstMatch

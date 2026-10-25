@@ -229,6 +229,7 @@ private struct PageRefreshable: ViewModifier {
     private var prematurelyStopped = false
     private var maximumPull: CGFloat = 0
     private var native = "native=unobserved"
+    private var activeNative = "unobserved"
 
     func beginCallback() {
         entered += 1
@@ -250,10 +251,12 @@ private struct PageRefreshable: ViewModifier {
             else if refreshingSeen && CACurrentMediaTime() - since > 0.1 { prematurelyStopped = true }
         }
         let frame = control.map { $0.convert($0.bounds, to: scroll.window) } ?? .zero
-        native = "control=\(control.map { NSStringFromClass(type(of: $0)) } ?? "nil"); refreshing=\(control?.isRefreshing ?? false); hidden=\(control?.isHidden ?? false); alpha=\(control?.alpha ?? 0); controlY=\(Int(frame.minY)); controlH=\(Int(frame.height)); maxPull=\(Int(maximumPull))"
+        let scrollFrame = scroll.convert(scroll.bounds, to: scroll.window)
+        native = "control=\(control.map { NSStringFromClass(type(of: $0)) } ?? "nil"); refreshing=\(control?.isRefreshing ?? false); hidden=\(control?.isHidden ?? false); alpha=\(control?.alpha ?? 0); controlY=\(Int(frame.minY)); controlH=\(Int(frame.height)); maxPull=\(Int(maximumPull)); scrollY=\(Int(scrollFrame.minY)); offsetY=\(Int(scroll.contentOffset.y)); adjustedTop=\(Int(scroll.adjustedContentInset.top)); insetTop=\(Int(scroll.contentInset.top))"
+        if activeSince != nil { activeNative = native }
     }
     var report: String {
-        "entered=\(entered); completed=\(completed); cancelled=\(cancelled); active=\(activeSince != nil); refreshingSeen=\(refreshingSeen); prematurelyStopped=\(prematurelyStopped); \(native)"
+        "entered=\(entered); completed=\(completed); cancelled=\(cancelled); active=\(activeSince != nil); refreshingSeen=\(refreshingSeen); prematurelyStopped=\(prematurelyStopped); \(native); activeNative=[\(activeNative)]"
     }
 }
 
