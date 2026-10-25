@@ -259,7 +259,11 @@ struct ScoreView: View {
             let publishesLoading = !ProcessInfo.processInfo.arguments.contains("--preview-refresh-without-loading-state")
             if publishesLoading { isLoading = true }
             defer { if publishesLoading { isLoading = false } }
-            try? await Task.sleep(for: InterfacePreview.refreshFixtureDelay)
+            if previewPublicationCount > 0 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
+                await PreviewRefreshCompletionGate.shared.waitForRelease()
+            } else {
+                try? await Task.sleep(for: InterfacePreview.refreshFixtureDelay)
+            }
             guard !Task.isCancelled else { return }
             let previewItems = InterfacePreview.emptyPage ? [] : InterfacePreview.scores
             items = previewItems

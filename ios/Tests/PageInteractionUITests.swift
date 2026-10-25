@@ -489,7 +489,7 @@ final class PageInteractionUITests: XCTestCase {
 
     private func assertScoreRefreshFeedback(omitTopBar: Bool = false, experiment: String? = nil) {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-ui", "--preview-page", "scores", "--preview-refresh", "--preview-long-list", "--preview-slow-refresh"]
+        app.launchArguments = ["--preview-ui", "--preview-page", "scores", "--preview-refresh", "--preview-long-list", "--preview-slow-refresh", "--preview-controlled-refresh"]
         if omitTopBar { app.launchArguments.append("--preview-omit-top-bar") }
         if let experiment { app.launchArguments.append("--preview-refresh-\(experiment)") }
         let mode = experiment ?? (omitTopBar ? "without-top-bar" : "with-top-bar")
@@ -504,8 +504,16 @@ final class PageInteractionUITests: XCTestCase {
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
         start.press(forDuration: 0.1, thenDragTo: end)
-        capture(app, "score-slow-refresh-\(mode)-after-release")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label CONTAINS 'entered=1; completed=0'"), evaluatedWith: observation)], timeout: 5), .completed)
+        XCTAssertEqual(counter.label, "1", "The controlled read cannot publish before the test releases it")
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "score-controlled-refresh-\(mode)-before-completion"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
         print("[RefreshFeedback] \(mode) after-release: \(observation.label)")
+        let completion = app.buttons["complete-controlled-refresh"]
+        XCTAssertTrue(completion.isHittable)
+        completion.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '2'"), evaluatedWith: counter)], timeout: 8), .completed)
         let report = observation.label
         print("[RefreshFeedback] \(mode) after-publication: \(report)")

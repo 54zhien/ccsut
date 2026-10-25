@@ -200,13 +200,26 @@ private struct PageRefreshable: ViewModifier {
             .overlay(alignment: .bottomTrailing) {
                 if RefreshFeedbackObservation.enabled {
                     TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                        let controlled = ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh")
                         Text(RefreshFeedbackObservation.shared.report)
-                            .font(.system(size: 1)).foregroundStyle(.clear).frame(width: 1, height: 1)
+                            .font(.system(size: controlled ? 9 : 1, design: .monospaced))
+                            .foregroundStyle(controlled ? Color.primary : Color.clear)
+                            .frame(width: controlled ? 280 : 1, height: controlled ? 180 : 1)
+                            .background(controlled ? Color(.secondarySystemGroupedBackground) : Color.clear)
+                            .padding(.bottom, controlled ? 130 : 0)
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel(RefreshFeedbackObservation.shared.report)
                             .accessibilityIdentifier("refresh-feedback-observation")
                             .allowsHitTesting(false)
                     }
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if RefreshFeedbackObservation.enabled && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
+                    Button("完成诊断刷新") { PreviewRefreshCompletionGate.shared.release() }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("complete-controlled-refresh")
+                        .padding(.trailing, 16).padding(.bottom, 90)
                 }
             }
             #endif
