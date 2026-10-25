@@ -118,12 +118,12 @@ struct ElectiveView: View {
             .padding(16)
             .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
 
+            if let errorText {
+                PageStatusNotice(message:errorText) { Task { await load(force:true) } }
+            }
             if selectedFilter == .selected {
                 enrolledList
             } else {
-                if let errorText {
-                    PageStatusNotice(message:errorText) { Task { await load(force:true) } }
-                }
                 ForEach(filtered) { item in catalogCard(item) }
                 if classes.isEmpty {
                     ContentUnavailableView(errorText == nil ? "当前没有可选课程" : AppMessages.loadFailure,
