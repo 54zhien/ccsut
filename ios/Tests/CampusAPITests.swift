@@ -140,6 +140,43 @@ struct CampusAPITests {
             $0.value(forHTTPHeaderField: "Authorization") == nil
         }, "validation and CAS never receive business bearer tokens")
 
+        // A successful HTTP response can still reject the business bearer.
+        for code in ["401", "\"401\""] {
+            for isLeave in [true, false] {
+                let rejected = "{\"code\":\(code),\"success\":false,\"errorMessage\":\"expired fixture\"}"
+                let businessExpired = FixtureCampusTransport { req, index in
+                    if req.url!.path.hasSuffix("validate_full") { return (200, [:], identity) }
+                    if req.url!.path.hasSuffix("redirect") { return (200, [:], "official landing") }
+                    if index == 2 { return (200, [:], rejected) }
+                    return (200, [:], isLeave ? emptyPage : #"{"code":"2000","data":[]}"#)
+                }
+                do {
+                    let c = CampusClient(account: "fixture-account", credentials: FixtureCredentials(), transport: businessExpired)
+                    if isLeave { _ = try await c.leaveRecords() }
+                    else { _ = try await c.travelRecords(kind: .departure) }
+                    let sent = await businessExpired.requests
+                    check(sent.count == 5 && sent.filter { $0.httpMethod == "POST" }.count == 2,
+                          "HTTP 200 business 401 renews CAS once for \(isLeave ? "leave" : "travel")")
+                } catch { check(false, "HTTP 200 business 401 recovers for \(isLeave ? "leave" : "travel")") }
+            }
+        }
+        for code in [401, 403] {
+            let rejected = FixtureCampusTransport { req, _ in
+                if req.url!.path.hasSuffix("validate_full") { return (200, [:], identity) }
+                if req.url!.path.hasSuffix("redirect") { return (200, [:], "official landing") }
+                return (200, [:], "{\"code\":\(code)}")
+            }
+            do {
+                _ = try await CampusClient(account: "fixture-account", credentials: FixtureCredentials(), transport: rejected).leaveRecords()
+                check(false, "permanent business rejection must fail")
+            } catch {
+                let sent = await rejected.requests
+                check(error as? CampusError == (code == 401 ? .authentication : .forbidden) &&
+                      sent.count == (code == 401 ? 5 : 2),
+                      "business \(code) has bounded recovery and preserves forbidden errors")
+            }
+        }
+
         let rotated = FixtureCampusTransport { req, index in
             if req.url!.path.hasSuffix("validate_full") {
                 return (200, [:], index == 1 ? identity : identity.replacingOccurrences(of: "fixture-access-token", with: "fixture-new-token"))

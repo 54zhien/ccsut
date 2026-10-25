@@ -167,7 +167,8 @@ final class PageLoadGate {
 /// Keep refresh, scroll geometry and the scroll view in one stable owner; page
 /// chrome and loading tasks belong outside this surface.
 struct PageScrollSurface<Content: View>: View {
-    let refresh: @MainActor () async -> Void
+    var refresh: (@MainActor () async -> Void)? = nil
+    var refreshHaptics = false
     var onOffsetChange: (CGFloat) -> Void = { _ in }
     @ViewBuilder var content: (CGSize, ScrollViewProxy) -> Content
 
@@ -177,10 +178,12 @@ struct PageScrollSurface<Content: View>: View {
                 ScrollView(.vertical) {
                     content(viewport.size, proxy)
                         .background {
-                            NativePageRefreshAnchor(action: refresh)
+                            if let refresh {
+                                NativePageRefreshAnchor(action: refresh, haptics: refreshHaptics)
                                 .frame(width: 0, height: 0)
                                 .allowsHitTesting(false)
                                 .accessibilityHidden(true)
+                            }
                         }
                 }
                 .scrollEdgeEffectStyle(.soft, for: .top)
@@ -282,7 +285,8 @@ private struct PageRefreshDiagnostics: ViewModifier {
 /// held inset when a pushed page updates its layout during an asynchronous read.
 private struct NativePageRefreshAnchor: UIViewRepresentable {
     let action: @MainActor () async -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+    let haptics: Bool
+    func makeCoordinator() -> Coordinator { Coordinator(action: action, haptics: haptics) }
     func makeUIView(context: Context) -> AnchorView {
         let view = AnchorView()
         view.coordinator = context.coordinator
@@ -291,6 +295,7 @@ private struct NativePageRefreshAnchor: UIViewRepresentable {
     }
     func updateUIView(_ view: AnchorView, context: Context) {
         context.coordinator.action = action
+        context.coordinator.haptics = haptics
         view.connect()
     }
     static func dismantleUIView(_ view: AnchorView, coordinator: Coordinator) { coordinator.detach() }
@@ -312,12 +317,14 @@ private struct NativePageRefreshAnchor: UIViewRepresentable {
 
     @MainActor final class Coordinator: NSObject {
         var action: @MainActor () async -> Void
+        var haptics: Bool
         private let control = UIRefreshControl()
         private weak var scroll: UIScrollView?
         private var task: Task<Void, Never>?
         private var revision: UInt64 = 0
-        init(action: @escaping @MainActor () async -> Void) {
+        init(action: @escaping @MainActor () async -> Void, haptics: Bool) {
             self.action = action
+            self.haptics = haptics
             super.init()
             control.addTarget(self, action: #selector(refresh), for: .valueChanged)
         }
@@ -330,6 +337,7 @@ private struct NativePageRefreshAnchor: UIViewRepresentable {
         }
         @objc private func refresh() {
             guard task == nil else { return }
+            if haptics { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
             let expectedRevision = revision
             let action = action
             #if DEBUG

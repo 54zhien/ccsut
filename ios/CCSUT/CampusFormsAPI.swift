@@ -32,7 +32,7 @@ extension CampusClient: CampusFormServing {
                 req.httpMethod = "POST"; req.httpBody = try JSONSerialization.data(withJSONObject: json(identity.userId))
                 req.setValue("application/json;charset=UTF-8", forHTTPHeaderField: "Content-Type")
             }
-            do { return try await send(req).0 }
+            do { return try await sendRead(req) }
             catch Failure.unauthorized { if attempt == 1 { throw CampusError.authentication } }
         }
         throw CampusError.authentication

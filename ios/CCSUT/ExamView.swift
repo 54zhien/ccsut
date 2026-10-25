@@ -29,7 +29,7 @@ struct ExamView: View {
 #endif
 
     var body: some View {
-        PageScrollSurface(refresh: { await load(force: true) }) { viewport, proxy in
+        PageScrollSurface(refresh: { await load(force: true) }, refreshHaptics: true) { viewport, proxy in
             VStack(spacing: 0) {
                 if isLoading && items.isEmpty {
                     ProgressView("加载考试安排…")

@@ -3,7 +3,6 @@ import SwiftUI
 /// Personal result records do not contain live capacity or mutation authority.
 struct EnrolledCourseCard: View {
     let record: EnrolledCourse
-    let readOnlyReason: String
 
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
@@ -23,16 +22,9 @@ struct EnrolledCourseCard: View {
                 Spacer(minLength:8)
                 Text(record.studyStatus).foregroundStyle(record.xdfs == "1" ? Color.green : Color.secondary)
             }.font(.caption)
-            Label(readOnlyReason,systemImage:"info.circle").font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal:false,vertical:true)
         }
         .padding(16).frame(maxWidth:.infinity,alignment:.leading)
         .background(Color(.secondarySystemGroupedBackground),in:.rect(cornerRadius:26))
-        .overlay {
-            if record.xdfs == "1" {
-                RoundedRectangle(cornerRadius:26).strokeBorder(.green.opacity(0.55),lineWidth:1.5)
-            }
-        }
         .accessibilityElement(children:.contain)
         .accessibilityIdentifier("enrolled-course-\(record.id)")
     }
@@ -64,7 +56,6 @@ struct EnrolledCourseDetail: View {
                     row("课程",record.kcbh)
                     row("教学班",record.jxbbh)
                 }
-                Section { Text("修读记录仅供查看，操作权限以当前选课批次和学校规则为准。").font(.footnote).foregroundStyle(.secondary) }
             }
             .navigationTitle("课程详情").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement:.confirmationAction) { Button("完成") { dismiss() } } }

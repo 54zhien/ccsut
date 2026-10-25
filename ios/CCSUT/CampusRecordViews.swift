@@ -72,7 +72,7 @@ private struct CampusRecordContent: View {
         PageScrollSurface(refresh: {
             if mode == .leave { await model.loadLeave(reset: true) }
             else { await model.loadTravel(kind: selected) }
-        }) { _, _ in
+        }, refreshHaptics: true) { _, _ in
             LazyVStack(alignment: .leading, spacing: 16) {
                 if mode == .travel {
                     Picker("记录类型", selection: $selected) {

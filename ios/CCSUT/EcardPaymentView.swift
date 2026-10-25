@@ -45,7 +45,7 @@ struct EcardPaymentView: View {
     }
 
     var body: some View {
-        ScrollView {
+        PageScrollSurface(refresh: { await model.refreshMeter(account: session.studentId) }, refreshHaptics: true) { _, _ in
             VStack(alignment: .leading, spacing: 20) {
                 if let issue = model.recoveryIssue { recoveryCard(issue) }
                 else if let receipt = model.receipt { result(receipt) }
@@ -81,7 +81,6 @@ struct EcardPaymentView: View {
             .frame(maxWidth: 720).frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .scrollEdgeEffectStyle(.soft, for: .top)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if model.recoveryIssue == nil, model.receipt == nil { payBar }
         }

@@ -47,7 +47,7 @@ struct ElectiveView: View {
     }
 
     var body: some View {
-        PageScrollSurface(refresh: { await load(force: true) }) { viewport, _ in
+        PageScrollSurface(refresh: { await load(force: true) }, refreshHaptics: true) { viewport, _ in
             VStack(spacing: 0) {
                 if isLoading && classes.isEmpty && enrolledModel.context == nil {
                     ProgressView("拉取教学班…")
@@ -215,7 +215,7 @@ struct ElectiveView: View {
                 .disabled(electiveState.isActionInProgress)
             }
             HStack {
-                Text("含自主选课与配课")
+                Text("线上、线下选课记录")
                 Spacer(minLength:8)
                 if let snapshot = enrolledModel.snapshot { Text("\(snapshot.count) 门").monospacedDigit() }
             }
@@ -248,7 +248,7 @@ struct ElectiveView: View {
             if let item = enrolledModel.currentCourse(for:record,catalog:electiveState,catalogTerm:initData?.xkxnxq) {
                 catalogCard(item)
             } else {
-                EnrolledCourseCard(record:record,readOnlyReason:enrolledReadOnlyReason)
+                EnrolledCourseCard(record:record)
                     .contentShape(.rect)
                     .onTapGesture { enrolledDetail = record }
             }
@@ -260,12 +260,6 @@ struct ElectiveView: View {
                 Text(enrolledModel.snapshot?.isEmpty == true ? "教务系统返回该学期暂无个人课程。" : "请尝试其他课程名或教师。")
             }
         }
-    }
-
-    private var enrolledReadOnlyReason: String {
-        if !enrolledModel.isVerified || isLoading { return "课程结果尚未验证完成，仅供查看" }
-        if enrolledModel.selectedTerm != enrolledModel.context?.defaultTerm { return "历史学期课程，仅供查看" }
-        return "仅供查看，下拉刷新可核实操作条件"
     }
 
     private func catalogCard(_ item: TeachingClass) -> some View {
@@ -784,12 +778,6 @@ struct ClassCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
-        .overlay {
-            if item.isSelected {
-                RoundedRectangle(cornerRadius: 26)
-                    .strokeBorder(.green.opacity(0.55), lineWidth: 1.5)
-            }
-        }
     }
 }
 

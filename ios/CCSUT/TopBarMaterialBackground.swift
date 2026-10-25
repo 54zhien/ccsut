@@ -12,7 +12,7 @@ enum TopBarBlur {
 }
 
 struct TopBarMaterialBackground: UIViewRepresentable {
-    var style: UIBlurEffect.Style = .systemUltraThinMaterial
+    @Environment(\.colorScheme) private var colorScheme
     var additionalLength: CGFloat = 32
     var topHold: Double = 0.35
     var horizontalInset: CGFloat = 0
@@ -24,7 +24,9 @@ struct TopBarMaterialBackground: UIViewRepresentable {
     }
 
     func updateUIView(_ view: TopBarMaterialHost, context: Context) {
-        view.configure(style: style, additionalLength: additionalLength,
+        view.overrideUserInterfaceStyle = colorScheme == .dark ? .dark : .light
+        view.configure(style: colorScheme == .dark ? .systemUltraThinMaterialDark : .systemUltraThinMaterialLight,
+                       additionalLength: additionalLength,
                        topHold: topHold, horizontalInset: horizontalInset)
     }
 }

@@ -27,6 +27,7 @@ private actor ModelServer {
     let paymentBody: String
     private(set) var debits = 0
     private(set) var creations = 0
+    private(set) var meterReads = 0
     private var failFirstCheck: Bool
     init(initialization: Gate? = nil, payment: Gate? = nil, reconciliation: Gate? = nil,
          status: Int = 0, paymentBody: String = #"{"code":200,"success":true}"#, failFirstCheck: Bool = false) {
@@ -45,7 +46,12 @@ private actor ModelServer {
             await initialization?.wait()
             body = #"{"code":200,"feeitem":{"feeitemid":"408","name":"fixture fee","flag":"0000000100","maxmoney":"400"}}"#
         case "/charge/feeitem/getThirdData":
-            body = #"{"code":200,"map":{"data":[{"name":"campus A","value":"A"},{"name":"campus B","value":"B"}]}}"#
+            if form.first(where: { $0.name == "level" })?.value == "3" {
+                meterReads += 1
+                body = #"{"code":200,"map":{"data":{"house_id":"fixture-room","house_no":"101","meter_id":"fixture-meter","meter_no":"001","customer_name":"fixture","sno":"fixture-A"},"showData":{"剩余金额":"42.00"}}}"#
+            } else {
+                body = #"{"code":200,"map":{"data":[{"name":"campus A","value":"A"},{"name":"campus B","value":"B"}]}}"#
+            }
         case "/blade-pay/pay":
             if form.first(where: { $0.name == "paystep" })?.value == "0" {
                 creations += 1
@@ -118,6 +124,27 @@ private actor ModelServer {
             model.room = "fixture-room"; model.amountText = "1"
             model.detail = MeterDetail(context: MeterContext(), show: ["房间信息": "fixture room"], dataType: nil)
             model.prepareConfirmation(); return model.confirmation
+        }
+
+        do {
+            let server = ModelServer(), journal = store("pull-refresh"), epoch = Epoch()
+            let model = make(server, journal, epoch)
+            await ready(model)
+            model.campus = "A"; model.building = "B"; model.room = "fixture-room"; model.amountText = "12"
+            await model.refreshMeter(account: "fixture-A")
+            let reads = await server.meterReads
+            check(model.detail?.remainingAmount == 42 && model.loadingText == nil && reads == 1,
+                  "pull refresh awaits the selected meter read and publishes the new balance")
+            check(model.campus == "A" && model.building == "B" && model.room == "fixture-room" && model.amountText == "12",
+                  "pull refresh preserves selected room and entered amount")
+            model.receipt = receipt("original-refresh-order")
+            try journal.save(model.receipt!, account: "fixture-A")
+            await model.refreshMeter(account: "fixture-A")
+            let counts = await server.counts()
+            check(try journal.load(account: "fixture-A")?.orderID == "original-refresh-order" &&
+                  model.receipt?.orderID == "original-refresh-order" && counts.creations == 0 && counts.debits == 0,
+                  "pull refresh preserves the original pending receipt and never sends payment")
+            model.stopQueries()
         }
 
         // Recovery failures must be distinguishable and remain blocking even

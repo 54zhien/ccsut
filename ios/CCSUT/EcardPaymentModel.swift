@@ -399,6 +399,34 @@ final class EcardPaymentModel {
             self.detail = meter
         }
     }
+
+    /// Pull-to-refresh performs reads only and joins their complete lifecycle.
+    /// A pending receipt or confirmation must never be reset by this gesture.
+    func refreshMeter(account: String?) async {
+        guard !isSubmitting, !isChecking, confirmation == nil else { return }
+        guard let account, !account.isEmpty else { return }
+        let generation = currentGeneration()
+        if self.account != account || boundGeneration != generation {
+            start(account: account, force: true)
+        } else if recoveryIssue != nil || receipt != nil {
+            return
+        } else if !isStarting && loadingText == nil {
+            if client == nil || fee == nil { start(account: account, force: true) }
+            else if let room { selectRoom(room) }
+            else if let building { selectBuilding(building) }
+            else if let campus { selectCampus(campus) }
+            else { start(account: account, force: true) }
+        }
+        // An expired read may replace its tasks with background authentication.
+        // Re-read task references until the current read chain has published.
+        while self.account == account && currentGeneration() == generation &&
+              (isStarting || loadingText != nil) && !Task.isCancelled {
+            await loginTask?.value
+            await initialTask?.value
+            await queryTask?.value
+        }
+    }
+
     private func query(_ label: String, action: @escaping @MainActor (EcardClient) async throws -> Void) {
         queryTask?.cancel()
         revision &+= 1

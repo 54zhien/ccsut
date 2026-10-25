@@ -198,7 +198,7 @@ actor CampusClient: CampusReading {
             request.setValue("application/json;charset=UTF-8", forHTTPHeaderField: "Content-Type")
             request.setValue(callback.absoluteString, forHTTPHeaderField: "Referer")
             request.httpBody = try JSONSerialization.data(withJSONObject: body(identity.userId))
-            do { return try await send(request).0 }
+            do { return try await sendRead(request) }
             catch Failure.unauthorized {
                 identities[subsystem] = nil
                 if attempt == 1 { throw CampusError.authentication }
@@ -257,6 +257,27 @@ actor CampusClient: CampusReading {
         request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", forHTTPHeaderField: "User-Agent")
         return request
+    }
+
+    private struct ReadStatus: Decodable {
+        let code: String?
+        private enum CodingKeys: String, CodingKey { case code }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            if let text = try? c.decode(String.self, forKey: .code) { code = text }
+            else { code = try c.decodeIfPresent(Int.self, forKey: .code).map(String.init) }
+        }
+    }
+
+    /// Only read callers consume this signal with a bounded CAS recovery loop.
+    /// Mutation responses must retain their existing uncertain-outcome handling.
+    func sendRead(_ request: URLRequest) async throws -> Data {
+        let data = try await send(request).0
+        switch (try? JSONDecoder().decode(ReadStatus.self, from: data))?.code {
+        case "401": throw Failure.unauthorized
+        case "403": throw CampusError.forbidden
+        default: return data
+        }
     }
 
     /// Follow only the official CAS/ehall chain, with fresh Cookie matching per hop.

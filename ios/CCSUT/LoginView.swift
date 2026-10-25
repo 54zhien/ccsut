@@ -186,7 +186,11 @@ struct LoginView: View {
                     .onSubmit { submit() }
 
                 Button(action: sendCode) {
-                    Group {
+                    ZStack {
+                        Text(cooldown > 0 ? "\(cooldown)s" : "获取验证码")
+                            .font(.subheadline.weight(.medium))
+                            .monospacedDigit()
+                            .hidden()
                         if busy == .sending {
                             ProgressView().controlSize(.mini)
                         } else {
@@ -195,11 +199,16 @@ struct LoginView: View {
                                 .monospacedDigit()
                         }
                     }
-                    .frame(minWidth: 84, minHeight: 44, alignment: .trailing)
-                    .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
+                    .frame(minWidth: 84, minHeight: 44, alignment: .center)
+                    .foregroundStyle(canSend || busy == .sending ? Color.accentColor : Color.secondary)
+                    .transaction { transaction in
+                        transaction.animation = nil
+                        transaction.disablesAnimations = true
+                    }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(CodeSendButtonStyle())
                 .disabled(!canSend)
+                .accessibilityLabel(busy == .sending ? "正在发送验证码" : cooldown > 0 ? "\(cooldown)秒后重发" : "获取验证码")
             }
             .padding(.horizontal, fieldInset)
             .frame(height: 56)
@@ -555,6 +564,13 @@ struct LoginView: View {
 
         return 'unknown';
         """
+}
+
+/// This control swaps text/spinner immediately and has no pressed opacity fade.
+private struct CodeSendButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+    }
 }
 
 // MARK: - Liquid Glass 卡片

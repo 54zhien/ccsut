@@ -11,29 +11,25 @@ struct AcademicView: View {
     @State private var path: [Destination] = []
     @State private var didNavigatePreview = false
     @State private var headerScrollOffset: CGFloat = 0
-    @State private var scoreSummary: String?
-    @State private var electiveSummary: String?
-    @State private var summaryGeneration: UInt64?
 #if DEBUG
     @State private var previewLoaded = false
 #endif
 
     var body: some View {
         NavigationStack(path: $path) {
-            PageScrollSurface(refresh: { await loadUpcomingExam() },
-                              onOffsetChange: { headerScrollOffset = $0 }) { _, _ in
+            PageScrollSurface(onOffsetChange: { headerScrollOffset = $0 }) { _, _ in
                 let cardHeight: CGFloat = 96
                 VStack(spacing: 12) {
                     NavigationLink(value: Destination.scores) {
-                        service("成绩查询", subtitle: scoreSummary ?? "课程成绩、学分与绩点", symbol: "chart.bar.doc.horizontal", tint: .accentColor, height: cardHeight)
+                        service("成绩查询", symbol: "chart.bar.doc.horizontal", tint: .accentColor, height: cardHeight)
                     }
                     .accessibilityIdentifier("academic-scores")
                     NavigationLink(value: Destination.exams) {
-                        service("考试安排", subtitle: examSummary, symbol: "calendar.badge.clock", tint: .accentColor, height: cardHeight)
+                        service("考试安排", symbol: "calendar.badge.clock", tint: .accentColor, height: cardHeight)
                     }
                     .accessibilityIdentifier("academic-exams")
                     NavigationLink(value: Destination.electives) {
-                        service("选课", subtitle: electiveSummary ?? "浏览课程与管理已选课程", symbol: "list.bullet.rectangle.portrait", tint: .accentColor, height: cardHeight)
+                        service("选课", symbol: "list.bullet.rectangle.portrait", tint: .accentColor, height: cardHeight)
                     }
                     .accessibilityIdentifier("academic-electives")
                     if let nextExam {
@@ -57,15 +53,9 @@ struct AcademicView: View {
             .navigationTitle("教务")
             .navigationDestination(for: Destination.self) { destination in
                 switch destination {
-                case .scores: ScoreView { items in
-                    resetSummariesIfNeeded()
-                    scoreSummary = items.isEmpty ? "暂无已公布成绩" : "已公布 \(items.count) 门成绩 · 点击查看详情"
-                }
+                case .scores: ScoreView()
                 case .exams: ExamView()
-                case .electives: ElectiveView(onLoaded: { count, term in
-                    resetSummariesIfNeeded()
-                    electiveSummary = "已选 \(count) 门 · \(SchedulePresentation.termTitle(term))"
-                }, onSummaryInvalidated: { electiveSummary = nil })
+                case .electives: ElectiveView()
                 }
             }
             .task {
@@ -96,36 +86,14 @@ struct AcademicView: View {
         }
     }
 
-    // Reuse successful child-page reads instead of issuing extra home-page requests.
-    private func resetSummariesIfNeeded() {
-        let generation = CookieJar.generation
-        if summaryGeneration != generation {
-            scoreSummary = nil
-            electiveSummary = nil
-            summaryGeneration = generation
-        }
-    }
-
-    private var examSummary: String {
-        guard let date = nextExam?.startDate else { return "考试时间、考场与座位" }
-        let formatted = date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened,
-                                                       locale: Locale(identifier: "zh_CN"),
-                                                       timeZone: TimeZone(identifier: "Asia/Shanghai")!))
-        return "最近一场 · \(formatted)"
-    }
-
-    private func service(_ title: String, subtitle: String, symbol: String, tint: Color, height: CGFloat) -> some View {
+    private func service(_ title: String, symbol: String, tint: Color, height: CGFloat) -> some View {
         HStack(spacing: 16) {
             Image(systemName: symbol)
                 .font(.system(size: 20, weight: .medium))
                 .foregroundStyle(tint)
                 .frame(width: 46, height: 46)
                 .background(tint.opacity(0.09), in: .rect(cornerRadius: 14))
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.headline).foregroundStyle(.primary)
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(title).font(.headline).foregroundStyle(.primary)
             Spacer(minLength: 4)
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
@@ -162,7 +130,6 @@ struct AcademicView: View {
     }
 
     private func fetchUpcomingExam() async {
-        resetSummariesIfNeeded()
         #if DEBUG
         if InterfacePreview.enabled {
             if previewLoaded && InterfacePreview.page == "academic" && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
