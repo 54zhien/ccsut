@@ -38,6 +38,38 @@ private actor PaymentServer {
         func check(_ value: Bool, _ name: String) {
             print("\(value ? "PASS" : "FAIL") \(name)"); if !value { failures += 1 }
         }
+        let readResponses: [(Int, String?, Bool)] = [
+            (401, nil, true),
+            (403, nil, false),
+            (302, "/plat/login", true),
+            (302, "https://auth.ccsut.cn/backstage/cas/login?service=fixture", true),
+            (302, "http://ecard.ccsut.cn:80/plat/login", true),
+            (302, nil, false),
+            (302, "/maintenance", false),
+            (302, "https://untrusted.invalid/plat/login", false),
+            (302, "https://ecard.ccsut.cn/plat/login-other", false),
+            (302, "https://ecard.ccsut.cn:8443/plat/login", false),
+            (302, "http://ecard.ccsut.cn:443/plat/login", false),
+            (302, "https://fixture@ecard.ccsut.cn/plat/login", false),
+            (302, "https://ecard.ccsut.cn/plat/login#fixture", false)
+        ]
+        for (status, location, shouldAuthenticate) in readResponses {
+            let responseClient = EcardClient(token: "fixture-token", transport: { request in
+                let headers = location.map { ["Location": $0] } ?? [:]
+                return (Data("{}".utf8), HTTPURLResponse(url: request.url!, statusCode: status,
+                    httpVersion: nil, headerFields: headers)!)
+            })
+            do {
+                _ = try await responseClient.feeItem()
+                check(false, "non-successful read response is rejected")
+            } catch let error as EcardError {
+                if case .authenticationRequired = error {
+                    check(shouldAuthenticate, "only explicit authentication rejection renews: \(status) \(location ?? "no location")")
+                } else if case .http(let code) = error {
+                    check(!shouldAuthenticate && code == status, "other responses retain HTTP status: \(status) \(location ?? "no location")")
+                } else { check(false, "read classification retains authentication or HTTP error") }
+            } catch { check(false, "read classification throws typed ecard error") }
+        }
         for body in [#"{"code":500,"msg":"fixture upstream error","success":false}"#,
                      #"{"code":200,"msg":"fixture uncertain result","success":false}"#] {
             let server = PaymentServer(paymentBody: body)

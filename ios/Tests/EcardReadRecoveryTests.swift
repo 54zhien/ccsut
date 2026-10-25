@@ -6,7 +6,7 @@ import WebKit
 }
 
 private actor PaymentReadFixture {
-    enum Failure { case http401, business401, http500 }
+    enum Failure { case http401, business401, http500, http403, unrelatedRedirect, loginRedirect }
     let failure: Failure
     let alwaysReject: Bool
     let singleCampus: Bool
@@ -36,11 +36,17 @@ private actor PaymentReadFixture {
             (expired && (alwaysReject || token.hasSuffix("stale") || rejectedTokens.contains(token)))
         let status: Int
         let body: String
+        var headers: [String: String] = [:]
         if rejected {
             switch failure {
             case .http401: status = 401; body = "{}"
             case .business401: status = 200; body = #"{"code":401,"msg":"fixture expired"}"#
             case .http500: status = 500; body = "{}"
+            case .http403: status = 403; body = "{}"
+            case .unrelatedRedirect:
+                status = 302; body = "{}"; headers["Location"] = "/maintenance"
+            case .loginRedirect:
+                status = 302; body = "{}"; headers["Location"] = "/plat/login"
             }
         } else if path.hasSuffix("singleFeeitem") {
             status = 200
@@ -51,7 +57,7 @@ private actor PaymentReadFixture {
                 ? #"{"code":200,"map":{"data":[{"name":"示例北校区","value":"north"}]}}"#
                 : #"{"code":200,"map":{"data":[{"name":"示例北校区","value":"north"},{"name":"示例南校区","value":"south"}]}}"#
         }
-        return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: [:])!)
+        return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!)
     }
 }
 
@@ -95,7 +101,7 @@ private actor PaymentReadFixture {
             }
         }
 
-        for failure in [PaymentReadFixture.Failure.http401, .business401] {
+        for failure in [PaymentReadFixture.Failure.http401, .business401, .loginRedirect] {
             let fixture = PaymentReadFixture(failure)
             let stale = token("stale"), renewed = token("renewed")
             await seed(stale)
@@ -125,16 +131,18 @@ private actor PaymentReadFixture {
               "ecard stops with a retryable error after one unsuccessful automatic renewal")
         deniedModel.stopQueries()
 
-        let offline = PaymentReadFixture(.http500)
-        await seed(token("stale"))
-        var offlineRenewals = 0
-        let offlineModel = EcardPaymentModel(pendingStore: journal, clientFactory: { value, _, _ in
-            EcardClient(token: value, transport: { await offline.reply($0, token: value) })
-        }, bridgeFactory: { offlineRenewals += 1; return bridge(token("renewed")) })
-        offlineModel.start(account: "fixture-payment-recovery")
-        await settle(offlineModel)
-        check(offlineRenewals == 0 && offlineModel.errorText != nil, "ecard server errors do not trigger authentication")
-        offlineModel.stopQueries()
+        for failure in [PaymentReadFixture.Failure.http500, .http403, .unrelatedRedirect] {
+            let offline = PaymentReadFixture(failure)
+            await seed(token("stale"))
+            var offlineRenewals = 0
+            let offlineModel = EcardPaymentModel(pendingStore: journal, clientFactory: { value, _, _ in
+                EcardClient(token: value, transport: { await offline.reply($0, token: value) })
+            }, bridgeFactory: { offlineRenewals += 1; return bridge(token("renewed")) })
+            offlineModel.start(account: "fixture-payment-recovery")
+            await settle(offlineModel)
+            check(offlineRenewals == 0 && offlineModel.errorText != nil, "ecard non-authentication response \(failure) does not trigger authentication")
+            offlineModel.stopQueries()
+        }
 
         for singleCampus in [false, true] {
             let later = PaymentReadFixture(singleCampus: singleCampus)

@@ -590,7 +590,8 @@ final class EcardClient {
         // A gateway may return JSON with code=500 after forwarding a payment.
         // Preserve its HTTP failure so recharge can reconcile the existing order.
         guard let http = resp as? HTTPURLResponse else { throw EcardError.http(-1) }
-        if [301, 302, 303, 307, 308, 401, 403].contains(http.statusCode) {
+        if http.statusCode == 401 ||
+            ([301, 302, 303, 307, 308].contains(http.statusCode) && Self.isLoginRedirect(http, from: req.url)) {
             throw EcardError.authenticationRequired
         }
         guard (200..<300).contains(http.statusCode) else { throw EcardError.http(http.statusCode) }
@@ -606,6 +607,25 @@ final class EcardClient {
             throw EcardError.decoding(Self.responseDescription(req, http: http, data: data, error: error))
         } catch {
             throw EcardError.decoding("\(Self.operationName(req))：无法读取接口响应")
+        }
+    }
+
+    /// Classify a login redirect without following it or forwarding credentials.
+    /// Other redirects and forbidden responses retain their original HTTP error.
+    private static func isLoginRedirect(_ response: HTTPURLResponse, from source: URL?) -> Bool {
+        guard let source, let location = response.value(forHTTPHeaderField: "Location"),
+              let url = URL(string: location, relativeTo: source)?.absoluteURL,
+              url.user == nil, url.password == nil, url.fragment == nil else { return false }
+        switch url.scheme?.lowercased() {
+        case "https": guard url.port == nil || url.port == 443 else { return false }
+        case "http": guard url.port == nil || url.port == 80 else { return false }
+        default: return false
+        }
+        switch (url.host?.lowercased(), url.path) {
+        case ("ecard.ccsut.cn", "/plat/login"),
+             ("auth.ccsut.cn", "/backstage/cas/login"),
+             ("zts.ccsut.cn", "/passport/v1/public/casLogin"): return true
+        default: return false
         }
     }
 
