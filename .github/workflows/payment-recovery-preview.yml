@@ -15,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build simulator app
+        id: build
         run: |
           set -o pipefail
           xcodebuild build -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug \
@@ -33,6 +34,7 @@ jobs:
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/recovery-tests.log"
       - name: Capture light and dark recovery states
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           set -e
           for appearance in light dark; do

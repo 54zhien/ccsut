@@ -125,13 +125,13 @@ struct EcardPaymentView: View {
                 .buttonStyle(.borderedProminent).controlSize(.large)
                 .disabled(model.isStarting || model.isSubmitting || model.isChecking)
                 .accessibilityIdentifier("payment-recovery-retry")
-            Button("核实原订单") { showingRecoveryHelp = true }
-                .frame(minHeight: 44)
-                .accessibilityIdentifier("payment-recovery-help")
+            Button { showingRecoveryHelp = true } label: {
+                Text("核实原订单").frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("payment-recovery-help")
         }
         .padding(24).frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
-        .accessibilityIdentifier("payment-recovery-card")
     }
 
     private var recoveryHelp: some View {

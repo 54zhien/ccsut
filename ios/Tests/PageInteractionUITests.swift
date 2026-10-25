@@ -168,7 +168,10 @@ final class PageInteractionUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
             retry.tap()
             XCTAssertTrue(retry.exists, "Retry must not dismiss an unresolved recovery state")
-            app.buttons["payment-recovery-help"].tap()
+            let help = app.buttons["payment-recovery-help"]
+            XCTAssertGreaterThanOrEqual(help.frame.height, 44)
+            XCTAssertTrue(help.isHittable)
+            help.tap()
             let close = app.buttons["payment-recovery-close"]
             XCTAssertTrue(close.waitForExistence(timeout: 5))
             XCTAssertEqual(app.textFields.count, 0, "Phase one must not accept arbitrary order IDs")
