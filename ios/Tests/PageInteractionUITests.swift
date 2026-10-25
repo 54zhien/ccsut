@@ -502,20 +502,21 @@ final class PageInteractionUITests: XCTestCase {
             } else if page == "campus-travel" {
                 XCTAssertTrue(app.staticTexts["示例区县"].waitForExistence(timeout: 8))
             }
-            let restingY = anchor.frame.minY
             let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
+            XCTAssertTrue(observation.waitForExistence(timeout: 5))
+            let restingInset = nativeRefreshValue(observation.label, "adjustedTop")
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
             start.press(forDuration: 0.1, thenDragTo: end)
             XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label CONTAINS 'entered=1; completed=0'"), evaluatedWith: observation)], timeout: 5), .completed, page)
-            XCTAssertGreaterThan(anchor.frame.minY - restingY, 40, "\(page): retain the native refresh region until completion")
+            assertNativeHeldRefresh(observation.label, restingInset: restingInset, page: page)
             let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = "\(page)-held-refresh"
             screenshot.lifetime = .keepAlways
             add(screenshot)
             app.buttons["complete-controlled-refresh"].tap()
             XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label CONTAINS 'entered=1; completed=1'"), evaluatedWith: observation)], timeout: 8), .completed, page)
-            XCTAssertEqual(anchor.frame.minY, restingY, accuracy: 3, "\(page): return to the original position")
+            assertNativeRefreshReturned(observation, restingInset: restingInset)
             app.terminate()
         }
     }
@@ -533,7 +534,7 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(observation.waitForExistence(timeout: 3))
         let topContent = app.staticTexts["学业概览"]
         XCTAssertTrue(topContent.exists)
-        let restingY = topContent.frame.minY
+        let restingInset = nativeRefreshValue(observation.label, "adjustedTop")
         print("[RefreshFeedback] \(mode) before-pull: \(observation.label)")
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
@@ -545,8 +546,7 @@ final class PageInteractionUITests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
         print("[RefreshFeedback] \(mode) after-release: \(observation.label)")
-        XCTAssertGreaterThan(topContent.frame.minY - restingY, 40,
-                             "Like the timetable, keep the content below a visible refresh region until loading completes")
+        assertNativeHeldRefresh(observation.label, restingInset: restingInset, page: "scores")
         let completion = app.buttons["complete-controlled-refresh"]
         XCTAssertTrue(completion.isHittable)
         completion.tap()
@@ -557,6 +557,37 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(report.contains("entered=1; completed=1"), "The refresh callback must finish exactly once: \(report)")
         XCTAssertTrue(report.contains("refreshingSeen=true"), "The native refresh control must become active: \(report)")
         XCTAssertTrue(report.contains("prematurelyStopped=false"), "The native refresh control must remain active until the awaited load finishes: \(report)")
+        assertNativeRefreshReturned(observation, restingInset: restingInset)
+    }
+
+    // SwiftUI AX frames can remain unchanged while UIKit adjusts the refresh
+    // inset. Verify the native held space and actual indicator placement, and
+    // retain a screen screenshot for the visible result.
+    private func nativeRefreshValue(_ report: String, _ key: String) -> Double {
+        let prefix = key + "="
+        guard let field = report.components(separatedBy: ";")
+            .map({ $0.trimmingCharacters(in: .whitespaces) })
+            .first(where: { $0.hasPrefix(prefix) }) else { return .nan }
+        return Double(field.dropFirst(prefix.count)) ?? .nan
+    }
+
+    private func assertNativeHeldRefresh(_ report: String, restingInset: Double, page: String) {
+        XCTAssertGreaterThan(nativeRefreshValue(report, "adjustedTop") - restingInset, 40, "\(page): reserve the native refresh region")
+        XCTAssertGreaterThan(-nativeRefreshValue(report, "offsetY") - restingInset, 40, "\(page): content stays below the refresh region")
+        XCTAssertGreaterThan(nativeRefreshValue(report, "controlH"), 0, "\(page): indicator has visible height")
+        XCTAssertGreaterThanOrEqual(nativeRefreshValue(report, "controlY") + 1,
+                                   nativeRefreshValue(report, "scrollY") + restingInset,
+                                   "\(page): indicator is below the page header")
+    }
+
+    private func assertNativeRefreshReturned(_ observation: XCUIElement, restingInset: Double) {
+        let restored = NSPredicate { _, _ in
+            let report = observation.label
+            return abs(self.nativeRefreshValue(report, "adjustedTop") - restingInset) < 1 &&
+                abs(self.nativeRefreshValue(report, "offsetY") + restingInset) < 1
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: restored, evaluatedWith: observation)], timeout: 5), .completed,
+                       "Return to the resting native inset and offset after completion")
     }
 
     func testAcademicTitlesAndTermStripsRemainStableWhenPinned() {

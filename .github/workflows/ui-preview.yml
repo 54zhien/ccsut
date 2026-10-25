@@ -15,7 +15,7 @@ on:
       test_scope:
         description: 'Interaction checks to run (focused checks preserve full-suite failure evidence)'
         type: choice
-        options: [all, refresh-and-search, refresh-animation, refresh-campus]
+        options: [all, refresh-and-search, refresh-animation, refresh-campus, refresh-proof]
         default: all
 
 jobs:
@@ -44,7 +44,7 @@ jobs:
         if: failure()
         run: xcrun simctl list devices > "$RUNNER_TEMP/ui-screenshots/simulator-state.txt"
       - name: Verify initial and selected week positioning
-        if: ${{ inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' }}
+        if: ${{ inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' }}
         run: |
           set -o pipefail
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
@@ -102,6 +102,14 @@ jobs:
             TEST_SELECTION=(
               -only-testing:CCSUTUITests/PageInteractionUITests/testCampusPagesRetainTimetableRefreshAnimation
               -only-testing:CCSUTUITests/PageInteractionUITests/testCampusEntryAndRecords
+            )
+          fi
+          if [ "$TEST_SCOPE" = 'refresh-proof' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testScoreRefreshControlRemainsActiveDuringSlowLoad
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusPagesRetainTimetableRefreshAnimation
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicTitlesAndTermStripsRemainStableWhenPinned
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicDetailSupportsContentSwipeBack
             )
           fi
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
