@@ -208,6 +208,23 @@ private actor ModelServer {
             model.stopQueries()
         }
 
+        do {
+            let journal = store("known-pending-missing"), epoch = Epoch(), server = ModelServer()
+            try journal.save(receipt("known-order"), account: "fixture-A")
+            let model = make(server, journal, epoch); await ready(model)
+            let file = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("known-pending-missing"), includingPropertiesForKeys: nil).first!
+            try FileManager.default.removeItem(at: file)
+            epoch.value += 1
+            model.start(account: "fixture-A", force: true)
+            _ = await waitUntil { !model.isStarting }
+            check(model.recoveryIssue == .missingRecord && confirm(model) == nil && !model.canPay,
+                  "known pending cannot disappear across a replacement session")
+            let restarted = store("known-pending-missing")
+            do { _ = try restarted.load(account: "fixture-A"); check(false, "detected loss of known pending remains blocked after restart") }
+            catch { check(error as? EcardReceiptRecoveryError == .missingRecord, "detected loss of known pending remains blocked after restart") }
+            model.stopQueries()
+        }
+
         // Restart while the server has received the debit, before its response.
         do {
             let gate = Gate(), journal = store("restart"), epoch = Epoch()
