@@ -471,13 +471,16 @@ actor CampusClient: CampusReading {
     private static func trustedURL(_ url: URL) -> URL? {
         guard ["ehall.ccsut.cn", "auth.ccsut.cn"].contains(url.host?.lowercased() ?? ""),
               url.user == nil, url.password == nil,
-              url.fragment == nil,
               ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { return nil }
         let isHTTP = url.scheme?.lowercased() == "http"
         guard url.port == nil || url.port == (isHTTP ? 80 : 443) else { return nil }
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         components?.scheme = "https"
         components?.host = url.host?.lowercased()
+        // Official CAS completes with a redirect to a SPA route (#/leaveList,
+        // #/stu-leave-list, etc.). Fragments are client-side only: validate the
+        // host/authority above, then omit the fragment from the HTTP request.
+        components?.fragment = nil
         if isHTTP { components?.port = nil }
         return components?.url
     }

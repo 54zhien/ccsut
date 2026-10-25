@@ -709,6 +709,35 @@ struct CampusAPITests {
 
     @MainActor
     static func cookieTransactionRegressions(_ check: @MainActor (Bool, String) -> Void) async {
+        // Shape observed against the live school service: CAS succeeds, then
+        // the portal redirects to its SPA route with a client-side fragment.
+        for kind in ["leave", "departure", "returning"] {
+            let landing = kind == "leave" ? "/backstage/leaveadmin/page/mobile/" : "/backstage/returnschool/page/mobile/"
+            let route = kind == "leave" ? "leaveList" : kind == "departure" ? "stu-leave-list" : "return-list-stu"
+            let credentials = FixtureCredentials()
+            let transport = FixtureCampusTransport { _, index in
+                switch index {
+                case 1: return (200, ["Set-Cookie":"YZSESSIONID2=fixture-portal; Path=/"], #"{"errcode":2001}"#)
+                case 2: return (302, ["Location":"https://auth.ccsut.cn/backstage/cas/login?service=fixture"], "")
+                case 3: return (302, ["Location":"https://ehall.ccsut.cn/backstage/cas-proxy/app/redirect?ticket=fixture"], "")
+                case 4: return (302, ["Location":"/backstage/cas-proxy/app/redirect?serverName=fixture"], "")
+                case 5: return (302, ["Location":landing + "#/" + route], "")
+                case 6: return (200, [:], "<!doctype html><html>official SPA landing</html>")
+                case 7: return (200, [:], identity)
+                default: return (200, [:], kind == "leave" ? emptyPage : #"{"code":2000,"data":[]}"#)
+                }
+            }
+            do {
+                let client = CampusClient(account:"fixture-account",credentials:credentials,transport:transport)
+                if kind == "leave" { _ = try await client.leaveRecords() }
+                else { _ = try await client.travelRecords(kind:kind == "departure" ? .departure : .returning) }
+                let sent = await transport.requests
+                check(sent.count == 8 && sent[5].url?.path == URL(string:"https://ehall.ccsut.cn" + landing)!.path &&
+                      sent.allSatisfy { $0.url?.fragment == nil } && credentials.accepted > 0,
+                      "live-shaped \(kind) CAS redirect strips SPA fragment and validates before publishing cookies")
+            } catch { check(false,"live-shaped \(kind) CAS redirect reaches verified business data") }
+        }
+
         // A mismatched identity, invalid token, or failed follow-up must never
         // publish the cookies returned before the rejection.
         for rejection in ["wrong-account", "invalid-token", "failed-validation", "transport-failure"] {
@@ -825,7 +854,10 @@ struct CampusAPITests {
             ("http://auth.ccsut.cn/backstage/cas/log%69n?service=a%2Fb%2Bc&x=%252f", "https://auth.ccsut.cn/backstage/cas/log%69n?service=a%2Fb%2Bc&x=%252f"),
             ("http://auth.ccsut.cn:80/login", "https://auth.ccsut.cn/login"),
             ("https://auth.ccsut.cn/login", "https://auth.ccsut.cn/login"),
-            ("https://auth.ccsut.cn:443/login", "https://auth.ccsut.cn:443/login")
+            ("https://auth.ccsut.cn:443/login", "https://auth.ccsut.cn:443/login"),
+            ("https://auth.ccsut.cn/login#fragment", "https://auth.ccsut.cn/login"),
+            ("https://ehall.ccsut.cn/backstage/leaveadmin/page/mobile/#/leaveList", "https://ehall.ccsut.cn/backstage/leaveadmin/page/mobile/"),
+            ("http://ehall.ccsut.cn:80/backstage/returnschool/page/mobile/?value=a%23b#/stu-leave-list", "https://ehall.ccsut.cn/backstage/returnschool/page/mobile/?value=a%23b")
         ] {
             let transport = FixtureCampusTransport { _, index in
                 switch index {
@@ -845,8 +877,8 @@ struct CampusAPITests {
         }
 
         for destination in ["http://auth.ccsut.cn:443/login", "http://auth.ccsut.cn:81/login", "https://auth.ccsut.cn:80/login",
-                            "https://auth.ccsut.cn:444/login", "https://auth.ccsut.cn/login#fragment", "https://user:secret@auth.ccsut.cn/login",
-                            "https://outside.invalid/login"] {
+                            "https://auth.ccsut.cn:444/login", "https://user:secret@auth.ccsut.cn/login#fragment",
+                            "https://outside.invalid/login#fragment"] {
             let transport = FixtureCampusTransport { _, index in
                 index == 1 ? (200, [:], "null") : (302, ["Location": destination], "")
             }
