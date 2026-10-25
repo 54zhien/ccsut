@@ -51,17 +51,7 @@ jobs:
           "$RUNNER_TEMP/ecard-payment-model"
       - name: Run original ecard callback and payment regressions
         if: always()
-        run: |
-          set -e
-          xcrun swiftc -parse-as-library \
-            ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift \
-            ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift \
-            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift \
-            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift \
-            ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift \
-            ios/Tests/Support/EcardWebKitDouble.swift ios/Tests/EcardRegressionTests.swift \
-            -o "$RUNNER_TEMP/ecard-original"
-          "$RUNNER_TEMP/ecard-original"
+        run: python3 ios/Tests/run-ecard-tests.py
       - name: Run native ecard SSO protocol regressions
         if: always()
         run: |

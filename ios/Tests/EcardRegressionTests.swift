@@ -116,19 +116,22 @@ final class EcardProtocol: URLProtocol {
             } catch { check(false, "\(failure) after payment submission must not become retryable error: \(error)") }
         }
         var payments = 0
+        var rejectionQueries = 0
         EcardProtocol.respond = { request in
+            if request.url!.path.contains("getpayinfo") {
+                rejectionQueries += 1
+                return (200, #"{"code":200,"order":{"orderid":"fixture-order","status":0}}"#)
+            }
             let form = EcardProtocol.form(request)
             if form["paystep"] == "0" { return (200, ready) }
             payments += 1
             return (200, #"{"code":200,"success":false,"msg":"insufficient balance"}"#)
         }
         do {
-            _ = try await client.rechargeElectricity(amount: 10, context: MeterContext())
-            check(false, "explicit payment rejection remains an error")
-        } catch EcardError.business(let code, let message) {
-            check(payments == 1 && code == 200 && message == "insufficient balance",
-                  "explicit payment rejection remains an error")
-        } catch { check(false, "explicit payment rejection keeps its business reason: \(error)") }
+            let result = try await client.rechargeElectricity(amount: 10, context: MeterContext())
+            check(!result.isCompleted && result.orderID == "fixture-order" && payments == 1 && rejectionQueries == 1,
+                  "business rejection after dispatch retains and reconciles the original order without another debit")
+        } catch { check(false, "post-dispatch business rejection must preserve the uncertain order: \(error)") }
 
         EcardProtocol.respond = { request in
             let form = EcardProtocol.form(request)
@@ -161,8 +164,8 @@ final class EcardProtocol: URLProtocol {
             do {
                 _ = try await retryLogin.fetchToken(forAccount: "student-B")
                 check(false, "attempt \(attempt) without a token must time out")
-            } catch EcardError.noToken {
-                check(true, "attempt \(attempt) finishes at its timeout")
+            } catch EcardError.authenticationTimeout(.starting) {
+                check(true, "attempt \(attempt) finishes with its actual authentication stage timeout")
             } catch { check(false, "attempt \(attempt) timeout reason: \(error)") }
         }
         let (cancelLogin, cancelView) = bridge()
