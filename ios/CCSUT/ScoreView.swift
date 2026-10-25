@@ -29,71 +29,50 @@ struct ScoreView: View {
 #endif
 
     var body: some View {
-        ScrollViewReader { proxy in
-            GeometryReader { viewport in
-                ScrollView {
-                    VStack(spacing: 0) {
-                        if isLoading && items.isEmpty {
-                            ProgressView("加载成绩…")
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else if errorText != nil, items.isEmpty {
-                            ContentUnavailableView {
-                                Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
-                            } description: {
-                                EmptyView()
-                            } actions: {
-                                Button("重试") { Task { await load(force: true) } }
-                            }
-                        } else if items.isEmpty {
-                            ContentUnavailableView {
-                                Label("暂无成绩", systemImage: "doc.text.magnifyingglass")
-                            } description: {
-                                Text("这学期还没出成绩，或者还没完成评教。")
-                            }
+        PageScrollSurface(refresh: { await load(force: true) }) { viewport, proxy in
+            VStack(spacing: 0) {
+                if isLoading && items.isEmpty {
+                    ProgressView("加载成绩…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if errorText != nil, items.isEmpty {
+                    ContentUnavailableView {
+                        Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
+                    } description: {
+                        EmptyView()
+                    } actions: {
+                        Button("重试") { Task { await load(force: true) } }
+                    }
+                } else if items.isEmpty {
+                    ContentUnavailableView {
+                        Label("暂无成绩", systemImage: "doc.text.magnifyingglass")
+                    } description: {
+                        Text("这学期还没出成绩，或者还没完成评教。")
+                    }
+                } else {
+                    if let errorText {
+                        PageStatusNotice(message: errorText) { Task { await load(force: true) } }
+                    }
+                    content { term in
+                        if reduceMotion {
+                            proxy.scrollTo(term, anchor: .top)
                         } else {
-                            if let errorText {
-                                PageStatusNotice(message: errorText) { Task { await load(force: true) } }
-                            }
-                            content { term in
-                                if reduceMotion {
-                                    proxy.scrollTo(term, anchor: .top)
-                                } else {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        proxy.scrollTo(term, anchor: .top)
-                                    }
-                                }
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(term, anchor: .top)
                             }
                         }
                     }
-                    .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
                 }
-                .scrollEdgeEffectStyle(.soft, for: .top)
-                #if DEBUG
-                .scrollEdgeEffectHidden(InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh-without-scroll-edge"), for: .top)
-                .modifier(ScoreRefreshDiagnosticPlacement(outer: false, action: { await load(force: true) }))
-                #else
-                .pageRefreshable { await load(force: true) }
-                #endif
-                .coordinateSpace(name: "academic-scroll")
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemGroupedBackground))
-            #if DEBUG
-            .modifier(ScoreChromeDiagnosticPlacement(inner: true))
-            #else
-            .academicDetailChrome(title: "成绩单")
-            #endif
-#if DEBUG
-            .modifier(ScoreRefreshDiagnosticPlacement(outer: true, action: { await load(force: true) }))
-            .overlay(alignment: .topTrailing) {
-                PageRefreshPublicationDiagnostics(count: previewPublicationCount)
-            }
-#endif
-            .task { if items.isEmpty { await load() } }
+            .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.height : 0)
         }
-        #if DEBUG
-        .modifier(ScoreChromeDiagnosticPlacement(inner: false))
-        #endif
+        .coordinateSpace(name: "academic-scroll")
+        .academicDetailChrome(title: "成绩单")
+#if DEBUG
+        .overlay(alignment: .topTrailing) {
+            PageRefreshPublicationDiagnostics(count: previewPublicationCount)
+        }
+#endif
+        .task { if items.isEmpty { await load() } }
     }
 
     // MARK: - 内容
@@ -310,27 +289,6 @@ struct ScoreView: View {
 }
 
 // MARK: - 单行
-
-#if DEBUG
-private struct ScoreChromeDiagnosticPlacement: ViewModifier {
-    let inner: Bool
-    @ViewBuilder func body(content: Content) -> some View {
-        let outside = InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh-chrome-outside-reader")
-        if inner != outside { content.academicDetailChrome(title: "成绩单") }
-        else { content }
-    }
-}
-
-private struct ScoreRefreshDiagnosticPlacement: ViewModifier {
-    let outer: Bool
-    let action: @MainActor () async -> Void
-    @ViewBuilder func body(content: Content) -> some View {
-        let useOuter = InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh-outer-attachment")
-        if outer == useOuter { content.pageRefreshable(action: action) }
-        else { content }
-    }
-}
-#endif
 
 private struct ScoreRow: View {
     let item: ScoreItem

@@ -163,6 +163,38 @@ final class PageLoadGate {
     }
 }
 
+/// The timetable's page hierarchy: viewport -> reader -> vertical scroll view.
+/// Keep refresh, scroll geometry and the scroll view in one stable owner; page
+/// chrome and loading tasks belong outside this surface.
+struct PageScrollSurface<Content: View>: View {
+    let refresh: @MainActor () async -> Void
+    var onOffsetChange: (CGFloat) -> Void = { _ in }
+    @ViewBuilder var content: (CGSize, ScrollViewProxy) -> Content
+    @State private var offset: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { viewport in
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    content(viewport.size, proxy)
+                }
+                .scrollIndicators(.hidden)
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                .scrollBounceBehavior(.always, axes: .vertical)
+                .pageRefreshable(action: refresh)
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
+                } action: { _, value in
+                    offset = value
+                    onOffsetChange(value)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .background(Color(.systemGroupedBackground))
+    }
+}
+
 extension View {
     /// Apply directly to the page's vertical ScrollView. SwiftUI owns the
     /// refresh lifecycle, including empty/loading content and return animation.
