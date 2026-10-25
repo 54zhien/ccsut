@@ -52,6 +52,7 @@ final class EcardPaymentModel {
     @ObservationIgnored private var loginTask: Task<Void, Never>?
     @ObservationIgnored private var loginPromptTask: Task<Void, Never>?
     @ObservationIgnored private var pendingLogin: LoginRequest?
+    @ObservationIgnored private var canRecoverReadSession = true
     @ObservationIgnored private let makeClient: @MainActor (String, UInt64, WKWebsiteDataStore?) -> EcardClient
     @ObservationIgnored private let makeBridge: @MainActor () -> EcardTokenBridge
 
@@ -92,6 +93,7 @@ final class EcardPaymentModel {
             else if let room, detail == nil { selectRoom(room) }
             return
         }
+        canRecoverReadSession = true
         stopQueries()
         EcardTokenBridge.cancelPreparation()
         self.account = account
@@ -188,7 +190,7 @@ final class EcardPaymentModel {
                 else if loadedCampuses.isEmpty { errorText = "暂无可选校区，请稍后重新加载" }
             } catch {
                 if current == revision, CookieJar.generation == generation, !Task.isCancelled {
-                    handleLoadError(error)
+                    handleLoadError(error, recoverReadSession: true)
                     loginRequest = nil
                 }
             }
@@ -234,16 +236,31 @@ final class EcardPaymentModel {
         })
     }
 
-    private func handleLoadError(_ error: Error) {
+    private func handleLoadError(_ error: Error, recoverReadSession: Bool = false) {
         errorText = error.localizedDescription
+        var authenticationRejected = false
         if let error = error as? EcardError {
             switch error {
             case .authenticationRequired, .sessionSynchronization, .noToken, .business(401, _):
+                switch error {
+                case .authenticationRequired, .business(401, _): authenticationRejected = true
+                default: break
+                }
                 EcardTokenBridge.clearCachedToken()
                 client = nil
                 fee = nil
             default: break
             }
+        }
+        // Only retry loading data. A failed payment may already have reached
+        // the server, so submit/checkOrder keep their existing result handling.
+        if recoverReadSession, authenticationRejected, canRecoverReadSession,
+           !isSubmitting, let account {
+            isStarting = false
+            start(account: account, force: true)
+            // start() resets the budget for an explicit reload; this automatic
+            // reload consumes it before its new tasks can run on MainActor.
+            canRecoverReadSession = false
         }
     }
 
@@ -310,7 +327,7 @@ final class EcardPaymentModel {
                 guard let client else { return }
                 try await action(client)
             } catch {
-                if current == revision, !Task.isCancelled { handleLoadError(error) }
+                if current == revision, !Task.isCancelled { handleLoadError(error, recoverReadSession: true) }
             }
         }
     }
