@@ -533,9 +533,10 @@ actor EcardSSOClient {
               let cas = servers.first(where: { ($0["authType"] as? String) == "auth/cas" }),
               let loginDomain = cas["loginDomain"] as? String, isOpaque(loginDomain),
               let loginText = cas["loginUrl"] as? String,
-              let loginURL = URL(string: loginText, relativeTo: URL(string: "https://\(ztsHost)")!)?.absoluteURL else {
+              let rawLoginURL = URL(string: loginText, relativeTo: URL(string: "https://\(ztsHost)")!)?.absoluteURL else {
             throw EcardSSOError.invalidResponse
         }
+        let loginURL = try normalizedTransportURL(rawLoginURL)
         try validateURL(loginURL)
         guard loginURL.host?.lowercased() == ztsHost,
               loginURL.path == "/passport/v1/public/casLogin",
@@ -794,11 +795,29 @@ actor EcardSSOClient {
 
     private static func resolve(_ location: String, relativeTo base: URL) throws -> URL {
         guard !location.contains("\r"), !location.contains("\n"),
-              let destination = URL(string: location, relativeTo: base)?.absoluteURL,
-              isAllowedOrigin(destination) else {
+              let destination = URL(string: location, relativeTo: base)?.absoluteURL else {
             throw EcardSSOError.untrustedRedirect
         }
-        return destination
+        return try normalizedTransportURL(destination)
+    }
+
+    /// Normalize only an outer transport address. Nested service/targetUrl values
+    /// retain their original bytes and must still pass the existing strict checks.
+    private static func normalizedTransportURL(_ url: URL) throws -> URL {
+        if isAllowedOrigin(url) { return url }
+        guard url.scheme?.lowercased() == "http", let host = url.host?.lowercased(),
+              [ecardHost, ztsHost, authHost].contains(host),
+              url.user == nil, url.password == nil, url.fragment == nil,
+              url.port == nil || url.port == 80,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw EcardSSOError.untrustedRedirect
+        }
+        components.scheme = "https"
+        components.port = nil
+        guard let upgraded = components.url, isAllowedOrigin(upgraded) else {
+            throw EcardSSOError.untrustedRedirect
+        }
+        return upgraded
     }
 
     private static func query(_ url: URL) -> [String: String] {

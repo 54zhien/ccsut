@@ -79,9 +79,9 @@ final class APIClient {
         let deadline = Date().addingTimeInterval(timeout)
         for _ in 0..<8 {
             try Task.checkCancellation()
-            guard let url = req.url, url.scheme == "https",
-                  let host = url.host, host == "ccsut.cn" || host.hasSuffix(".ccsut.cn")
+            guard let rawURL = req.url, let url = Self.transportURL(rawURL)
             else { throw APIError.notLoggedIn }
+            req.url = url
             if !allowAuthenticationRedirects, Self.isAuthenticationURL(url) { throw APIError.notLoggedIn }
             let remaining = deadline.timeIntervalSinceNow
             guard remaining > 0 else { throw URLError(.timedOut) }
@@ -122,6 +122,22 @@ final class APIClient {
             return (data, http)
         }
         throw URLError(.httpTooManyRedirects)
+    }
+
+    /// Upgrade only the known academic/CAS deployment. Never send credentials over HTTP.
+    /// Keep the encoded query intact: CAS tickets and service values are opaque here.
+    private static func transportURL(_ url: URL) -> URL? {
+        guard let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased(),
+              host == "ccsut.cn" || host.hasSuffix(".ccsut.cn"),
+              url.user == nil, url.password == nil, url.fragment == nil else { return nil }
+        if scheme == "https" { return url.port == nil || url.port == 443 ? url : nil }
+        guard scheme == "http", ["tls.ccsut.cn", "auth.ccsut.cn"].contains(host),
+              url.port == nil || url.port == 80,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.scheme = "https"
+        components.host = host
+        components.port = nil
+        return components.url
     }
 
     static func isAuthenticationURL(_ url: URL) -> Bool {

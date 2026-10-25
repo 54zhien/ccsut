@@ -415,7 +415,10 @@ struct EcardSSOClientTests {
                       "HTTP outer SSO redirects and config upgrade safely (port \(String(describing: port)))")
                 let exchange = outcome.requests.first { $0.url?.path == "/berserker-auth/oauth/token" }
                 let form = String(data: exchange?.httpBody ?? Data(), encoding: .utf8) ?? ""
+                let services = outcome.requests.filter { $0.url?.host == "auth.ccsut.cn" }
+                    .compactMap { URLComponents(url: $0.url!, resolvingAgainstBaseURL: false)?.percentEncodedQuery }
                 check(form.contains("username=fixture%2Bticket%26part%3D2")
+                      && services == [gatewayCASLocation.percentEncodedQuery!, ecardCASLocation.percentEncodedQuery!]
                       && outcome.requests.filter { $0.url?.host == "auth.ccsut.cn" }.allSatisfy {
                           $0.value(forHTTPHeaderField: "Authorization") == nil && $0.value(forHTTPHeaderField: "synjones-auth") == nil
                       }, "HTTP upgrade preserves ticket bytes and keeps token authorization off CAS")
@@ -448,6 +451,19 @@ struct EcardSSOClientTests {
                       "HTTP SSO rejection boundary \(index) sends no further request or cookie commit")
             } catch { check(false, "HTTP SSO rejection boundary \(index): wrong error") }
         }
+
+        let httpLoopResponse = StubResponse(302, headers: ["Location":
+            "http://ecard.ccsut.cn:80/berserker-auth/cas/login/wisedu?targetUrl=https%3A%2F%2Fecard.ccsut.cn%2Fplat%3Fname%3DloginTransit"],
+            path: "/berserker-auth/cas/login/wisedu")
+        let httpLoop = ScriptedTransport(Array(repeating: httpLoopResponse, count: 20))
+        do {
+            _ = try await EcardSSOClient(account: account, credentials: SyntheticCredentials(), transport: httpLoop, timeout: 2).fetchPaymentToken()
+            check(false, "HTTP normalization retains SSO loop detection")
+        } catch let error as EcardSSOError {
+            let outcome = await httpLoop.outcome()
+            check(error == .serviceUnavailable && outcome.requestCount <= 2
+                  && outcome.requests.allSatisfy { $0.url?.scheme == "https" }, "HTTP normalization retains SSO loop detection")
+        } catch { check(false, "HTTP normalization retains SSO loop detection with bounded error") }
 
         let badRedirectTransport = ScriptedTransport([
             StubResponse(302, headers: ["Location": "https://attacker.invalid/collect?ticket=fixture",

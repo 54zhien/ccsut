@@ -532,11 +532,30 @@ struct SessionRegressionTests {
         }
         CookieJar.shared = [cookie("TGC", "fixture", domain: "auth.ccsut.cn")]
         SchoolProtocol.requestCount = 0
-        SchoolProtocol.response = { request in (302, request.url!, ["Location":"http://auth.ccsut.cn/backstage/cas/login"], "") }
+        SchoolProtocol.response = { request in (302, request.url!, ["Location":"http://AUTH.ccsut.cn/backstage/cas/login"], "") }
         do {
             _ = try await api.html("/admin/business")
             check(false, "HTTP upgrade does not enable authentication redirects for business calls")
         } catch { check(SchoolProtocol.requestCount == 1, "HTTP upgrade does not enable authentication redirects for business calls") }
+
+        SchoolProtocol.requestCount = 0
+        SchoolProtocol.response = { request in (302, request.url!, ["Location":"http://tls.ccsut.cn:80/loop"], "") }
+        do { _ = try await api.html("/loop"); check(false, "HTTP normalization retains academic redirect limit") }
+        catch { check((error as? URLError)?.code == .httpTooManyRedirects && SchoolProtocol.requestCount == 8,
+                      "HTTP normalization retains academic redirect limit") }
+
+        CookieJar.shared = [cookie("TGC", "before-switch", domain: "auth.ccsut.cn")]
+        SchoolProtocol.requestCount = 0
+        SchoolProtocol.response = { request in
+            CookieJar.shared = []
+            return (302, request.url!, ["Location":"http://auth.ccsut.cn/backstage/cas/login"], "")
+        }
+        do {
+            _ = try await api.response(for: URLRequest(url: URL(string: "https://tls.ccsut.cn/admin/caslogin")!),
+                                       allowAuthenticationRedirects: true)
+            check(false, "account change aborts before upgraded HTTP hop")
+        } catch is CancellationError { check(SchoolProtocol.requestCount == 1, "account change aborts before upgraded HTTP hop") }
+        catch { check(false, "account change aborts upgraded HTTP hop with cancellation") }
 
         CookieJar.shared = [cookie("scoped", "yes", path: "/admin"), cookie("TGC", "private", domain: "auth.ccsut.cn")]
         check(CookieJar.header(for: URL(string: "https://tls.ccsut.cn/admin/courses")!) == "scoped=yes",
