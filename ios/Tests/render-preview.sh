@@ -2,13 +2,17 @@
 set -euo pipefail
 
 # A real simulator render of the shipping SwiftUI views, with DEBUG-only fixtures.
-DEVICE=$(xcrun simctl list devices available -j | python3 -c '
+if [ -n "${CCSUT_PREVIEW_DEVICE:-}" ]; then
+  DEVICE="$CCSUT_PREVIEW_DEVICE"
+else
+  DEVICE=$(xcrun simctl list devices available -j | python3 -c '
 import json,sys
 devices=[d for group in json.load(sys.stdin)["devices"].values() for d in group if "iPhone" in d["name"]]
 if not devices: raise SystemExit("No available iPhone simulator")
 devices.sort(key=lambda d: ("Pro" in d["name"], "Max" not in d["name"], d["name"]), reverse=True)
 print(devices[0]["udid"])
 ')
+fi
 if [ -n "${GITHUB_ENV:-}" ]; then echo "CCSUT_PREVIEW_DEVICE=$DEVICE" >> "$GITHUB_ENV"; fi
 APP="$RUNNER_TEMP/UIPreview/Build/Products/Debug-iphonesimulator/CCSUT.app"
 OUT="$RUNNER_TEMP/ui-screenshots"

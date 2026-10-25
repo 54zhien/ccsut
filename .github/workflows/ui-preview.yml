@@ -17,13 +17,30 @@ on:
         type: choice
         options: [all, refresh-and-search, refresh-navigation]
         default: all
+      test_environment:
+        description: 'Default stable simulator or the reported iPhone 15 Pro Max / iOS 27.2 environment'
+        type: choice
+        options: [stable, ios-27-2]
+        default: stable
 
 jobs:
   preview:
-    runs-on: macos-26
-    timeout-minutes: 30
+    runs-on: ${{ inputs.test_environment == 'ios-27-2' && 'xcode-27' || 'macos-26' }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare reported iOS 27.2 runtime
+        if: ${{ inputs.test_environment == 'ios-27-2' }}
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          sudo xcode-select --switch /Applications/Xcode_27.2.app
+          xcodebuild -version
+          xcodebuild -downloadPlatform iOS -buildVersion 27.2 -architectureVariant arm64
+          xcrun simctl list runtimes
+          DEVICE=$(xcrun simctl create 'CCSUT iPhone 15 Pro Max iOS 27.2' \
+            com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro-Max com.apple.CoreSimulator.SimRuntime.iOS-27-2)
+          echo "CCSUT_PREVIEW_DEVICE=$DEVICE" >> "$GITHUB_ENV"
       - name: Test timetable presentation
         run: |
           xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
