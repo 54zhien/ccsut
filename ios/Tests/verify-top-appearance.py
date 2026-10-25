@@ -22,7 +22,9 @@ for page in ("schedule", "academic", "campus", "scores"):
             medians = []
             for left, right in ((0.05, 0.09), (0.91, 0.95)):
                 region = image.crop((int(w * left), int(h * 0.04), int(w * right), int(h * 0.065)))
-                medians.append(statistics.median(max(pixel) for pixel in region.getdata()))
+                pixels = region.load()
+                medians.append(statistics.median(max(pixels[x, y])
+                    for y in range(region.height) for x in range(region.width)))
         passed = min(medians) >= 180 if mode == "light" else max(medians) <= 12
         results.append({"page": page, "mode": mode, "top_medians": medians, "passed": passed})
         print(f"{'PASS' if passed else 'FAIL'} {page} {mode}: top band {medians}")

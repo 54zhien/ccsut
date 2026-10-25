@@ -75,6 +75,59 @@ final class ScopedCampusCredentials: CampusSessionCredentials, @unchecked Sendab
     }
 }
 
+final class RotatingCASCookieCredentials: CampusSessionCredentials, @unchecked Sendable {
+    private let lock = NSLock()
+    private var revision: UInt64 = 1
+    private var cookies = [
+        HTTPCookie(properties: [.name: "TGC", .value: "old-tgc", .domain: ".ccsut.cn", .path: "/", .secure: "TRUE"])!,
+        HTTPCookie(properties: [.name: "ehall", .value: "old-session", .domain: "ehall.ccsut.cn", .path: "/", .secure: "TRUE"])!
+    ]
+    var generation: UInt64 { lock.lock(); defer { lock.unlock() }; return revision }
+
+    func replaceAccount() {
+        lock.lock(); defer { lock.unlock() }
+        revision += 1
+    }
+
+    func rotateTGC(to value: String) {
+        accept([HTTPCookie(properties: [.name: "TGC", .value: value, .domain: ".ccsut.cn", .path: "/", .secure: "TRUE"])!], generation: generation)
+    }
+
+    func scopedCookies(for url: URL, expectedGeneration: UInt64) throws -> [HTTPCookie] {
+        lock.lock(); defer { lock.unlock() }
+        guard expectedGeneration == revision else { throw CancellationError() }
+        let host = url.host?.lowercased() ?? ""
+        let path = url.path.isEmpty ? "/" : url.path
+        return cookies.filter { cookie in
+            let domain = cookie.domain.lowercased()
+            let normalized = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+            let domainMatches = host == normalized || (domain.hasPrefix(".") && host.hasSuffix("." + normalized))
+            let pathMatches = path == cookie.path || path.hasPrefix(cookie.path.hasSuffix("/") ? cookie.path : cookie.path + "/")
+            return domainMatches && pathMatches && (!cookie.isSecure || url.scheme == "https") &&
+                (cookie.expiresDate ?? .distantFuture) > Date()
+        }
+    }
+
+    func header(for url: URL, expectedGeneration: UInt64) throws -> String? {
+        let matched = try scopedCookies(for: url, expectedGeneration: expectedGeneration)
+        return matched.isEmpty ? nil : matched.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+    }
+
+    func accept(_ incoming: [HTTPCookie], generation: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        guard generation == revision else { return }
+        for cookie in incoming {
+            let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            cookies.removeAll {
+                $0.name == cookie.name &&
+                    $0.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")) == domain &&
+                    $0.path == cookie.path
+            }
+            if (cookie.expiresDate ?? .distantFuture) > Date() { cookies.append(cookie) }
+        }
+    }
+}
+
 actor CampusFixtureBarrier {
     private var blocked = false
     private var arrival: CheckedContinuation<Void, Never>?
@@ -113,6 +166,40 @@ struct CampusAPITests {
             print("\(condition ? "PASS" : "FAIL") \(name)")
             if !condition { failures += 1 }
         }
+        check(CampusOfficialNavigationPolicy.decision(
+            for: URL(string: "https://ehall.ccsut.cn/backstage/page"), targetIsMainFrame: true
+        ) == .allow, "official portal navigation remains allowed")
+        check(CampusOfficialNavigationPolicy.decision(
+            for: URL(string: "https://auth.ccsut.cn/backstage/cas/login"), targetIsMainFrame: true
+        ) == .allow, "official CAS navigation remains allowed")
+        check(CampusOfficialNavigationPolicy.decision(
+            for: URL(string: "http://ehall.ccsut.cn/backstage/page"), targetIsMainFrame: true
+        ) == .upgrade(URL(string: "https://ehall.ccsut.cn/backstage/page")!), "official HTTP navigation upgrades to HTTPS")
+        check(CampusOfficialNavigationPolicy.decision(
+            for: URL(string: "http://ehall.ccsut.cn:80/backstage/page"), targetIsMainFrame: true
+        ) == .upgrade(URL(string: "https://ehall.ccsut.cn/backstage/page")!), "default HTTP port is removed when upgrading")
+        check(CampusOfficialNavigationPolicy.decision(
+            for: URL(string: "http://ehall.ccsut.cn/backstage/page"), targetIsMainFrame: false
+        ) == .blocked(reportFailure: false), "HTTP subframe is cancelled without replacing the official page")
+        check(CampusOfficialNavigationPolicy.decision(
+            for: URL(string: "about:blank"), targetIsMainFrame: true
+        ) == .allow, "blank WebKit document remains allowed")
+        check(CampusOfficialNavigationPolicy.decision(
+            for: URL(string: "https://outside.invalid/login"), targetIsMainFrame: true
+        ) == .blocked(reportFailure: true), "off-domain main-frame navigation is still rejected visibly")
+        check(CampusOfficialNavigationPolicy.decision(
+            for: URL(string: "https://outside.invalid/frame"), targetIsMainFrame: false
+        ) == .blocked(reportFailure: false), "off-domain subframe rejection cannot fail the whole official page")
+        check(CampusOfficialNavigationPolicy.decision(
+            for: URL(string: "https://outside.invalid/popup"), targetIsMainFrame: nil
+        ) == .blocked(reportFailure: false), "off-domain popup is cancelled without failing the visible page")
+        check(CampusOfficialNavigationPolicy.decision(
+            for: URL(string: "http://ehall.ccsut.cn:8080/backstage/page"), targetIsMainFrame: true
+        ) == .blocked(reportFailure: true), "nondefault HTTP port remains rejected")
+        check(CampusOfficialNavigationPolicy.decision(
+            for: URL(string: "https://auth.ccsut.cn:8443/backstage/cas/login"), targetIsMainFrame: true
+        ) == .blocked(reportFailure: true), "nondefault HTTPS port remains rejected")
+
         let credentials = FixtureCredentials()
         let success = FixtureCampusTransport { req, _ in
             if req.url!.path.hasSuffix("validate_full") { return (200, [:], identity) }
@@ -221,6 +308,197 @@ struct CampusAPITests {
             check(false, "business 401 renews CAS even when validation still accepts the rejected token")
         }
 
+        let rotatingCredentials = RotatingCASCookieCredentials()
+        let rotationDuringRenewal = FixtureCampusTransport { req, index in
+            if req.url!.path.hasSuffix("validate_full") {
+                let cookie = req.value(forHTTPHeaderField: "Cookie") ?? ""
+                if cookie.contains("TGC=rotated-tgc") { return (200, [:], identity) }
+                if cookie.contains("TGC=stale-transaction") || cookie.contains("TGC=old-tgc") {
+                    let headers = index == 1
+                        ? ["Set-Cookie": "TGC=stale-transaction; Domain=.ccsut.cn; Secure; Path=/"]
+                        : [:]
+                    return (200, headers, #"{"errcode":2001,"msg":"not authenticated"}"#)
+                }
+                return (200, [:], #"{"errcode":2001,"msg":"not authenticated"}"#)
+            }
+            if req.url!.path.hasSuffix("redirect") {
+                rotatingCredentials.rotateTGC(to: "rotated-tgc")
+                return (302, ["Location": "https://auth.ccsut.cn/backstage/cas/login?service=fixture"], "")
+            }
+            if req.url?.host == "auth.ccsut.cn" { return (200, [:], "CAS login fixture") }
+            return (200, [:], emptyPage)
+        }
+        do {
+            let rotationClient = CampusClient(account: "fixture-account", credentials: rotatingCredentials,
+                                              transport: rotationDuringRenewal)
+            _ = try await rotationClient.leaveRecords()
+            let sent = await rotationDuringRenewal.requests
+            let staleCASRequest = sent.first { $0.url?.host == "auth.ccsut.cn" }
+            let freshValidation = sent.first {
+                $0.url?.path.hasSuffix("validate_full") == true &&
+                    $0.value(forHTTPHeaderField: "Cookie")?.contains("TGC=rotated-tgc") == true
+            }
+            let currentCASHeader = try rotatingCredentials.header(
+                for: URL(string: "https://auth.ccsut.cn/backstage/cas/login")!, expectedGeneration: 1
+            )
+            let diagnostic = await rotationClient.authenticationDiagnostic
+            check(sent.count == 6 && sent.filter { $0.httpMethod == "POST" }.count == 1 &&
+                  sent.last?.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-access-token",
+                  "same-account CAS cookie rotation restarts one read-auth transaction")
+            check(staleCASRequest?.value(forHTTPHeaderField: "Cookie")?.contains("TGC=stale-transaction") == true &&
+                  freshValidation != nil && currentCASHeader?.contains("TGC=rotated-tgc") == true &&
+                  currentCASHeader?.contains("TGC=stale-transaction") == false,
+                  "CAS retry discards the stale transaction overlay and reads the rotated CookieJar value")
+            check(diagnostic.stage == .authenticated && diagnostic.outcome == .accepted &&
+                  diagnostic.casCookiesChangedDuringAttempt,
+                  "CAS diagnostic retains only a fixed stage, outcome and rotation flag")
+        } catch {
+            check(false, "same-account CAS cookie rotation restarts one read-auth transaction")
+            check(false, "CAS retry discards the stale transaction overlay and reads the rotated CookieJar value")
+            check(false, "CAS diagnostic retains only a fixed stage, outcome and rotation flag")
+        }
+
+        let twiceRotatedCredentials = RotatingCASCookieCredentials()
+        let twiceRotated = FixtureCampusTransport { req, index in
+            if req.url!.path.hasSuffix("validate_full") {
+                if index == 1 {
+                    return (200, ["Set-Cookie": "TGC=stale-one; Domain=.ccsut.cn; Secure; Path=/"],
+                            #"{"errcode":2001,"msg":"not authenticated"}"#)
+                }
+                if index == 5 {
+                    return (200, ["Set-Cookie": "TGC=stale-two; Domain=.ccsut.cn; Secure; Path=/"],
+                            #"{"errcode":2001,"msg":"not authenticated"}"#)
+                }
+                return (200, [:], #"{"errcode":2001,"msg":"not authenticated"}"#)
+            }
+            if req.url!.path.hasSuffix("redirect") {
+                twiceRotatedCredentials.rotateTGC(to: index == 2 ? "rotated-once" : "rotated-twice")
+                return (302, ["Location": "https://auth.ccsut.cn/backstage/cas/login?service=fixture"], "")
+            }
+            if req.url?.host == "auth.ccsut.cn" { return (200, [:], "CAS login fixture") }
+            return (200, [:], emptyPage)
+        }
+        let twiceRotatedClient = CampusClient(account: "fixture-account", credentials: twiceRotatedCredentials,
+                                              transport: twiceRotated)
+        do {
+            _ = try await twiceRotatedClient.leaveRecords()
+            check(false, "a second CAS-cookie rotation cannot start a third auth transaction")
+        } catch {
+            let sent = await twiceRotated.requests
+            let currentCASHeader = try twiceRotatedCredentials.header(
+                for: URL(string: "https://auth.ccsut.cn/backstage/cas/login")!, expectedGeneration: 1
+            )
+            let diagnostic = await twiceRotatedClient.authenticationDiagnostic
+            check(error as? CampusError == .authentication && sent.count == 8 &&
+                  sent.filter { $0.httpMethod == "POST" }.isEmpty &&
+                  sent.filter { $0.url?.host == "auth.ccsut.cn" }.count == 2,
+                  "a second CAS-cookie rotation cannot start a third auth transaction")
+            check(currentCASHeader?.contains("TGC=rotated-twice") == true &&
+                  currentCASHeader?.contains("TGC=stale-one") == false &&
+                  currentCASHeader?.contains("TGC=stale-two") == false &&
+                  diagnostic.stage == .renewedValidation && diagnostic.outcome == .rejected &&
+                  diagnostic.casCookiesChangedDuringAttempt,
+                  "failed bounded retry discards both stale overlays and records only the rotation flag")
+        }
+
+        let replacedDuringRetryCredentials = RotatingCASCookieCredentials()
+        let replacedDuringRetry = FixtureCampusTransport { req, index in
+            if req.url!.path.hasSuffix("validate_full") {
+                if index == 1 {
+                    return (200, ["Set-Cookie": "TGC=stale-before-retry; Domain=.ccsut.cn; Secure; Path=/"],
+                            #"{"errcode":2001,"msg":"not authenticated"}"#)
+                }
+                if index == 5 {
+                    replacedDuringRetryCredentials.replaceAccount()
+                    return (200, [:], identity)
+                }
+                return (200, [:], #"{"errcode":2001,"msg":"not authenticated"}"#)
+            }
+            if req.url!.path.hasSuffix("redirect") {
+                replacedDuringRetryCredentials.rotateTGC(to: "rotated-before-retry")
+                return (302, ["Location": "https://auth.ccsut.cn/backstage/cas/login?service=fixture"], "")
+            }
+            if req.url?.host == "auth.ccsut.cn" { return (200, [:], "CAS login fixture") }
+            return (200, [:], emptyPage)
+        }
+        let replacedDuringRetryClient = CampusClient(account: "fixture-account", credentials: replacedDuringRetryCredentials,
+                                                     transport: replacedDuringRetry)
+        do {
+            _ = try await replacedDuringRetryClient.leaveRecords()
+            check(false, "account replacement during bounded retry stops before publishing cookies or reading")
+        } catch {
+            let sent = await replacedDuringRetry.requests
+            let currentCASHeader = try replacedDuringRetryCredentials.header(
+                for: URL(string: "https://auth.ccsut.cn/backstage/cas/login")!, expectedGeneration: 2
+            )
+            let diagnostic = await replacedDuringRetryClient.authenticationDiagnostic
+            check(error is CancellationError && sent.count == 5 && sent.filter { $0.httpMethod == "POST" }.isEmpty,
+                  "account replacement during bounded retry stops before publishing cookies or reading")
+            check(currentCASHeader?.contains("TGC=rotated-before-retry") == true &&
+                  currentCASHeader?.contains("TGC=stale-before-retry") == false &&
+                  diagnostic.stage == .initialValidation && diagnostic.outcome == .failed &&
+                  diagnostic.casCookiesChangedDuringAttempt,
+                  "account replacement does not commit a prior transaction overlay")
+        }
+
+        let forcedRotationCredentials = RotatingCASCookieCredentials()
+        let rejectedIdentity = identity.replacingOccurrences(of: "fixture-access-token", with: "rejected-access-token")
+        let freshIdentity = identity.replacingOccurrences(of: "fixture-access-token", with: "fresh-access-token")
+        let forcedRotation = FixtureCampusTransport { req, index in
+            let url = req.url!
+            if url.path.hasSuffix("validate_full") {
+                let cookie = req.value(forHTTPHeaderField: "Cookie") ?? ""
+                if index == 1 { return (200, [:], rejectedIdentity) }
+                if cookie.contains("TGC=stale-forced") { return (200, [:], #"{"errcode":2001,"msg":"not authenticated"}"#) }
+                if cookie.contains("ehall=fresh-session") { return (200, [:], freshIdentity) }
+                return (200, [:], rejectedIdentity)
+            }
+            if url.path.hasSuffix("redirect") {
+                if url.query?.contains("ticket=") == true {
+                    return (200, ["Set-Cookie": "ehall=fresh-session; Secure; Path=/"], "official landing")
+                }
+                if index == 3 {
+                    forcedRotationCredentials.rotateTGC(to: "rotated-forced")
+                    return (302, [
+                        "Set-Cookie": "TGC=stale-forced; Domain=.ccsut.cn; Secure; Path=/",
+                        "Location": "https://auth.ccsut.cn/backstage/cas/login?service=fixture"
+                    ], "")
+                }
+                return (302, ["Location": "https://auth.ccsut.cn/backstage/cas/login?service=fixture"], "")
+            }
+            if url.host == "auth.ccsut.cn" {
+                if req.value(forHTTPHeaderField: "Cookie")?.contains("TGC=rotated-forced") == true {
+                    return (302, ["Location": "https://ehall.ccsut.cn/backstage/cas-proxy/app/redirect?ticket=fixture"], "")
+                }
+                return (200, [:], "CAS login fixture")
+            }
+            if req.httpMethod == "POST" {
+                return req.value(forHTTPHeaderField: "Authorization") == "Bearer fresh-access-token"
+                    ? (200, [:], emptyPage) : (401, [:], "")
+            }
+            return (200, [:], emptyPage)
+        }
+        let forcedRotationClient = CampusClient(account: "fixture-account", credentials: forcedRotationCredentials,
+                                                transport: forcedRotation)
+        do {
+            _ = try await forcedRotationClient.leaveRecords()
+            let sent = await forcedRotation.requests
+            let validations = sent.filter { $0.url?.path.hasSuffix("validate_full") == true }
+            let casRequests = sent.filter { $0.url?.host == "auth.ccsut.cn" }
+            let reads = sent.filter { $0.httpMethod == "POST" }
+            check(sent.count == 10 && validations.count == 3 && casRequests.count == 2 && reads.count == 2 &&
+                  reads.first?.value(forHTTPHeaderField: "Authorization") == "Bearer rejected-access-token" &&
+                  reads.last?.value(forHTTPHeaderField: "Authorization") == "Bearer fresh-access-token",
+                  "forced recovery after a rejected bearer renews again after concurrent CAS-cookie rotation")
+            check(sent[5].url?.path.hasSuffix("redirect") == true &&
+                  casRequests.first?.value(forHTTPHeaderField: "Cookie")?.contains("TGC=stale-forced") == true &&
+                  casRequests.last?.value(forHTTPHeaderField: "Cookie")?.contains("TGC=rotated-forced") == true,
+                  "forced rotation retry skips validation-only reuse and starts a fresh CAS redirect")
+        } catch {
+            check(false, "forced recovery after a rejected bearer renews again after concurrent CAS-cookie rotation")
+            check(false, "forced rotation retry skips validation-only reuse and starts a fresh CAS redirect")
+        }
+
         for loginLocation in ["https://auth.ccsut.cn/backstage/cas/login?service=fixture",
                               "/backstage/cas-proxy/app/redirect?serverName=https%3A%2F%2Fehall.ccsut.cn"] {
             let loginRedirect = FixtureCampusTransport { req, index in
@@ -274,14 +552,18 @@ struct CampusAPITests {
                 if req.url!.path.hasSuffix("redirect") { return (200, [:], "interactive login page") }
                 return (401, [:], "")
             }
+            let incompleteClient = CampusClient(account: "fixture-account", credentials: FixtureCredentials(), transport: incompleteRenewal)
             do {
-                _ = try await CampusClient(account: "fixture-account", credentials: FixtureCredentials(), transport: incompleteRenewal).leaveRecords()
+                _ = try await incompleteClient.leaveRecords()
                 check(false, "failed renewal cannot resume a business read")
             } catch {
                 let sent = await incompleteRenewal.requests
+                let diagnostic = await incompleteClient.authenticationDiagnostic
                 check(error as? CampusError == (wrongAccountAfterRenewal ? .identityMismatch : .authentication) &&
                       sent.filter { $0.httpMethod == "POST" }.count == 1 && sent.count == 4,
                       "interactive or mismatched renewal stops before replaying the read")
+                check(!diagnostic.casCookiesChangedDuringAttempt,
+                      "unchanged CAS CookieJar does not permit another auth transaction")
             }
         }
 
