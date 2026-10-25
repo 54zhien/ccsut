@@ -46,24 +46,18 @@ struct ElectiveView: View {
     }
 
     var body: some View {
-        GeometryReader { viewport in
-            ScrollView {
-                VStack(spacing: 0) {
-                    if isLoading && classes.isEmpty && enrolledModel.context == nil {
-                        ProgressView("拉取教学班…")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        list
-                    }
+        PageScrollSurface(refresh: { await load(force: true) }) { viewport, _ in
+            VStack(spacing: 0) {
+                if isLoading && classes.isEmpty && enrolledModel.context == nil {
+                    ProgressView("??????")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    list
                 }
-                .frame(maxWidth: .infinity, minHeight: classes.isEmpty ? viewport.size.height : 0)
             }
-            .scrollEdgeEffectStyle(.soft, for: .top)
-            .pageRefreshable { await load(force: true) }
-            .scrollDismissesKeyboard(.immediately)
+            .frame(maxWidth: .infinity, minHeight: classes.isEmpty ? viewport.height : 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground))
+        .scrollDismissesKeyboard(.immediately)
         .academicDetailChrome(title: "选课")
 #if DEBUG
         .overlay(alignment: .topTrailing) {
@@ -560,7 +554,11 @@ struct ElectiveView: View {
         }
         #if DEBUG
         if InterfacePreview.enabled {
-            try? await Task.sleep(for: .milliseconds(250))
+            if previewPublicationCount > 0 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
+                await PreviewRefreshCompletionGate.shared.waitForRelease()
+            } else {
+                try? await Task.sleep(for: InterfacePreview.refreshFixtureDelay)
+            }
             guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
             let previewClasses = InterfacePreview.emptyPage ? [] : InterfacePreview.classes
             var builder = ElectiveSnapshotBuilder<TeachingClass>()

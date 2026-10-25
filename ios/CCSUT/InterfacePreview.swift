@@ -1,5 +1,30 @@
 import Foundation
 
+#if DEBUG
+/// UI tests release the second score load explicitly, so screenshots cannot race completion.
+@MainActor final class PreviewRefreshCompletionGate {
+    static let shared = PreviewRefreshCompletionGate()
+    private var pending: [UUID: CheckedContinuation<Void, Never>] = [:]
+    func waitForRelease() async {
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled { continuation.resume() }
+                else { pending[id] = continuation }
+            }
+        } onCancel: {
+            Task { @MainActor in self.pending.removeValue(forKey: id)?.resume() }
+        }
+    }
+    func release() {
+        let continuations = Array(pending.values)
+        pending.removeAll()
+        for continuation in continuations { continuation.resume() }
+    }
+}
+
+#endif
+
 /// Simulator-only screenshot fixtures. Release builds cannot enable this route.
 enum InterfacePreview {
     static var enabled: Bool {
@@ -18,6 +43,10 @@ enum InterfacePreview {
     }
 
     #if DEBUG
+    static var refreshFixtureDelay: Duration {
+        ProcessInfo.processInfo.arguments.contains("--preview-slow-refresh") ? .seconds(2) : .milliseconds(250)
+    }
+
     static var longList: Bool {
         ProcessInfo.processInfo.arguments.contains("--preview-long-list")
     }

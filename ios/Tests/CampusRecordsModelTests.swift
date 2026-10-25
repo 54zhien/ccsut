@@ -17,6 +17,7 @@ actor FixtureCampusReader: CampusReading {
         """.utf8))
     }
     func travelRecords(kind: CampusTravelKind) async throws -> [CampusTravelRecord] {
+        if delay { try await Task.sleep(for: .milliseconds(100)) }
         if failTravel == kind { throw CampusError.serviceUnavailable }
         return try CampusDecoder.travelRecords(Data("{\"code\":\"2000\",\"data\":[{\"openid\":\"\(kind.rawValue)\"}]}".utf8))
     }
@@ -57,17 +58,42 @@ struct CampusRecordsModelTests {
         await reader.configure(delay: true)
         let pending = Task { await model.loadLeave(reset: false) }
         try await Task.sleep(for: .milliseconds(10))
-        await model.loadLeave(reset: true)
+        var joinedLeaveStarted = false
+        var joinedLeaveFinished = false
+        let joinedLeave = Task {
+            joinedLeaveStarted = true
+            await model.loadLeave(reset: true)
+            joinedLeaveFinished = true
+        }
+        while !joinedLeaveStarted { await Task.yield() }
+        check(!joinedLeaveFinished, "refresh waits for an in-flight leave read")
         let pages = await reader.pages
         check(pages.last == 2 && pages.count == 6, "overlapping refresh cannot race pagination")
         model.cancel()
         await pending.value
+        await joinedLeave.value
         check(model.leave.page == 1 && !model.isLoadingLeave && model.leaveError == nil, "leaving page cancels pending read without error")
         await reader.configure()
         await model.loadTravel(kind: .departure)
         await reader.configure(travel: .returning)
         await model.loadTravel(kind: .returning)
         check(model.travel[.departure]?.count == 1 && model.travelErrors[.returning] != nil, "travel categories retain independent success and failure")
+        await reader.configure(delay: true)
+        let pendingTravel = Task { await model.loadTravel(kind: .departure) }
+        while !model.loadingTravel.contains(.departure) { await Task.yield() }
+        var joinedTravelStarted = false
+        var joinedTravelFinished = false
+        let joinedTravel = Task {
+            joinedTravelStarted = true
+            await model.loadTravel(kind: .departure)
+            joinedTravelFinished = true
+        }
+        while !joinedTravelStarted { await Task.yield() }
+        check(!joinedTravelFinished, "refresh waits for an in-flight travel read")
+        model.cancel()
+        await pendingTravel.value
+        await joinedTravel.value
+        check(joinedTravelFinished && !model.loadingTravel.contains(.departure), "cancellation releases joined travel refresh")
         await reader.configure(delay: true)
         let oldAccount = Task { await model.loadLeave(reset: false) }
         try await Task.sleep(for: .milliseconds(10))

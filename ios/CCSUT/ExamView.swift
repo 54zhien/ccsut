@@ -29,43 +29,35 @@ struct ExamView: View {
 #endif
 
     var body: some View {
-        GeometryReader { viewport in
-          ScrollViewReader { proxy in
-            ScrollView {
-                VStack(spacing: 0) {
-                    if isLoading && items.isEmpty {
-                        ProgressView("加载考试安排…")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if errorText != nil, items.isEmpty {
-                        ContentUnavailableView {
-                            Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
-                        } description: {
-                            Text(errorText ?? AppMessages.loadFailure)
-                        } actions: {
-                            Button("重试") { Task { await load(force: true) } }
-                        }
-                    } else if items.isEmpty {
-                        ContentUnavailableView {
-                            Label("暂无考试安排", systemImage: "calendar.badge.clock")
-                        } description: {
-                            Text("教务系统暂未返回考试安排。")
-                        }
-                    } else {
-                        if let errorText {
-                            PageStatusNotice(message: errorText) { Task { await load(force: true) } }
-                        }
-                        content(proxy: proxy)
+        PageScrollSurface(refresh: { await load(force: true) }) { viewport, proxy in
+            VStack(spacing: 0) {
+                if isLoading && items.isEmpty {
+                    ProgressView("加载考试安排…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if errorText != nil, items.isEmpty {
+                    ContentUnavailableView {
+                        Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(errorText ?? AppMessages.loadFailure)
+                    } actions: {
+                        Button("重试") { Task { await load(force: true) } }
                     }
+                } else if items.isEmpty {
+                    ContentUnavailableView {
+                        Label("暂无考试安排", systemImage: "calendar.badge.clock")
+                    } description: {
+                        Text("教务系统暂未返回考试安排。")
+                    }
+                } else {
+                    if let errorText {
+                        PageStatusNotice(message: errorText) { Task { await load(force: true) } }
+                    }
+                    content(proxy: proxy)
                 }
-                .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
             }
-            .scrollEdgeEffectStyle(.soft, for: .top)
-            .pageRefreshable { await load(force: true) }
-            .coordinateSpace(name: "academic-scroll")
-          }
+            .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.height : 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground))
+        .coordinateSpace(name: "academic-scroll")
         .academicDetailChrome(title: "考试")
 #if DEBUG
         .overlay(alignment: .topTrailing) {
@@ -236,7 +228,11 @@ struct ExamView: View {
         if InterfacePreview.enabled {
             isLoading = true
             defer { isLoading = false }
-            try? await Task.sleep(for: .milliseconds(250))
+            if previewPublicationCount > 0 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
+                await PreviewRefreshCompletionGate.shared.waitForRelease()
+            } else {
+                try? await Task.sleep(for: InterfacePreview.refreshFixtureDelay)
+            }
             guard !Task.isCancelled else { return }
             items = InterfacePreview.emptyPage ? [] : InterfacePreview.exams
             previewPublicationCount += 1

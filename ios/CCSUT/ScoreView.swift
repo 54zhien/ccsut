@@ -29,58 +29,50 @@ struct ScoreView: View {
 #endif
 
     var body: some View {
-        ScrollViewReader { proxy in
-            GeometryReader { viewport in
-                ScrollView {
-                    VStack(spacing: 0) {
-                        if isLoading && items.isEmpty {
-                            ProgressView("加载成绩…")
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else if errorText != nil, items.isEmpty {
-                            ContentUnavailableView {
-                                Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
-                            } description: {
-                                EmptyView()
-                            } actions: {
-                                Button("重试") { Task { await load(force: true) } }
-                            }
-                        } else if items.isEmpty {
-                            ContentUnavailableView {
-                                Label("暂无成绩", systemImage: "doc.text.magnifyingglass")
-                            } description: {
-                                Text("这学期还没出成绩，或者还没完成评教。")
-                            }
+        PageScrollSurface(refresh: { await load(force: true) }) { viewport, proxy in
+            VStack(spacing: 0) {
+                if isLoading && items.isEmpty {
+                    ProgressView("加载成绩…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if errorText != nil, items.isEmpty {
+                    ContentUnavailableView {
+                        Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
+                    } description: {
+                        EmptyView()
+                    } actions: {
+                        Button("重试") { Task { await load(force: true) } }
+                    }
+                } else if items.isEmpty {
+                    ContentUnavailableView {
+                        Label("暂无成绩", systemImage: "doc.text.magnifyingglass")
+                    } description: {
+                        Text("这学期还没出成绩，或者还没完成评教。")
+                    }
+                } else {
+                    if let errorText {
+                        PageStatusNotice(message: errorText) { Task { await load(force: true) } }
+                    }
+                    content { term in
+                        if reduceMotion {
+                            proxy.scrollTo(term, anchor: .top)
                         } else {
-                            if let errorText {
-                                PageStatusNotice(message: errorText) { Task { await load(force: true) } }
-                            }
-                            content { term in
-                                if reduceMotion {
-                                    proxy.scrollTo(term, anchor: .top)
-                                } else {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        proxy.scrollTo(term, anchor: .top)
-                                    }
-                                }
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(term, anchor: .top)
                             }
                         }
                     }
-                    .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.size.height : 0)
                 }
-                .scrollEdgeEffectStyle(.soft, for: .top)
-                .pageRefreshable { await load(force: true) }
-                .coordinateSpace(name: "academic-scroll")
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemGroupedBackground))
-            .academicDetailChrome(title: "成绩单")
-#if DEBUG
-            .overlay(alignment: .topTrailing) {
-                PageRefreshPublicationDiagnostics(count: previewPublicationCount)
-            }
-#endif
-            .task { if items.isEmpty { await load() } }
+            .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.height : 0)
         }
+        .coordinateSpace(name: "academic-scroll")
+        .academicDetailChrome(title: "成绩单")
+#if DEBUG
+        .overlay(alignment: .topTrailing) {
+            PageRefreshPublicationDiagnostics(count: previewPublicationCount)
+        }
+#endif
+        .task { if items.isEmpty { await load() } }
     }
 
     // MARK: - 内容
@@ -246,7 +238,11 @@ struct ScoreView: View {
         if InterfacePreview.enabled {
             isLoading = true
             defer { isLoading = false }
-            try? await Task.sleep(for: .milliseconds(250))
+            if previewPublicationCount > 0 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
+                await PreviewRefreshCompletionGate.shared.waitForRelease()
+            } else {
+                try? await Task.sleep(for: InterfacePreview.refreshFixtureDelay)
+            }
             guard !Task.isCancelled else { return }
             let previewItems = InterfacePreview.emptyPage ? [] : InterfacePreview.scores
             items = previewItems
