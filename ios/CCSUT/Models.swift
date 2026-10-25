@@ -79,11 +79,11 @@ struct TeachingClass: Decodable, Identifiable, Hashable {
     var creditValue: Double { Double(xf ?? "") ?? 0 }
 
     var enrolled: Int {
-        Int((yxrl ?? "").split(separator: "/").first ?? "") ?? 0
+        Int(((yxrl ?? "").split(separator: "/").first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
     }
 
     var capacity: Int {
-        Int((yxrl ?? "").split(separator: "/").last ?? "") ?? 0
+        Int(((yxrl ?? "").split(separator: "/").last ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
     }
 
     var isFull: Bool { capacity > 0 && enrolled >= capacity }
@@ -260,19 +260,36 @@ enum WeekParser {
     /// "1-4,6-11" → [1,2,3,4,6,7,8,9,10,11]
     /// "1-3,5-7,9-9,11-11" → 单双周也在这里展开
     static func parse(_ raw: String) -> [Int] {
+        (try? parseValidated(raw)) ?? []
+    }
+
+    enum ParseError: Error { case invalidRange }
+
+    /// Invalid nonempty input must be rejected before publishing a timetable.
+    static func parseValidated(_ raw: String) throws -> [Int] {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return [] }
+        let normalized = text.replacingOccurrences(of: "，", with: ",")
+            .replacingOccurrences(of: "、", with: ",")
+            .replacingOccurrences(of: "；", with: ",")
+            .replacingOccurrences(of: ";", with: ",")
+        let pattern = #"^\s*([0-9]{1,2})(?:\s*[-~至]\s*([0-9]{1,2}))?\s*(?:周)?\s*(?:[（(]?(单|双)(?:周)?[）)]?)?\s*$"#
+        let regex = try NSRegularExpression(pattern: pattern)
         var set = Set<Int>()
-        for part in raw.split(separator: ",") {
-            let p = part.trimmingCharacters(in: .whitespaces)
-            guard !p.isEmpty else { continue }
-            if p.contains("-") {
-                let nums = p.split(separator: "-").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-                if nums.count == 2, nums[0] <= nums[1], nums[1] - nums[0] < 60 {
-                    set.formUnion(nums[0]...nums[1])
+        for part in normalized.components(separatedBy: ",") {
+            let value = part as NSString
+            guard let match = regex.firstMatch(in: part, range: NSRange(location: 0, length: value.length)),
+                  let start = Int(value.substring(with: match.range(at: 1))) else { throw ParseError.invalidRange }
+            let end = match.range(at: 2).location == NSNotFound ? start : Int(value.substring(with: match.range(at: 2)))!
+            guard (1...53).contains(start), (start...53).contains(end) else { throw ParseError.invalidRange }
+            let parity = match.range(at: 3).location == NSNotFound ? "" : value.substring(with: match.range(at: 3))
+            for week in start...end {
+                if parity.isEmpty || (parity == "单" && week % 2 == 1) || (parity == "双" && week % 2 == 0) {
+                    set.insert(week)
                 }
-            } else if let n = Int(p), n > 0 {
-                set.insert(n)
             }
         }
+        guard !set.isEmpty else { throw ParseError.invalidRange }
         return set.sorted()
     }
 
@@ -327,6 +344,10 @@ struct ScoreItem: Decodable, Identifiable, Hashable {
     var credit: Double { Double(xf ?? "") ?? 0 }
     var point: Double { jd ?? 0 }
     var passed: Bool { sfjg == "1" }
+    /// 已出成绩（缓考/在修课程 jd 为 null，不参与绩点加权）
+    var hasGrade: Bool { jd != nil }
+    /// 只将明确的 "0" 计为不及格；缺失、空白或未知状态保持中性。
+    var failed: Bool { sfjg == "0" }
     var scoreText: String { (zhcj?.isEmpty == false) ? zhcj! : "—" }
 
     /// 成绩分项拆成可读的键值对
@@ -351,14 +372,15 @@ struct ScoreTerm: Identifiable {
     var id: String { name }
     var credits: Double { items.reduce(0) { $0 + $1.credit } }
 
-    /// 加权平均绩点
+    /// 加权平均绩点（只统计已出成绩的课，未出成绩的课不进分子也不进分母）
     var gpa: Double {
-        let weighted = items.reduce(0.0) { $0 + $1.point * $1.credit }
-        let total = credits
+        let graded = items.filter(\.hasGrade)
+        let weighted = graded.reduce(0.0) { $0 + $1.point * $1.credit }
+        let total = graded.reduce(0.0) { $0 + $1.credit }
         return total > 0 ? weighted / total : 0
     }
 
-    var failedCount: Int { items.filter { !$0.passed }.count }
+    var failedCount: Int { items.filter(\.failed).count }
 }
 
 
@@ -376,7 +398,10 @@ struct ExamItem: Decodable, Identifiable, Hashable {
     let zwh: String?       // 座位号
     let ksxs: String?      // 考试 / 考查
     let kspcmc: String?    // 考试批次 期末考试 / 开学补（缓）考
-    let dataXnxq: String?  // 学期
+    let dataXnxq: String?  // 服务端的「当前学年学期」上下文，不是本场考试所属学期
+    /// 本场考试实际所属学期。
+    /// 服务端不会返回它——dataXnxq 恒等于当前学期，只能由请求参数回填。
+    var term: String? = nil
 
     /// 完整的考场，如「9号栋 9-112」
     var location: String {

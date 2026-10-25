@@ -2,7 +2,7 @@
 //  WebLoginSheet.swift
 //  CCSUT
 //
-//  统一身份认证 · 底部弹起的 large sheet
+//  统一身份认证 · 全高网页与悬浮玻璃控件
 //
 //  CAS 有三个页签：扫码登录 / 密码登录 / 验证码登录
 //  这里只走两条不需要密码的：
@@ -43,76 +43,127 @@ struct LoginSheetRequest: Identifiable {
 struct WebLoginSheet: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @Environment(\.deviceCornerRadius) private var deviceCornerRadius
+    @ScaledMetric(relativeTo: .body) private var topSymbolSize: CGFloat = 20
+    @ScaledMetric(relativeTo: .body) private var browserSymbolSize: CGFloat = 24
 
-    let request: LoginSheetRequest
+    private let request: LoginSheetRequest?
+    private let ownsNavigation: Bool
 
     @State private var webView: WKWebView
     @State private var nav = WebNavigator()
     @State private var status = ""
     @State private var didPrepare = false
+    @State private var topControlDiameter: CGFloat = 0
+    @State private var bottomControlDiameter: CGFloat = 0
 
+    /// LoginView passes its already-running web view and navigator. They are moved
+    /// into this sheet only after the source WebPanel has left the main view tree.
+    init(webView: WKWebView, navigator: WebNavigator) {
+        request = nil
+        ownsNavigation = false
+        _webView = State(initialValue: webView)
+        _nav = State(initialValue: navigator)
+    }
+
+    /// Standalone entry retained for callers that need a dedicated web login flow.
     init(request: LoginSheetRequest) {
         self.request = request
+        ownsNavigation = true
         _webView = State(initialValue: WebFactory.make())
+        _nav = State(initialValue: WebNavigator())
     }
 
     var body: some View {
-        NavigationStack {
-            WebPanel(webView: webView)
-                .ignoresSafeArea(edges: .bottom)
-                .overlay(alignment: .top) {
-                    if !status.isEmpty { statusBar }
-                }
-                .navigationTitle(request.title)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("取消") { dismiss() }
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            webView.reload()
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                }
-                .onAppear(perform: start)
-                .onChange(of: nav.currentURL) { _, url in
-                    guard let url else { return }
-                    handle(url)
-                }
-                .onChange(of: nav.lastError) { _, err in
-                    if let err { status = "⚠️ \(err)" }
+        GeometryReader { viewport in
+            WebPanel(webView: webView, extendsUnderControls: true)
+                .overlay(alignment: .top) { topControls }
+                .overlay(alignment: .bottom) {
+                    bottomControls
+                        .padding(.bottom, max(SheetLayout.controlInset(deviceCornerRadius, diameter: bottomControlDiameter), viewport.safeAreaInsets.bottom))
                 }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea(.container)
+        .tint(nil)
+        .onAppear {
+            if ownsNavigation { start() }
+            else { nav.recoverLoginPageIfNeeded(in: webView) }
+        }
+        .onChange(of: nav.currentURL) { _, url in
+            guard let url else { return }
+            handle(url)
+        }
+        .onChange(of: nav.isFinished) { _, finished in
+            if finished { status = "" }
+        }
+        .onChange(of: nav.lastError) { _, err in
+            if err != nil { status = AppMessages.loadFailure }
+        }
+        .presentationDetents([.large])
+        .presentationContentInteraction(.scrolls)
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(SheetLayout.cornerRadius(deviceCornerRadius))
     }
 
-    private var statusBar: some View {
-        HStack(spacing: 8) {
-            if webView.isLoading {
-                ProgressView().controlSize(.mini)
-            } else {
-                Image(systemName: "info.circle").font(.caption)
-            }
-            Text(status).font(.caption).lineLimit(3)
-            Spacer(minLength: 0)
+    private var topControls: some View {
+        HStack {
+            SheetSymbolButton(symbol: "xmark", label: "关闭网页登录", symbolSize: topSymbolSize) { dismiss() }
+            Spacer()
+            SheetSymbolButton(symbol: "arrow.clockwise", label: "刷新网页", symbolSize: topSymbolSize, action: refresh)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .background(.thinMaterial)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topControlDiameter = $0 }
+        .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius, diameter: topControlDiameter))
+        .padding(.top, SheetLayout.controlInset(deviceCornerRadius, diameter: topControlDiameter))
+    }
+
+    private var bottomControls: some View {
+        HStack(alignment: .center, spacing: 12) {
+            if !status.isEmpty {
+                Text(AppMessages.readable(status))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, 16)
+                    .frame(height: bottomControlDiameter > 0 ? bottomControlDiameter : nil)
+                    .glassEffect(.regular, in: .capsule)
+            }
+            Spacer(minLength: 0)
+            SheetSymbolButton(symbol: "safari", label: "在 Safari 中打开当前网址", symbolSize: browserSymbolSize, action: openCurrentURLInSafari)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bottomControlDiameter = $0 }
+        }
+        .padding(.horizontal, SheetLayout.controlInset(deviceCornerRadius, diameter: bottomControlDiameter))
+    }
+
+    private var currentURL: URL? {
+        webView.url ?? nav.currentURL ?? SessionStore.casLoginURL
+    }
+
+    private func refresh() {
+        status = "加载认证页…"
+        didPrepare = false
+        nav.refresh(in: webView)
+    }
+
+    private func openCurrentURLInSafari() {
+        guard let url = currentURL else { return }
+        openURL(url)
     }
 
     // MARK: 流程
 
     private func start() {
+        guard request != nil else { return }
         webView.navigationDelegate = nav
         nav.onNavigate = { url in handle(url) }
         status = "加载认证页…"
-        webView.load(URLRequest(url: SessionStore.casLoginURL))
+        nav.loadLoginPage(in: webView)
     }
 
     private func handle(_ url: URL) {
+        guard let request else { return }
         let absolute = url.absoluteString
 
         // 到教务系统 → 接管
@@ -134,6 +185,7 @@ struct WebLoginSheet: View {
     }
 
     private func prepareSMS() async {
+        guard let request else { return }
         status = "切到验证码登录…"
         do {
             let raw = try await webView.callAsync(Self.smsScript, arguments: [
@@ -151,9 +203,9 @@ struct WebLoginSheet: View {
             case "no-code":
                 status = "账号已填好 · 点「获取验证码」，收到短信后填进去再点登录"
             case "no-tab":
-                status = "认证页没渲染出页签，点右上角刷新"
+                status = "认证页没渲染出页签，请点右上角刷新"
             case "no-form":
-                status = "没找到验证码登录表单，点右上角刷新"
+                status = "没找到验证码登录表单，请点右上角刷新"
             case "no-account":
                 status = "账号框是空的，请手动填一下"
             case "send-failed":
@@ -167,6 +219,7 @@ struct WebLoginSheet: View {
     }
 
     private func finish() async {
+        guard ownsNavigation else { return }
         status = "接管会话…"
         let ok = await session.adoptCookies()
         if ok {

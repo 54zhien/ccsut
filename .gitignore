@@ -7,6 +7,9 @@ state.json
 node_modules/
 .pnpm-store/
 
+# 本地分发产物、截图和诊断说明可能含个人信息，整个目录不入库
+/dist/
+
 # iOS
 ios/build/
 ios/DerivedData/

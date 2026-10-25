@@ -1,0 +1,180 @@
+name: UI preview
+
+on:
+  push:
+    branches: [ui/navigation-timetable]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ui-preview.yml'
+  workflow_dispatch:
+    inputs:
+      render_catalog:
+        description: 'Also render the full static preview catalog and compact-device screenshots'
+        type: boolean
+        default: true
+      test_scope:
+        description: 'Interaction checks to run (focused checks preserve full-suite failure evidence)'
+        type: choice
+        options: [all, refresh-and-search, refresh-animation, refresh-campus, refresh-proof]
+        default: all
+      blur_diagnostics:
+        description: 'Run the three failed checks in legacy mode and render both blur versions'
+        type: boolean
+        default: false
+      skip_previews:
+        description: 'Skip screenshots when only completing the legacy-mode control experiment'
+        type: boolean
+        default: false
+
+jobs:
+  preview:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test timetable presentation
+        run: |
+          xcrun swiftc -target "$(uname -m)-apple-macos14.0" -parse-as-library ios/CCSUT/TopBarBlurProfile.swift ios/Tests/TopBarBlurTests.swift -o "$RUNNER_TEMP/top-blur-tests"
+          "$RUNNER_TEMP/top-blur-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
+          "$RUNNER_TEMP/schedule-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/InterfacePreview.swift ios/Tests/ReleasePreviewTests.swift -o "$RUNNER_TEMP/release-preview-tests"
+          "$RUNNER_TEMP/release-preview-tests" --preview-ui --preview-page academic
+      - name: Build simulator app
+        run: |
+          set -o pipefail
+          xcodebuild build -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/UIPreview" \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-build.log"
+      - name: Prepare native simulator
+        id: simulator
+        timeout-minutes: 10
+        run: bash ios/Tests/render-preview.sh --boot-only
+      - name: Preserve simulator boot state
+        if: failure()
+        run: xcrun simctl list devices > "$RUNNER_TEMP/ui-screenshots/simulator-state.txt"
+      - name: Verify initial and selected week positioning
+        if: ${{ !inputs.blur_diagnostics && inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' }}
+        run: |
+          set -o pipefail
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-week-tests.xcresult" \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testSemesterAndWeekdaysMoveWithCourses \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-week-test.log"
+      - name: Export week positioning screenshots
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/ui-week-tests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-week-tests.xcresult" --output-path "$RUNNER_TEMP/ui-week-test-attachments"
+          fi
+      - name: Publish week positioning evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCSUT-week-positioning
+          path: |
+            ${{ runner.temp }}/ui-week-test.log
+            ${{ runner.temp }}/ui-week-test-attachments/*.png
+            ${{ runner.temp }}/ui-week-test-attachments/*.txt
+            ${{ runner.temp }}/ui-week-test-attachments/manifest.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Verify native page interactions
+        if: ${{ !inputs.blur_diagnostics && !cancelled() && steps.simulator.conclusion == 'success' }}
+        env:
+          TEST_SCOPE: ${{ !inputs.blur_diagnostics && inputs.test_scope }}
+        run: |
+          set -o pipefail
+          xcrun simctl io "$CCSUT_PREVIEW_DEVICE" recordVideo --codec=h264 "$RUNNER_TEMP/ui-screenshots/native-interactions.mp4" &
+          VIDEO_PID=$!
+          trap 'kill -INT "$VIDEO_PID"; wait "$VIDEO_PID" || true' EXIT
+          TEST_SELECTION=(-skip-testing:CCSUTUITests/PageInteractionUITests/testSemesterAndWeekdaysMoveWithCourses)
+          if [ "$TEST_SCOPE" = 'refresh-and-search' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicPagesPullToRefreshIncludingEmptyStates
+              -only-testing:CCSUTUITests/PageInteractionUITests/testPullingTimetableRefreshesWholePageOnce
+              -only-testing:CCSUTUITests/PageInteractionUITests/testElectiveEmptySearchCanResetAndDisabledReasonIsVisible
+              -only-testing:CCSUTUITests/PageInteractionUITests/testLargeTextKeepsAcademicControlsAccessible
+            )
+          fi
+          if [ "$TEST_SCOPE" = 'refresh-animation' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testScoreRefreshControlRemainsActiveDuringSlowLoad
+              -only-testing:CCSUTUITests/PageInteractionUITests/testOtherPagesRetainTimetableRefreshAnimation
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTimetableControlledRefreshAnimationReference
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicPagesPullToRefreshIncludingEmptyStates
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicTitlesAndTermStripsRemainStableWhenPinned
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicDetailSupportsContentSwipeBack
+            )
+          fi
+          if [ "$TEST_SCOPE" = 'refresh-campus' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusPagesRetainTimetableRefreshAnimation
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusEntryAndRecords
+            )
+          fi
+          if [ "$TEST_SCOPE" = 'refresh-proof' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testScoreRefreshControlRemainsActiveDuringSlowLoad
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusPagesRetainTimetableRefreshAnimation
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicTitlesAndTermStripsRemainStableWhenPinned
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicDetailSupportsContentSwipeBack
+            )
+          fi
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
+            "${TEST_SELECTION[@]}" \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
+      - name: Export interaction screenshots
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/ui-tests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-tests.xcresult" --output-path "$RUNNER_TEMP/ui-test-attachments"
+          fi
+      - name: Publish interaction evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCSUT-ui-interactions
+          path: |
+            ${{ runner.temp }}/ui-test.log
+            ${{ runner.temp }}/ui-test-attachments/*.png
+            ${{ runner.temp }}/ui-test-attachments/*.txt
+            ${{ runner.temp }}/ui-test-attachments/manifest.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Compare failed checks with legacy blur
+        if: ${{ inputs.blur_diagnostics && steps.simulator.conclusion == 'success' }}
+        run: |
+          set -o pipefail
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/legacy-blur-tests.xcresult" \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicHomeWithoutReminderHasStableSpacedEntries \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicPagesPullToRefreshIncludingEmptyStates \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testPullingTimetableRefreshesWholePageOnce \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG CCSUT_TEST_LEGACY_TOP_BLUR" \
+            2>&1 | tee "$RUNNER_TEMP/legacy-blur-test.log"
+      - name: Render preview screens
+        if: ${{ !inputs.skip_previews && !cancelled() && steps.simulator.conclusion == 'success' && inputs.render_catalog != false }}
+        run: bash ios/Tests/render-preview.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CCSUT-ui-preview
+          path: |
+            ${{ runner.temp }}/ui-screenshots/
+            ${{ runner.temp }}/ui-build.log
+            ${{ runner.temp }}/ui-week-test.log
+            ${{ runner.temp }}/ui-week-tests.xcresult/
+            ${{ runner.temp }}/ui-week-test-attachments/
+            ${{ runner.temp }}/ui-test.log
+            ${{ runner.temp }}/ui-tests.xcresult/
+            ${{ runner.temp }}/ui-test-attachments/
+            ${{ runner.temp }}/legacy-blur-test.log
+            ${{ runner.temp }}/legacy-blur-tests.xcresult/
+          if-no-files-found: error
+          retention-days: 14

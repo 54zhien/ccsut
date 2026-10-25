@@ -6,22 +6,126 @@ on:
       - 'ios/CCSUT/**'
       - 'ios/Tests/**'
       - '.github/workflows/session-tests.yml'
+      - '.gitignore'
+      - 'dist/**'
   workflow_dispatch:
 
 jobs:
   session:
     runs-on: macos-26
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Reject tracked distribution and diagnostic files
+        if: always()
+        run: node --test ios/Tests/repository-privacy.test.mjs
       - name: Compile session regression runner
         run: |
           xcrun swiftc -parse-as-library \
-            ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/Models.swift \
+            ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift \
+            ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift \
+            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift \
+            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift \
+            ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift \
             ios/Tests/SessionRegressionTests.swift \
             -o "$RUNNER_TEMP/session-tests"
       - name: Run Swift session regressions
         run: '"$RUNNER_TEMP/session-tests"'
+      - name: Run WebKit credential restoration policy regressions
+        if: always()
+        run: |
+          set -e
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/WebSessionCookies.swift ios/Tests/WebSessionCookieTests.swift -o "$RUNNER_TEMP/web-session-cookies"
+          "$RUNNER_TEMP/web-session-cookies"
+      - name: Run ecard read-session recovery regressions
+        if: always()
+        run: |
+          set -e
+          xcrun swiftc -parse-as-library \
+            ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift \
+            ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift \
+            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift \
+            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift \
+            ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift ios/CCSUT/EcardPaymentPersistence.swift ios/CCSUT/EcardPaymentModel.swift \
+            ios/Tests/EcardReadRecoveryTests.swift -o "$RUNNER_TEMP/ecard-payment-model"
+          "$RUNNER_TEMP/ecard-payment-model"
+      - name: Run original ecard callback and payment regressions
+        if: always()
+        run: python3 ios/Tests/run-ecard-tests.py
+      - name: Run native ecard SSO protocol regressions
+        if: always()
+        run: |
+          set -e
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/EcardSSOClient.swift ios/Tests/EcardSSOClientTests.swift -o "$RUNNER_TEMP/ecard-sso"
+          "$RUNNER_TEMP/ecard-sso"
+      - name: Run payment recovery and state regressions
+        if: always()
+        run: |
+          set -e
+          SOURCES=(ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift
+            ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift
+            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift
+            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift
+            ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift
+            ios/CCSUT/EcardPaymentPersistence.swift ios/CCSUT/EcardPaymentModel.swift)
+          xcrun swiftc -parse-as-library "${SOURCES[@]}" ios/Tests/EcardPaymentAPITests.swift -o "$RUNNER_TEMP/payment-api"
+          "$RUNNER_TEMP/payment-api"
+          xcrun swiftc -parse-as-library "${SOURCES[@]}" ios/Tests/EcardPaymentModelTests.swift -o "$RUNNER_TEMP/payment-model"
+          "$RUNNER_TEMP/payment-model"
       - name: Run embedded login script regressions
         if: always()
-        run: node --test ios/Tests/login-script.test.mjs
+        run: node --test ios/Tests/login-script.test.mjs ios/Tests/campus-web-privacy.test.mjs ios/Tests/cas-script.test.mjs
+      - name: Run campus read-only regressions
+        if: always()
+        run: |
+          set -e
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/Tests/CampusModelTests.swift -o "$RUNNER_TEMP/campus-model-tests"
+          "$RUNNER_TEMP/campus-model-tests"
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusAPI.swift ios/Tests/CampusAPITests.swift -o "$RUNNER_TEMP/campus-api-tests"
+          "$RUNNER_TEMP/campus-api-tests"
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusAPI.swift ios/CCSUT/CampusRecordsModel.swift ios/Tests/CampusRecordsModelTests.swift -o "$RUNNER_TEMP/campus-record-tests"
+          "$RUNNER_TEMP/campus-record-tests"
+      - name: Run native campus form regressions
+        if: always()
+        run: |
+          set -e
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusFormRules.swift ios/Tests/CampusFormRulesTests.swift -o "$RUNNER_TEMP/campus-form-rules"
+          "$RUNNER_TEMP/campus-form-rules"
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusFormRules.swift ios/CCSUT/CampusAPI.swift ios/CCSUT/CampusFormsAPI.swift ios/Tests/CampusFormsAPITests.swift -o "$RUNNER_TEMP/campus-form-api"
+          "$RUNNER_TEMP/campus-form-api"
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusFormRules.swift ios/CCSUT/CampusAPI.swift ios/CCSUT/CampusFormsAPI.swift ios/CCSUT/CampusFormModel.swift ios/Tests/CampusFormModelTests.swift -o "$RUNNER_TEMP/campus-form-model"
+          "$RUNNER_TEMP/campus-form-model"
+          xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/CampusModels.swift ios/CCSUT/CampusPresentation.swift ios/Tests/CampusPresentationTests.swift -o "$RUNNER_TEMP/campus-presentation"
+          "$RUNNER_TEMP/campus-presentation"
+      - name: Run protocol and academic integrity regressions
+        if: always()
+        run: |
+          xcrun swiftc ios/CCSUT/APIResponse.swift ios/Tests/APIResponseTests.swift -o "$RUNNER_TEMP/api-response-tests"
+          "$RUNNER_TEMP/api-response-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/ElectiveState.swift ios/Tests/ElectiveStateTests.swift -o "$RUNNER_TEMP/elective-state-tests"
+          "$RUNNER_TEMP/elective-state-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift ios/CCSUT/ElectiveState.swift ios/CCSUT/EnrolledCourses.swift ios/Tests/EnrolledCoursesTests.swift -o "$RUNNER_TEMP/enrolled-courses-tests"
+          "$RUNNER_TEMP/enrolled-courses-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/CCSUT/AcademicCalendar.swift ios/Tests/AcademicReliabilityTests.swift -o "$RUNNER_TEMP/academic-tests"
+          "$RUNNER_TEMP/academic-tests"
+      - name: Run timetable presentation regressions
+        if: always()
+        run: |
+          xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
+          "$RUNNER_TEMP/schedule-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/InterfacePreview.swift ios/Tests/ReleasePreviewTests.swift -o "$RUNNER_TEMP/release-preview-tests"
+          "$RUNNER_TEMP/release-preview-tests" --preview-ui --preview-page academic
+      - name: Run selected-course load ownership regressions
+        if: always()
+        run: python3 ios/Tests/run-elective-load-tests.py
+      - name: Run retained material top blur regressions
+        if: always()
+        run: |
+          set -e
+          xcrun swiftc -parse-as-library ios/CCSUT/TopBarBlurProfile.swift ios/Tests/TopBarBlurTests.swift -o "$RUNNER_TEMP/top-blur-tests"
+          "$RUNNER_TEMP/top-blur-tests"
+      - name: Build iOS simulator app with debug fixtures
+        run: |
+          xcodebuild build -quiet -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/AcademicBuild" \
+            CODE_SIGNING_ALLOWED=NO

@@ -33,7 +33,9 @@ const WATCH = !!flag('watch', false);
 const INTERVAL = Number(flag('interval', 600)) * 1000;
 const LOG_PATH = flag('log', null);
 
-const PROBE = 'https://tls.ccsut.cn/admin/index';
+// /admin/index 在该部署是 303 中转页，永远无法判活；
+// getXlzc 才是判活探针：会话有效返回 {"ret":0,...}，失效时 302 登录页
+const PROBE = 'https://tls.ccsut.cn/admin/api/getXlzc';
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
@@ -66,7 +68,7 @@ async function checkOnce(state) {
   const res = await fetch(PROBE, {
     method: 'GET',
     redirect: 'manual',
-    headers: { cookie: cookieHeader(state.cookies), 'user-agent': UA, accept: 'text/html,application/xhtml+xml' },
+    headers: { cookie: cookieHeader(state.cookies), 'user-agent': UA, accept: 'application/json' },
   });
 
   // 服务端可能在响应里刷新 Cookie，合并回去
@@ -85,7 +87,15 @@ async function checkOnce(state) {
   }
 
   const location = res.headers.get('location') ?? '';
-  const alive = res.status === 200 && !location.includes('/admin/login');
+  let alive = res.status === 200 && !location.includes('/admin/login');
+  if (alive) {
+    // getXlzc 必须以 {"ret":0} 收尾；200 但 body 是登录 HTML 也算失效
+    try {
+      alive = JSON.parse(await res.text()).ret === 0;
+    } catch {
+      alive = false;
+    }
+  }
   return { alive, status: res.status, location, refreshed, ms: Date.now() - startedAt };
 }
 

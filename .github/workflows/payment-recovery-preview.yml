@@ -1,0 +1,64 @@
+name: Payment recovery preview
+
+on:
+  push:
+    branches: [codex/journal-recovery-entry]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/payment-recovery-preview.yml'
+  workflow_dispatch:
+
+jobs:
+  recovery-ui:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build simulator app
+        id: build
+        run: |
+          set -o pipefail
+          xcodebuild build -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/UIPreview" \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/recovery-build.log"
+      - name: Boot native simulator
+        run: bash ios/Tests/render-preview.sh --boot-only
+      - name: Check recovery entry and existing amount selection
+        run: |
+          set -o pipefail
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/recovery-tests.xcresult" \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testPaymentRecoveryEntry \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testPaymentRecoveryLargeText \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/recovery-tests.log"
+      - name: Capture light and dark recovery states
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          set -e
+          for appearance in light dark; do
+            xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance "$appearance"
+            for state in read version corrupt missing; do
+              xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut --preview-ui --preview-page "campus-electricity-recovery-$state"
+              sleep 3
+              xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$RUNNER_TEMP/ui-screenshots/recovery-$state-$appearance.png"
+            done
+          done
+      - name: Export test screenshots
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/recovery-tests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/recovery-tests.xcresult" --output-path "$RUNNER_TEMP/recovery-attachments"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CCSUT-payment-recovery-preview
+          path: |
+            ${{ runner.temp }}/recovery-build.log
+            ${{ runner.temp }}/recovery-tests.log
+            ${{ runner.temp }}/ui-screenshots/
+            ${{ runner.temp }}/recovery-attachments/
+          if-no-files-found: error
+          retention-days: 14

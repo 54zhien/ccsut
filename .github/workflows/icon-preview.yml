@@ -1,0 +1,54 @@
+name: Native icon verification
+
+on:
+  push:
+    branches: [ui/navigation-timetable]
+    paths:
+      - 'ios/CCSUT/AppIcon.icon/**'
+      - 'ios/CCSUT.xcodeproj/project.pbxproj'
+      - '.github/workflows/icon-preview.yml'
+      - 'tools/verify_app_icon.py'
+  workflow_dispatch:
+
+jobs:
+  icon:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select matching Xcode
+        run: |
+          XCODE=$(ls -1d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+      - name: Compile native icon and inspect appearances
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/icon-preview"
+          xcrun actool ios/CCSUT/AppIcon.icon --compile "$RUNNER_TEMP/icon-preview" \
+            --app-icon AppIcon --platform iphoneos --minimum-deployment-target 26.0 \
+            --target-device iphone --target-device ipad --output-format human-readable-text \
+            --notices --warnings --output-partial-info-plist "$RUNNER_TEMP/icon-preview/icon.plist"
+          xcrun assetutil --info "$RUNNER_TEMP/icon-preview/Assets.car" > "$RUNNER_TEMP/icon-preview/catalog.json"
+          python3 tools/verify_app_icon.py "$RUNNER_TEMP/icon-preview/catalog.json" \
+            > "$RUNNER_TEMP/icon-preview/verification.json"
+      - name: Render native icon appearances
+        run: |
+          RENDERER="$(xcode-select -p)/Applications/Icon Composer.app/Contents/Executables/ictool"
+          if [ ! -x "$RENDERER" ]; then
+            RENDERER=$(find /Applications -path '*/Icon Composer.app/Contents/Executables/ictool' -type f 2>/dev/null | sort -V | tail -1)
+          fi
+          test -x "$RENDERER"
+          echo "Icon Composer renderer: $RENDERER"
+          "$RENDERER" --version
+          for APPEARANCE in Default Dark TintedDark; do
+            "$RENDERER" ios/CCSUT/AppIcon.icon --export-image \
+              --output-file "$RUNNER_TEMP/icon-preview/$APPEARANCE.png" \
+              --platform iOS --rendition "$APPEARANCE" --width 1024 --height 1024 --scale 1
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CCSUT-native-icon
+          path: ${{ runner.temp }}/icon-preview/
+          retention-days: 14

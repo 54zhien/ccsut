@@ -218,11 +218,18 @@ final class SessionStore {
     }
 
     private let api: APIClient
+    private let prepareEcardSession: @MainActor (String, WKWebsiteDataStore) -> Void
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var adoptionTask: Task<Bool, Never>?
     @ObservationIgnored private var isLoggingOut = false
 
-    init(api: APIClient = .shared) { self.api = api }
+    init(api: APIClient = .shared,
+         prepareEcardSession: @escaping @MainActor (String, WKWebsiteDataStore) -> Void = {
+             EcardTokenBridge.prepareSession(forAccount: $0, dataStore: $1)
+         }) {
+        self.api = api
+        self.prepareEcardSession = prepareEcardSession
+    }
 
     private let cookieKey = "ccsut.cookies.v2"
     private let nameKey = "ccsut.student.name"
@@ -249,9 +256,16 @@ final class SessionStore {
         do {
             try await verifySession()
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            // WebStore is deliberately non-persistent. The native session may
+            // still be valid after a cold launch, but CAS/ecard WebViews start
+            // empty until the restored (and verified) cookies are injected.
+            // Do this before exposing MainTabs or starting the ecard prefetch.
+            await injectToWebKit(allCookies())
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
             phase = .loggedIn
-            await loadProfile()
             await refreshIfNeeded()
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            await loadProfile()
         } catch {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             lastError = error.localizedDescription
@@ -315,6 +329,17 @@ final class SessionStore {
         guard !Task.isCancelled, !isLoggingOut else { return }
         let previous = phase
         let generation = CookieJar.generation
+        // Keep the gate closed throughout CAS and WebKit injection: another
+        // suspended loadProfile must not start a replacement prefetch meanwhile.
+        await EcardTokenBridge.suspendPreparation()
+        defer {
+            EcardTokenBridge.resumePreparation()
+            if CookieJar.generation == generation, !Task.isCancelled, !isLoggingOut,
+               phase == .loggedIn, let account = studentId, !account.isEmpty {
+                prepareEcardSession(account, WebStore.dataStore)
+            }
+        }
+        guard CookieJar.generation == generation, !Task.isCancelled, !isLoggingOut else { return }
         // 启动验证结束前不展示 MainTabs，避免页面拿过期 Cookie 抢先加载。
         if previous != .checking { phase = .refreshing }
         lastError = nil
@@ -328,6 +353,7 @@ final class SessionStore {
             phase = .loggedIn
             lastError = nil
             await injectToWebKit(allCookies())
+            guard CookieJar.generation == generation, !Task.isCancelled else { return }
             await loadProfile()
         } catch {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
@@ -447,6 +473,7 @@ final class SessionStore {
             if let sid = initData.xsxh, !sid.isEmpty {
                 studentId = sid
                 UserDefaults.standard.set(sid, forKey: sidKey)
+                prepareEcardSession(sid, WebStore.dataStore)
             }
         } catch {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
@@ -468,11 +495,14 @@ final class SessionStore {
     }
 
     private func injectToWebKit(_ cookies: [HTTPCookie]) async {
-        let generation = CookieJar.generation
-        for c in cookies {
-            guard CookieJar.generation == generation, !Task.isCancelled else { return }
-            do { try await WebStore.dataStore.httpCookieStore.set(c) }
-            catch { return }
+        do {
+            try await WebStore.restoreCookies(cookies, to: WebStore.dataStore, policy: .replaceExisting)
+        } catch is CancellationError {
+            return
+        } catch {
+            // Native verification already succeeded; retain that login and let
+            // payment startup retry the missing WebKit credentials separately.
+            lastError = "恢复校园网页认证失败，请在缴费页重新加载"
         }
     }
 
@@ -485,6 +515,7 @@ final class SessionStore {
         refreshTask?.cancel()
         adoptionTask?.cancel()
         CookieJar.shared = []
+        EcardTokenBridge.clearCachedToken()
         Keychain.delete(cookieKey)
         UserDefaults.standard.removeObject(forKey: nameKey)
         UserDefaults.standard.removeObject(forKey: sidKey)
@@ -549,6 +580,11 @@ final class NoRedirect: NSObject, URLSessionTaskDelegate {
 }
 
 enum CookieJar {
+    struct RequestCookies {
+        let hasCookies: Bool
+        let header: String?
+    }
+
     private static let lock = NSRecursiveLock()
     private nonisolated(unsafe) static var cookies: [HTTPCookie] = []
     private nonisolated(unsafe) static var revision: UInt64 = 0
@@ -596,17 +632,53 @@ enum CookieJar {
     }
 
     static func header(for url: URL) -> String? {
-        guard let host = url.host?.lowercased() else { return nil }
+        lock.lock(); defer { lock.unlock() }
+        return makeHeader(for: url, cookies: activeCookiesLocked)
+    }
+
+    /// Validates the generation and derives the matching Cookie header under one lock.
+    /// A caller must never check `generation` separately from reading this header.
+    static func requestCookies(for url: URL, expectedGeneration: UInt64) throws -> RequestCookies {
+        lock.lock(); defer { lock.unlock() }
+        guard expectedGeneration == revision else { throw CancellationError() }
+        let activeCookies = activeCookiesLocked
+        return RequestCookies(
+            hasCookies: !activeCookies.isEmpty,
+            header: makeHeader(for: url, cookies: activeCookies)
+        )
+    }
+
+    static func header(for url: URL, expectedGeneration: UInt64) throws -> String? {
+        try requestCookies(for: url, expectedGeneration: expectedGeneration).header
+    }
+
+    /// Keep scope metadata and validate ownership under the same lock for SSO overlays.
+    static func scopedCookies(for url: URL, expectedGeneration: UInt64) throws -> [HTTPCookie] {
+        lock.lock(); defer { lock.unlock() }
+        guard expectedGeneration == revision else { throw CancellationError() }
+        return matchingCookies(for: url, cookies: activeCookiesLocked)
+    }
+
+    private static var activeCookiesLocked: [HTTPCookie] {
+        cookies.filter { isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
+    }
+
+    private static func makeHeader(for url: URL, cookies: [HTTPCookie]) -> String? {
+        let matched = matchingCookies(for: url, cookies: cookies)
+        guard !matched.isEmpty else { return nil }
+        return matched.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+    }
+
+    private static func matchingCookies(for url: URL, cookies: [HTTPCookie]) -> [HTTPCookie] {
+        guard let host = url.host?.lowercased() else { return [] }
         let path = url.path.isEmpty ? "/" : url.path
-        let matched = shared.filter { c in
+        return cookies.filter { c in
             let d = c.domain.hasPrefix(".") ? String(c.domain.dropFirst()) : c.domain
             let domainMatches = host == d || (c.domain.hasPrefix(".") && host.hasSuffix("." + d))
             let pathMatches = path == c.path || (path.hasPrefix(c.path) &&
                 (c.path.hasSuffix("/") || path.dropFirst(c.path.count).hasPrefix("/")))
             return domainMatches && pathMatches && (!c.isSecure || url.scheme == "https")
         }.sorted { $0.path.count > $1.path.count }
-        guard !matched.isEmpty else { return nil }
-        return matched.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
     }
 
     static var names: [String] { shared.map(\.name).sorted() }
@@ -628,7 +700,11 @@ enum CookieJar {
     static func upsert(_ incoming: [HTTPCookie], generation: UInt64? = nil) {
         lock.lock(); defer { lock.unlock() }
         if let generation, generation != revision { return }
-        let key: (HTTPCookie) -> String = { "\($0.name)|\($0.domain)|\($0.path)" }
+        let key: (HTTPCookie) -> String = {
+            let domain = $0.domain.lowercased()
+            let normalized = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+            return "\($0.name)|\(normalized)|\($0.path)"
+        }
         for cookie in incoming where isSchoolCookie(cookie) {
             cookies.removeAll { key($0) == key(cookie) }
             if (cookie.expiresDate ?? .distantFuture) > Date() { cookies.append(cookie) }
@@ -647,4 +723,13 @@ enum CookieJar {
 
 enum WebStore {
     nonisolated(unsafe) static var dataStore: WKWebsiteDataStore = .nonPersistent()
+
+    @MainActor static func restoreCookies(_ cookies: [HTTPCookie], to store: WKWebsiteDataStore,
+                                         policy: WebSessionCookies.Policy) async throws {
+        let generation = CookieJar.generation
+        try await WebSessionCookies.restore(cookies, policy: policy,
+            read: { try await store.httpCookieStore.cookieSnapshot() },
+            write: { try await store.httpCookieStore.set($0) },
+            isCurrent: { CookieJar.generation == generation })
+    }
 }
