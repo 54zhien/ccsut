@@ -34,12 +34,21 @@ jobs:
         timeout-minutes: 20
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ui-screenshots"
           sudo xcode-select --switch /Applications/Xcode_27.2.app
           xcodebuild -version
           xcodebuild -downloadPlatform iOS -buildVersion 27.2 -architectureVariant arm64
           xcrun simctl list runtimes
+          xcrun simctl list runtimes -j > "$RUNNER_TEMP/ui-screenshots/runtimes.json"
+          RUNTIME=$(python3 -c '
+          import json,sys
+          runtimes=json.load(open(sys.argv[1]))["runtimes"]
+          matches=[r for r in runtimes if r.get("isAvailable") and r.get("version")=="27.2"]
+          if len(matches)!=1: raise SystemExit("Expected one available iOS 27.2 runtime: " + repr(matches))
+          print(matches[0]["identifier"])
+          ' "$RUNNER_TEMP/ui-screenshots/runtimes.json")
           DEVICE=$(xcrun simctl create 'CCSUT iPhone 15 Pro Max iOS 27.2' \
-            com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro-Max com.apple.CoreSimulator.SimRuntime.iOS-27-2)
+            com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro-Max "$RUNTIME")
           echo "CCSUT_PREVIEW_DEVICE=$DEVICE" >> "$GITHUB_ENV"
       - name: Test timetable presentation
         run: |
