@@ -467,6 +467,77 @@ struct SessionRegressionTests {
         check(SchoolProtocol.requestPaths == ["/admin/caslogin", "/backstage/cas/login", "/admin/caslogin"],
               "TGC-only renewal completes all three fake-network hops")
 
+        for port in ["", ":80"] {
+            CookieJar.shared = [cookie("TGC", "http-fixture", domain: "auth.ccsut.cn")]
+            var allHTTPS = true
+            var correctScopedCookies = true
+            var preservedTicket = false
+            SchoolProtocol.response = { request in
+                let url = request.url!
+                allHTTPS = allHTTPS && url.scheme == "https" && (url.port == nil || url.port == 443)
+                if url.host == "auth.ccsut.cn" {
+                    correctScopedCookies = correctScopedCookies && request.value(forHTTPHeaderField: "Cookie") == "TGC=http-fixture"
+                    return (302, url, ["Location":"http://tls.ccsut.cn\(port)/admin/caslogin?ticket=fixture%2Bticket%26part%3D2"], "")
+                }
+                if url.path == "/admin/caslogin" {
+                    correctScopedCookies = correctScopedCookies && request.value(forHTTPHeaderField: "Cookie") == nil
+                    if url.query == nil {
+                        return (302, url, ["Location":"http://auth.ccsut.cn\(port)/backstage/cas/login?service=https%3A%2F%2Ftls.ccsut.cn%2Fadmin%2Fcaslogin"], "")
+                    }
+                    preservedTicket = url.query == "ticket=fixture%2Bticket%26part%3D2"
+                    return (302, url, ["Location":"/frontend/student", "Set-Cookie":"jw_uf=http-renewed; Path=/; Secure"], "")
+                }
+                return (200, url, [:], "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}")
+            }
+            let store = sessionStore()
+            await store.refresh()
+            check(store.phase == .loggedIn && allHTTPS && correctScopedCookies && preservedTicket
+                  && CookieJar.header(for: "tls.ccsut.cn") == "jw_uf=http-renewed",
+                  "HTTP CAS renewal upgrades before Secure cookie matching and preserves ticket bytes (port \(port))")
+        }
+
+        let rejectedAcademicURLs = [
+            "http://attacker.invalid/admin/caslogin", "http://auth.ccsut.cn.attacker.invalid/backstage/cas/login",
+            "http://unknown.ccsut.cn/admin/caslogin", "http://auth.ccsut.cn:8080/backstage/cas/login",
+            "http://user:pass@auth.ccsut.cn/backstage/cas/login", "http://auth.ccsut.cn/backstage/cas/login#fragment"
+        ]
+        for (index, location) in rejectedAcademicURLs.enumerated() {
+            CookieJar.shared = [cookie("TGC", "fixture", domain: "auth.ccsut.cn")]
+            SchoolProtocol.requestCount = 0
+            SchoolProtocol.response = { request in (302, request.url!, ["Location":location], "") }
+            do {
+                _ = try await api.response(for: URLRequest(url: URL(string: "https://tls.ccsut.cn/admin/caslogin")!),
+                                           allowAuthenticationRedirects: true)
+                check(false, "HTTP academic rejection boundary \(index)")
+            } catch {
+                check((error as? APIError).map { if case .notLoggedIn = $0 { return true }; return false } == true
+                      && SchoolProtocol.requestCount == 1, "HTTP academic rejection boundary \(index) sends no further request")
+            }
+        }
+
+        for status in [307, 308] {
+            CookieJar.shared = [cookie("jw_uf", "fixture"), cookie("TGC", "fixture", domain: "auth.ccsut.cn")]
+            SchoolProtocol.requestCount = 0
+            SchoolProtocol.response = { request in
+                (status, request.url!, ["Location":"http://auth.ccsut.cn/backstage/cas/login"], "")
+            }
+            var request = URLRequest(url: URL(string: "https://tls.ccsut.cn/admin/business")!)
+            request.httpMethod = "POST"; request.httpBody = Data("synthetic=form".utf8)
+            do {
+                _ = try await api.response(for: request, allowAuthenticationRedirects: true)
+                check(false, "HTTP upgrade never forwards a cross-host business POST (\(status))")
+            } catch {
+                check(SchoolProtocol.requestCount == 1, "HTTP upgrade never forwards a cross-host business POST (\(status))")
+            }
+        }
+        CookieJar.shared = [cookie("TGC", "fixture", domain: "auth.ccsut.cn")]
+        SchoolProtocol.requestCount = 0
+        SchoolProtocol.response = { request in (302, request.url!, ["Location":"http://auth.ccsut.cn/backstage/cas/login"], "") }
+        do {
+            _ = try await api.html("/admin/business")
+            check(false, "HTTP upgrade does not enable authentication redirects for business calls")
+        } catch { check(SchoolProtocol.requestCount == 1, "HTTP upgrade does not enable authentication redirects for business calls") }
+
         CookieJar.shared = [cookie("scoped", "yes", path: "/admin"), cookie("TGC", "private", domain: "auth.ccsut.cn")]
         check(CookieJar.header(for: URL(string: "https://tls.ccsut.cn/admin/courses")!) == "scoped=yes",
               "path-scoped Cookie reaches its permitted endpoint")

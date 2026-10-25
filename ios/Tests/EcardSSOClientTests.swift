@@ -341,7 +341,7 @@ struct EcardSSOClientTests {
         ecardCallback.queryItems = [URLQueryItem(name: "targetUrl", value: transitTarget),
                                     URLQueryItem(name: "ticket", value: "fixture-ecard-cas-ticket")]
         let configJSON = #"{"code":0,"data":{"defaultDomain":"local","authServerInfoList":[{"authType":"auth/cas","loginDomain":"cas88719","loginUrl":"/passport/v1/public/casLogin?sfDomain=cas88719"}]}}"#
-        let gatewayTransport = ScriptedTransport(Self.gatewayPrefix(
+        let gatewayResponses = Self.gatewayPrefix(
             authCheckBody: #"{"code":0,"data":{"sidTicket":"fixture-sid-ticket","userName":"2026123456"}}"#
         ) + [
             StubResponse(302, headers: ["Location": "https://ecard.ccsut.cn/berserker-auth/cas/login/wisedu?sdpAppCode=da7ce743-45f0-46d0-9b9e-a3afa4f9b2bb&unitId=59f83d72-4fef-48c4-8859-44f786e145e6"],
@@ -365,7 +365,8 @@ struct EcardSSOClientTests {
                              $0.value(forHTTPHeaderField: "synjones-auth") == "bearer fixture-portal-token"
                                  && $0.value(forHTTPHeaderField: "Authorization") == "Synthetic feeitem header"
                          })
-        ])
+        ]
+        let gatewayTransport = ScriptedTransport(gatewayResponses)
         do {
             let result = try await EcardSSOClient(account: account, credentials: SyntheticCredentials(),
                                                  transport: gatewayTransport, timeout: 2,
@@ -384,6 +385,68 @@ struct EcardSSOClientTests {
             let outcome = await gatewayTransport.outcome()
             let paths = outcome.requests.compactMap { $0.url?.path }.joined(separator: " -> ")
             check(false, "gateway CAS synthetic flow: \(error.localizedDescription) [\(paths)]")
+        }
+
+
+        for port in [nil, 80] as [Int?] {
+            // Only change the outer address; encoded service/targetUrl/tickets stay byte-for-byte intact.
+            let responses = gatewayResponses.map { response -> StubResponse in
+                var headers = response.headers
+                if let location = headers["Location"], var url = URLComponents(string: location), url.scheme == "https" {
+                    url.scheme = "http"; url.port = port
+                    headers["Location"] = url.url!.absoluteString
+                }
+                var body = String(data: response.body, encoding: .utf8)!
+                if response.expectedPath == "/passport/v1/public/authConfig" {
+                    let authority = port == nil ? "zts.ccsut.cn" : "zts.ccsut.cn:80"
+                    body = body.replacingOccurrences(of: "\"loginUrl\":\"/", with: "\"loginUrl\":\"http://\(authority)/")
+                }
+                return StubResponse(response.status, headers: headers, body: body, path: response.expectedPath,
+                    method: response.expectedMethod, query: response.expectedQuery, checkRequest: response.checkRequest)
+            }
+            let transport = ScriptedTransport(responses)
+            do {
+                let result = try await EcardSSOClient(account: account, credentials: SyntheticCredentials(),
+                    transport: transport, timeout: 2, tokenAuthorization: "Synthetic token header",
+                    feeItemAuthorization: "Synthetic feeitem header").fetchPaymentToken()
+                let outcome = await transport.outcome()
+                check(result == token && outcome.remaining == 0 && !outcome.mismatch
+                      && outcome.requests.allSatisfy { $0.url?.scheme == "https" && ($0.url?.port == nil || $0.url?.port == 443) },
+                      "HTTP outer SSO redirects and config upgrade safely (port \(String(describing: port)))")
+                let exchange = outcome.requests.first { $0.url?.path == "/berserker-auth/oauth/token" }
+                let form = String(data: exchange?.httpBody ?? Data(), encoding: .utf8) ?? ""
+                check(form.contains("username=fixture%2Bticket%26part%3D2")
+                      && outcome.requests.filter { $0.url?.host == "auth.ccsut.cn" }.allSatisfy {
+                          $0.value(forHTTPHeaderField: "Authorization") == nil && $0.value(forHTTPHeaderField: "synjones-auth") == nil
+                      }, "HTTP upgrade preserves ticket bytes and keeps token authorization off CAS")
+            } catch { check(false, "HTTP outer SSO redirects and config upgrade safely (port \(String(describing: port))): \(error)") }
+        }
+
+        let rejectedHTTP = [
+            "http://attacker.invalid/controller/v1/public/verify?t=fixture",
+            "http://zts.ccsut.cn.attacker.invalid/controller/v1/public/verify?t=fixture",
+            "http://unknown.ccsut.cn/controller/v1/public/verify?t=fixture",
+            "http://zts.ccsut.cn:8080/controller/v1/public/verify?t=fixture",
+            "http://user:pass@zts.ccsut.cn/controller/v1/public/verify?t=fixture",
+            "http://zts.ccsut.cn/controller/v1/public/verify?t=fixture#fragment",
+            "http://zts.ccsut.cn/not-allowed?t=fixture",
+            "http://zts.ccsut.cn/controller/v1/public/verify?t=one&t=two",
+            "http://zts.ccsut.cn/controller/v1/public/verify?t=fixture&extra=1",
+            "http://auth.ccsut.cn/backstage/cas/login?service=http%3A%2F%2Fzts.ccsut.cn%2Fpassport%2Fv1%2Fauth%2Fcas",
+            "http://ecard.ccsut.cn/plat?name=loginTransit&ticket=fixture&targetUrl=http%3A%2F%2Fecard.ccsut.cn%2Fplat%3Fname%3DloginTransit",
+        ]
+        for (index, location) in rejectedHTTP.enumerated() {
+            let transport = ScriptedTransport([StubResponse(302, headers: ["Location": location,
+                "Set-Cookie":"TGC=uncommitted; Domain=ecard.ccsut.cn; Path=/; Secure"], path: "/berserker-auth/cas/login/wisedu")])
+            let credentials = SyntheticCredentials()
+            do {
+                _ = try await EcardSSOClient(account: account, credentials: credentials, transport: transport, timeout: 2).fetchPaymentToken()
+                check(false, "HTTP SSO rejection boundary \(index)")
+            } catch let error as EcardSSOError {
+                let outcome = await transport.outcome()
+                check(error == .untrustedRedirect && outcome.requestCount == 1 && credentials.acceptedState().acceptCount == 0,
+                      "HTTP SSO rejection boundary \(index) sends no further request or cookie commit")
+            } catch { check(false, "HTTP SSO rejection boundary \(index): wrong error") }
         }
 
         let badRedirectTransport = ScriptedTransport([
