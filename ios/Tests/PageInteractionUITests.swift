@@ -452,6 +452,65 @@ final class PageInteractionUITests: XCTestCase {
         }
     }
 
+    // The direct-preview refresh test starts with the academic tab already selected.
+    // These cases keep the timetable mounted first and enter through the real links,
+    // matching the device report: scrolling works, but pulling at the top does not refresh.
+    func testScoresRefreshAfterSwitchingFromTimetable() {
+        assertRefreshAfterSwitchingFromTimetable(entry: "academic-scores", content: "示例课程 1")
+    }
+
+    func testExamsRefreshAfterSwitchingFromTimetable() {
+        assertRefreshAfterSwitchingFromTimetable(entry: "academic-exams", content: "示例考试 1")
+    }
+
+    func testElectivesRefreshAfterSwitchingFromTimetable() {
+        assertRefreshAfterSwitchingFromTimetable(entry: "academic-electives", content: "工程制图")
+    }
+
+    func testLongAcademicListsPullToRefresh() {
+        for (page, content) in [("scores", "示例课程 1"), ("exams", "示例考试 1")] {
+            let app = launch(page, longList: true, refresh: true)
+            assertAcademicPullPublishes(app, content: content, stage: "direct-long-\(page)")
+            app.terminate()
+        }
+    }
+
+    private func assertRefreshAfterSwitchingFromTimetable(entry: String, content: String) {
+        let app = launch("interactions", longList: true, refresh: true)
+        defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts["refresh-count"].waitForExistence(timeout: 5))
+        let academicTab = app.tabBars.buttons["教务"]
+        XCTAssertTrue(academicTab.waitForExistence(timeout: 5))
+        academicTab.tap()
+        let link = app.buttons[entry]
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.tap()
+        XCTAssertTrue(app.buttons["返回教务"].waitForExistence(timeout: 5))
+        assertAcademicPullPublishes(app, content: content, stage: "tab-switch-\(entry)")
+    }
+
+    private func assertAcademicPullPublishes(_ app: XCUIApplication, content: String, stage: String) {
+        let counter = app.descendants(matching: .any).matching(identifier: "academic-publication-count").firstMatch
+        XCTAssertTrue(counter.waitForExistence(timeout: 5))
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5), .completed,
+                       "The initial snapshot must finish before testing a separate pull")
+        let row = app.staticTexts.matching(identifier: content).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        XCTAssertTrue(row.isHittable, "The list must start at the top")
+        capture(app, "\(stage)-before-pull")
+        logPageRefreshDiagnostic(app, "\(stage)-before-pull")
+        // Start in the middle of the scrollable body, away from the title/semester menu.
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        let refreshed = XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '2'"), evaluatedWith: counter)], timeout: 5)
+        logPageRefreshDiagnostic(app, "\(stage)-after-pull")
+        capture(app, "\(stage)-after-pull")
+        XCTAssertEqual(refreshed, .completed, "\(stage): one pull must publish one new snapshot")
+        XCTAssertEqual(counter.label, "2")
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+    }
+
     func testAcademicTitlesAndTermStripsRemainStableWhenPinned() {
         var stripWidths: [CGFloat] = []
         for (page, title) in [("scores", "成绩单"), ("exams", "考试")] {
