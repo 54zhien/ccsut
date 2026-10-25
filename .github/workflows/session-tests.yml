@@ -6,6 +6,8 @@ on:
       - 'ios/CCSUT/**'
       - 'ios/Tests/**'
       - '.github/workflows/session-tests.yml'
+      - '.gitignore'
+      - 'dist/**'
   workflow_dispatch:
 
 jobs:
@@ -14,6 +16,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Reject tracked distribution and diagnostic files
+        if: always()
+        run: node --test ios/Tests/repository-privacy.test.mjs
       - name: Compile session regression runner
         run: |
           xcrun swiftc -parse-as-library \

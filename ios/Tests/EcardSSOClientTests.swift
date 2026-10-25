@@ -219,6 +219,44 @@ struct EcardSSOClientTests {
             check(false, "direct CAS session returns the validated payment JWT: \(error.localizedDescription)")
         }
 
+        // A deletion replaces only (name, normalized domain, path), not every
+        // persistent cookie with the same name. Exercise real request assembly.
+        let deletionScopes: [(label: String, survivorDomain: String, survivorPath: String,
+                              deletedDomain: String, deletedPath: String)] = [
+            ("narrow deletion preserves root", "ecard.ccsut.cn", "/", "ecard.ccsut.cn", "/berserker-auth"),
+            ("root deletion preserves narrow", "ecard.ccsut.cn", "/berserker-auth", "ecard.ccsut.cn", "/"),
+            ("host deletion preserves parent domain", ".ccsut.cn", "/", "ecard.ccsut.cn", "/"),
+            ("parent deletion preserves host", "ecard.ccsut.cn", "/", ".ccsut.cn", "/"),
+            ("unrelated path deletion preserves root", "ecard.ccsut.cn", "/", "ecard.ccsut.cn", "/charge"),
+        ]
+        for scope in deletionScopes {
+            let survivor = HTTPCookie(properties: [.domain: scope.survivorDomain, .path: scope.survivorPath,
+                                                   .name: "TGC", .value: "survivor", .secure: "TRUE"])!
+            let deleted = HTTPCookie(properties: [.domain: scope.deletedDomain, .path: scope.deletedPath,
+                                                 .name: "TGC", .value: "obsolete", .secure: "TRUE"])!
+            let credentials = SyntheticCredentials(initialCookies: [survivor, deleted])
+            let transport = ScriptedTransport([
+                StubResponse(302, headers: ["Location": transitLocation,
+                    "Set-Cookie": "TGC=; Domain=\(scope.deletedDomain); Path=\(scope.deletedPath); Expires=Wed, 21 Oct 2015 07:28:00 GMT; Secure"],
+                    path: "/berserker-auth/cas/login/wisedu"),
+                StubResponse(200, body: #"{"access_token":"fixture-portal-token","token_type":"bearer","expires_in":3600,"sno":"2026123456"}"#,
+                    path: "/berserker-auth/oauth/token", method: "POST",
+                    checkRequest: { $0.value(forHTTPHeaderField: "Cookie") == "TGC=survivor"
+                        && credentials.acceptedState().acceptCount == 0 }),
+                StubResponse(302, headers: ["Location": "https://ecard.ccsut.cn/charge-app/?token=\(token)&name=pays&id=408"],
+                    path: "/charge/feeitem/toAppitem")
+            ])
+            do {
+                _ = try await EcardSSOClient(account: account, credentials: credentials,
+                    transport: transport, timeout: 2).fetchPaymentToken()
+                let outcome = await transport.outcome()
+                check(!outcome.mismatch && outcome.remaining == 0, "\(scope.label) during authentication")
+                let state = credentials.acceptedState()
+                check(state.acceptCount == 1 && state.cookies.count == 1 && state.cookies.first?.value == "survivor",
+                      "\(scope.label) after successful commit")
+            } catch { check(false, "\(scope.label): \(error.localizedDescription)") }
+        }
+
         let staleCookie = HTTPCookie(properties: [
             .domain: "ecard.ccsut.cn", .path: "/", .name: "TGC", .value: "stale", .secure: "TRUE"
         ])!
