@@ -121,7 +121,7 @@ final class EcardPaymentModel {
         let sameSession = self.account == account && boundGeneration == generation
         guard !isSubmitting || !sameSession else { return }
         guard !isStarting || !sameSession || force else { return }
-        if sameSession, fee != nil, !force {
+        if sameSession, fee != nil, recoveryIssue == nil, !force {
             if let campus, buildings.isEmpty { selectCampus(campus) }
             else if let room, detail == nil { selectRoom(room) }
             return
@@ -130,9 +130,9 @@ final class EcardPaymentModel {
         submissionID = nil; isSubmitting = false
         checkingID = nil; isChecking = false
         EcardTokenBridge.cancelPreparation()
+        let wasBlocked = self.account == account && (recoveryIssue != nil || receipt?.status == .pending)
         self.account = account
         boundGeneration = generation
-        let wasBlocked = recoveryIssue != nil && sameSession
         recoveryIssue = nil; receipt = nil; confirmation = nil
         do {
             receipt = try pendingStore.load(account: account)

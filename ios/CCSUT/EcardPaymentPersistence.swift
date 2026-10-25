@@ -5,10 +5,10 @@ enum EcardReceiptRecoveryError: Error, LocalizedError, Equatable {
     case storageUnavailable, unresolvedOrder
     var errorDescription: String? {
         switch self {
-        case .readUnavailable: return "暂时无法读取待确认订单，请解锁设备后重试读取，勿重复缴费"
+        case .readUnavailable: return "无法读取待确认订单，请稍后重试读取；持续失败时请核实原订单，勿重复缴费"
         case .unsupportedVersion: return "待确认订单由不支持的版本保存，请更新 App 后重试，勿重复缴费"
         case .corrupted: return "待确认订单记录已损坏，请先核实原订单，勿重复缴费"
-        case .missingRecord: return "此前无法读取的待确认订单记录现已缺失，请先核实原订单，勿重复缴费"
+        case .missingRecord: return "本地待确认订单记录已缺失，请先核实原订单，勿重复缴费"
         case .storageUnavailable: return "无法保存或更新支付恢复记录，请稍后重试，勿重复缴费"
         case .unresolvedOrder: return "已有待确认订单，请先查询原订单，勿重复缴费"
         }
@@ -42,6 +42,8 @@ enum EcardReceiptRecoveryError: Error, LocalizedError, Equatable {
             // so a subsequent missing file cannot silently enable a new debit.
             blockedAccounts.insert(account)
             if let file = try? fileURL(account: account) {
+                // When the volume itself cannot be written, only this process
+                // can remember the failure. Do not erase the original evidence.
                 try? writeData(Data("recovery-required".utf8), to: blockURL(file))
             }
             throw error
@@ -63,6 +65,7 @@ enum EcardReceiptRecoveryError: Error, LocalizedError, Equatable {
             case .pending:
                 guard let saved = journal.receipt else { throw EcardReceiptRecoveryError.corrupted }
                 try validate(saved); receipt = saved
+                blockedAccounts.insert(account)
             case .cleared:
                 guard journal.receipt == nil else { throw EcardReceiptRecoveryError.corrupted }
                 receipt = nil
@@ -82,6 +85,7 @@ enum EcardReceiptRecoveryError: Error, LocalizedError, Equatable {
         let receipt = try decode(data)
         // Remove the old copy only after its atomic replacement exists.
         try write(receipt, to: file)
+        blockedAccounts.insert(account)
         defaults.removeObject(forKey: key)
         return receipt
     }
@@ -107,6 +111,7 @@ enum EcardReceiptRecoveryError: Error, LocalizedError, Equatable {
             throw EcardReceiptRecoveryError.unresolvedOrder
         }
         try write(receipt, to: fileURL(account: account))
+        blockedAccounts.insert(account)
     }
 
     func clear(account: String, orderID: String) throws {

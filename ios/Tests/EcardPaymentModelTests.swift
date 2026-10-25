@@ -225,6 +225,25 @@ private actor ModelServer {
             model.stopQueries()
         }
 
+        do {
+            let journal = store("marker-write-failure")
+            try journal.save(receipt("original-order"), account: "fixture-A")
+            let file = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("marker-write-failure"), includingPropertiesForKeys: nil).first!
+            let original = Data("broken-json".utf8)
+            try original.write(to: file)
+            // A directory at the marker destination rejects its atomic write.
+            let marker = file.appendingPathExtension("recovery-block")
+            try FileManager.default.createDirectory(at: marker, withIntermediateDirectories: false)
+            let model = make(ModelServer(), journal, Epoch()); await ready(model)
+            model.retryRecovery(account: "fixture-A")
+            check(model.recoveryIssue == .corrupted && !model.canPay, "failed block-marker write cannot unlock the current process")
+            check(try Data(contentsOf: file) == original, "failed block-marker write preserves damaged source")
+            try FileManager.default.removeItem(at: file)
+            model.retryRecovery(account: "fixture-A")
+            check(model.recoveryIssue == .missingRecord && !model.canPay, "in-memory block survives disappearance when marker write fails")
+            model.stopQueries()
+        }
+
         // Restart while the server has received the debit, before its response.
         do {
             let gate = Gate(), journal = store("restart"), epoch = Epoch()
