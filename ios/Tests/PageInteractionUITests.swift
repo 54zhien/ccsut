@@ -74,6 +74,9 @@ final class PageInteractionUITests: XCTestCase {
         let app = launch("electives", arguments:["--preview-complete-selected"])
         XCTAssertTrue(app.staticTexts["示例线上已选课"].waitForExistence(timeout:8))
         app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["示例线下已选课"].waitForExistence(timeout:5))
+        XCTAssertFalse(app.staticTexts["示例配课课程"].exists)
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format:"label CONTAINS %@","仅供查看")).firstMatch.exists)
         let search = app.textFields["课程名 / 教师"]
         search.tap(); search.typeText("示例线下")
         XCTAssertTrue(app.staticTexts["示例线下已选课"].waitForExistence(timeout:5))
@@ -726,7 +729,7 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testOtherPagesRetainTimetableRefreshAnimation() {
-        assertPagesRetainTimetableRefreshAnimation(["exams", "electives", "academic", "campus-leave", "campus-travel"])
+        assertPagesRetainTimetableRefreshAnimation(["exams", "electives", "campus-leave", "campus-travel"])
     }
 
     func testCampusPagesRetainTimetableRefreshAnimation() {
@@ -889,7 +892,7 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertEqual(stripWidths[0], stripWidths[1], accuracy: 2)
     }
 
-    func testScoreBreakdownExpandsAndHomeReusesLoadedSummary() {
+    func testScoreBreakdownExpandsAndHomeKeepsOnlyEntryTitles() {
         let app = launch("scores")
         let disclosure = app.buttons["score-breakdown-1"]
         XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
@@ -901,7 +904,9 @@ final class PageInteractionUITests: XCTestCase {
         disclosure.tap()
         XCTAssertFalse(app.staticTexts["平时(40%)"].exists)
         app.buttons["返回教务"].tap()
-        XCTAssertTrue(app.buttons["academic-scores"].label.contains("已公布 3 门成绩"))
+        XCTAssertEqual(app.buttons["academic-scores"].label, "成绩查询")
+        XCTAssertEqual(app.buttons["academic-exams"].label, "考试安排")
+        XCTAssertEqual(app.buttons["academic-electives"].label, "选课")
     }
 
     func testSemesterMenusReachHistoricalContent() {
