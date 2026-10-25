@@ -15,6 +15,7 @@ struct ElectiveView: View {
     @Environment(\.deviceCornerRadius) private var deviceCornerRadius
 
     var onLoaded: (_ selectedCount: Int, _ term: String) -> Void = { _, _ in }
+    var onSummaryInvalidated: () -> Void = {}
 
     @State private var initData: ElectiveInit?
     @State private var electiveState = ElectiveState<TeachingClass>()
@@ -74,6 +75,7 @@ struct ElectiveView: View {
         }
         .onChange(of: enrolledModel.currentSummary) { _, summary in
             if let summary { onLoaded(summary.count, summary.term) }
+            else { onSummaryInvalidated() }
         }
         .sheet(item: $detail) { item in
             CourseDetailSheet(item: item, actionBlockReason: actionBlockReason(for: item))
@@ -267,7 +269,7 @@ struct ElectiveView: View {
     private var enrolledReadOnlyReason: String {
         if !enrolledModel.isVerified || isLoading { return "课程结果尚未验证完成，仅供查看" }
         if enrolledModel.selectedTerm != enrolledModel.context?.defaultTerm { return "历史学期课程，仅供查看" }
-        return "仅供查看，请在官方页面核实操作条件"
+        return "仅供查看，下拉刷新可核实操作条件"
     }
 
     private func catalogCard(_ item: TeachingClass) -> some View {
@@ -538,7 +540,8 @@ struct ElectiveView: View {
                         expectedGeneration: expectedGeneration)
             if let expectedGeneration, handleCookieGenerationChange(expected:expectedGeneration) { return }
             guard !Task.isCancelled else { return }
-            await enrolledModel.load(refreshContext:force)
+            let owner = CookieJar.generation
+            await enrolledModel.load(refreshContext:force,catalogGeneration:hasVerifiedSnapshot(for:owner) ? owner : nil)
         }
     }
 

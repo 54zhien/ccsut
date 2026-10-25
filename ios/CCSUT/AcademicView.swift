@@ -67,10 +67,10 @@ struct AcademicView: View {
                     scoreSummary = items.isEmpty ? "暂无已公布成绩" : "已公布 \(items.count) 门成绩 · 点击查看详情"
                 }
                 case .exams: ExamView()
-                case .electives: ElectiveView { count, term in
+                case .electives: ElectiveView(onLoaded: { count, term in
                     resetSummariesIfNeeded()
                     electiveSummary = "已选 \(count) 门 · \(SchedulePresentation.termTitle(term))"
-                }
+                }, onSummaryInvalidated: { electiveSummary = nil })
                 }
             }
             .task {

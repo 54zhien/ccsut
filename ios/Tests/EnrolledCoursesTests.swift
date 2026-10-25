@@ -99,6 +99,8 @@ private actor ReadGate {
         check(model.currentSummary?.count == 1 && model.currentSummary?.term == current,"current summary uses complete result count")
         fail = true; await model.load()
         check(model.snapshot?.first?.id == "closed" && !model.isVerified && model.errorText != nil,"failed same-term refresh retains content with an unverified notice")
+        check(model.currentSummary == nil,"failed current-result refresh cannot keep an apparently verified summary")
+        fail = false; await model.load()
         fail = false; await model.load(term:past)
         check(model.snapshot?.first?.id == "past" && model.selectedTerm == past,"term change replaces old content")
         check(model.currentSummary?.term == current,"history does not overwrite the current summary")
@@ -132,7 +134,7 @@ private actor ReadGate {
               "cancelled read remains explicitly unverified rather than a successful empty list")
 
         let link = EnrolledCoursesModel(generation:{generation.value},contextLoader:{ _ in context },coursesLoader:{ term,_ in [try course("match",term:term)] })
-        await link.load()
+        await link.load(catalogGeneration:generation.value)
         func catalog(_ json: String) throws -> ElectiveState<TeachingClass> {
             let c = try JSONDecoder().decode(TeachingClass.self,from:Data(json.utf8))
             var b = ElectiveSnapshotBuilder<TeachingClass>(); b.append([ElectiveCourseRecord(id:c.id,value:c,actionFacts:ElectiveCourseActionFacts(isSelected:c.isSelected,selectionFlag:c.sfkxk,isFull:c.isFull))],batchID:"live")
@@ -149,6 +151,9 @@ private actor ReadGate {
         let otherClass = try catalog(#"{"id":"match","jxbbh":"OTHER","status":"1"}"#)
         check(link.currentCourse(for:matched,catalog:otherClass,catalogTerm:current) == nil,"course id without matching teaching-class number is insufficient")
         check(link.currentCourse(for:matched,catalog:live,catalogTerm:past) == nil,"different catalog term cannot grant mutation authority")
+        await link.load()
+        check(link.currentCourse(for:matched,catalog:live,catalogTerm:current) == nil,
+              "an independent selected-result retry cannot reactivate an older catalog snapshot")
         await link.load(term:past)
         check(link.currentCourse(for:matched,catalog:live,catalogTerm:current) == nil,"history is read-only even when an id happens to match a current class")
         print("Enrolled course failures: \(failures)"); exit(failures == 0 ? 0 : 1)

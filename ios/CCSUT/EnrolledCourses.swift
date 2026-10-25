@@ -133,16 +133,19 @@ struct EnrolledCoursesSummary: Equatable { let count: Int; let term: String }
     private let contextLoader: (UInt64) async throws -> EnrolledCoursesContext
     private let coursesLoader: (String, UInt64) async throws -> [EnrolledCourse]
     private var ownerGeneration: UInt64?
+    private var linkedCatalogGeneration: UInt64?
     private var requestVersion: UInt64 = 0
     init(generation: @escaping () -> UInt64, contextLoader: @escaping (UInt64) async throws -> EnrolledCoursesContext,
          coursesLoader: @escaping (String, UInt64) async throws -> [EnrolledCourse]) {
         self.generation = generation; self.contextLoader = contextLoader; self.coursesLoader = coursesLoader
     }
-    func load(term: String? = nil, refreshContext: Bool = false) async {
+    /// Only a coordinated catalog+results refresh may link display records to action cards.
+    func load(term: String? = nil, refreshContext: Bool = false, catalogGeneration: UInt64? = nil) async {
         discardIfAccountChanged()
         let owner = generation()
         ownerGeneration = owner
         requestVersion &+= 1
+        linkedCatalogGeneration = nil
         let version = requestVersion
         if let term, term != selectedTerm { snapshot = nil; selectedTerm = term }
         isLoading = true; isVerified = false; errorText = nil
@@ -159,12 +162,14 @@ struct EnrolledCoursesSummary: Equatable { let count: Int; let term: String }
             guard context.terms.contains(target) else { throw APIError.decoding("该学期不在教务提供的已选查询范围内") }
             if selectedTerm != target { snapshot = nil }
             selectedTerm = target
+            if target == context.defaultTerm { currentSummary = nil }
             let courses = try await coursesLoader(target,owner)
             guard accepts(version,owner:owner) else { return }
             try Task.checkCancellation()
             guard courses.allSatisfy({$0.xnxq == target}) else { throw APIError.decoding("已选课程学期不匹配") }
             snapshot = courses.sorted { ($0.kcmc ?? "").localizedStandardCompare($1.kcmc ?? "") == .orderedAscending }
             isVerified = true
+            if catalogGeneration == owner { linkedCatalogGeneration = owner }
             if target == context.defaultTerm { currentSummary = EnrolledCoursesSummary(count:courses.count,term:target) }
         } catch {
             guard accepts(version,owner:owner) else { return }
@@ -172,11 +177,15 @@ struct EnrolledCoursesSummary: Equatable { let count: Int; let term: String }
                 : (error as? APIError)?.localizedDescription ?? "完整已选结果读取失败，请重试"
         }
     }
-    func invalidate() { requestVersion &+= 1; isVerified = false; isLoading = false }
+    func invalidate() {
+        requestVersion &+= 1; isVerified = false; isLoading = false; linkedCatalogGeneration = nil
+        if selectedTerm == context?.defaultTerm { currentSummary = nil }
+    }
     func discardIfAccountChanged() {
         guard let ownerGeneration, ownerGeneration != generation() else { return }
         requestVersion &+= 1
         self.ownerGeneration = nil
+        linkedCatalogGeneration = nil
         context = nil; selectedTerm = nil; snapshot = nil; currentSummary = nil
         isVerified = false; isLoading = false; errorText = nil
     }
@@ -185,7 +194,7 @@ struct EnrolledCoursesSummary: Equatable { let count: Int; let term: String }
         return version == requestVersion
     }
     func currentCourse(for record: EnrolledCourse, catalog: ElectiveState<TeachingClass>, catalogTerm: String?) -> TeachingClass? {
-        guard isVerified, !isLoading, ownerGeneration == generation(),
+        guard isVerified, !isLoading, ownerGeneration == generation(), linkedCatalogGeneration == generation(),
               let context, selectedTerm == context.defaultTerm, record.xnxq == selectedTerm,
               record.xnxq == catalogTerm, record.xdfs == "1", record.xkfs == "选课",
               snapshot?.contains(record) == true,

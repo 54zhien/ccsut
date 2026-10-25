@@ -192,7 +192,7 @@ extension APIClient {
 
     func enrolledCourses(term: String, expectedGeneration: UInt64) async throws -> [EnrolledCourse] {
         try await EnrolledCoursesLoader.load(term:term) { page in
-            var form = ["queryFields":"id,parentId,kcid,xnxq,xdxz,xdfs,kcbh,kcmc,jxbmc,jxbbh,rkjs,xf,xkfs,sksjdd,kcxz,kclx,skfs,",
+            var form = ["queryFields":"id,parentId,kcid,xnxq,xdxz,xdfs,kcbh,kcjj,kcbz,jxbmc,jxbbh,zxs,llxs,syxs,shangjxs,shijianxs,qtxs,jxbzc,kclb,kcxz,type,kclx,kcgs,rkjs,jxms,sksjdd,xf,skfs,xkfs,xklx,",
                         "_search":"false", "page.size":"100", "page.pn":String(page), "sort":"id", "order":"asc",
                         "xnxq":term, "kklx":"", "kcxz":"", "xdxz":"", "xklx":""]
             for key in ["xnxq","kklx","kcxz","xdxz","xklx"] { form["query.\(key)||"] = form[key] }
