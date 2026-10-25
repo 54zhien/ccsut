@@ -806,17 +806,20 @@ final class PageInteractionUITests: XCTestCase {
     /// These are AX delivery bounds, not refresh-performance deadlines. The
     /// native controlled gate stays held until the single explicit tap.
     private func waitForPublication(in app: XCUIApplication, expected: String, stage: String) -> Bool {
-        var lastCount = "not sampled"
+        var lastExactMatch = false
         var attempts = 0
         let started = Date()
+        // Match both attributes in one AX query. An exists check followed by
+        // label can re-resolve the element and exhaust the delivery window.
+        let exactPublication = NSPredicate(format:"identifier == %@ AND label == %@",
+                                           "academic-publication-count", expected)
         let predicate = NSPredicate { _, _ in
             attempts += 1
-            let current = app.descendants(matching:.any).matching(identifier:"academic-publication-count").firstMatch
-            lastCount = current.exists ? current.label : "missing"
-            return lastCount == expected
+            lastExactMatch = app.descendants(matching:.any).matching(exactPublication).firstMatch.exists
+            return lastExactMatch
         }
         let result = XCTWaiter.wait(for:[expectation(for:predicate,evaluatedWith:app)],timeout:30)
-        let diagnostic = "\(stage): expected publication=\(expected); result=\(result.rawValue); polls=\(attempts); elapsed=\(Date().timeIntervalSince(started)); lastCount=\(lastCount)"
+        let diagnostic = "\(stage): expected publication=\(expected); result=\(result.rawValue); polls=\(attempts); elapsed=\(Date().timeIntervalSince(started)); lastExactMatch=\(lastExactMatch)"
         print("[RefreshPublication] \(diagnostic)")
         XCTAssertEqual(result,.completed,diagnostic)
         return result == .completed
