@@ -122,6 +122,15 @@ private actor ReadGate {
         generation.value = 3; await accountRace.load(); await accountGate.open(); await oldAccount.value
         check(accountRace.snapshot?.first?.id == "new-account","late old-account response cannot wipe or publish over new-account records")
 
+        let cancelGate = ReadGate()
+        let cancelled = EnrolledCoursesModel(generation:{generation.value},contextLoader:{ _ in context },coursesLoader:{ term,_ in
+            await cancelGate.block(); return [try course("cancelled",term:term)]
+        })
+        let cancelledRead = Task { await cancelled.load() }; await cancelGate.waitForEntry()
+        cancelledRead.cancel(); await cancelGate.open(); await cancelledRead.value
+        check(cancelled.snapshot == nil && !cancelled.isVerified && cancelled.errorText != nil && !cancelled.isLoading,
+              "cancelled read remains explicitly unverified rather than a successful empty list")
+
         let link = EnrolledCoursesModel(generation:{generation.value},contextLoader:{ _ in context },coursesLoader:{ term,_ in [try course("match",term:term)] })
         await link.load()
         func catalog(_ json: String) throws -> ElectiveState<TeachingClass> {

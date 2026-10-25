@@ -27,6 +27,7 @@ jobs:
             -only-testing:CCSUTUITests/PageInteractionUITests/testCompleteSelectedIncludesClosedBatch \
             -only-testing:CCSUTUITests/PageInteractionUITests/testSelectedHistoryIsReadOnlyWithEmptyCatalog \
             -only-testing:CCSUTUITests/PageInteractionUITests/testSelectedReadFailureDoesNotPretendToBeComplete \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testSelectedHistoryLargeTextAndDarkAppearance \
             -only-testing:CCSUTUITests/PageInteractionUITests/testElectiveEmptySearchCanResetAndDisabledReasonIsVisible \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/selected-tests.log"
       - name: Export screenshots

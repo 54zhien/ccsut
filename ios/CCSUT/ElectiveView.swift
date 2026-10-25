@@ -18,6 +18,7 @@ struct ElectiveView: View {
 
     @State private var initData: ElectiveInit?
     @State private var electiveState = ElectiveState<TeachingClass>()
+    @State private var enrolledModel = makeEnrolledModel()
     @State private var keyword = ""
     @State private var selectedFilter: Filter = .all
     @State private var isLoading = false
@@ -25,6 +26,7 @@ struct ElectiveView: View {
     @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
     @State private var detail: TeachingClass?
+    @State private var enrolledDetail: EnrolledCourse?
     @State private var pending: PendingAction?
     @State private var workingId: String?
     @State private var actionMessage: String?
@@ -46,28 +48,10 @@ struct ElectiveView: View {
         GeometryReader { viewport in
             ScrollView {
                 VStack(spacing: 0) {
-                    if isLoading && classes.isEmpty {
+                    if isLoading && classes.isEmpty && enrolledModel.context == nil {
                         ProgressView("拉取教学班…")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if errorText != nil, classes.isEmpty {
-                        ContentUnavailableView {
-                            Label(AppMessages.loadFailure, systemImage: "exclamationmark.icloud")
-                        } description: {
-                            EmptyView()
-                        } actions: {
-                            Button("重试") { Task { await load(force: true) } }
-                                .buttonStyle(.borderedProminent)
-                        }
-                    } else if classes.isEmpty {
-                        ContentUnavailableView {
-                            Label("当前没有可选课程", systemImage: "tray")
-                        } description: {
-                            Text(initData.map { "选课学期 \(SchedulePresentation.termTitle($0.xkxnxq ?? "—"))" } ?? "")
-                        }
                     } else {
-                        if let errorText {
-                            PageStatusNotice(message: errorText) { Task { await load(force: true) } }
-                        }
                         list
                     }
                 }
@@ -88,9 +72,18 @@ struct ElectiveView: View {
         .task {
             if classes.isEmpty { await load() }
         }
+        .onChange(of: enrolledModel.currentSummary) { _, summary in
+            if let summary { onLoaded(summary.count, summary.term) }
+        }
         .sheet(item: $detail) { item in
             CourseDetailSheet(item: item, actionBlockReason: actionBlockReason(for: item))
                 .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(deviceCornerRadius)
+        }
+        .sheet(item: $enrolledDetail) { item in
+            EnrolledCourseDetail(record:item)
+                .presentationDetents([.medium,.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(deviceCornerRadius)
         }
@@ -122,25 +115,25 @@ struct ElectiveView: View {
             VStack(spacing: 14) {
                 searchField
                 filterBar
-                if let initData { header(initData) }
+                if selectedFilter == .selected { enrolledHeader }
+                else if let initData { header(initData) }
             }
             .padding(16)
             .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
 
-            ForEach(filtered) { item in
-                let blockReason = actionBlockReason(for: item)
-                ClassCard(
-                    item: item,
-                    onAction: { pending = PendingAction(courseID: item.id, title: item.kcmc, enrolling: !item.isSelected) },
-                    isWorking: workingId == item.id,
-                    canPerformAction: blockReason == nil,
-                    actionBlockReason: blockReason
-                )
-                .contentShape(.rect)
-                .onTapGesture { detail = item }
+            if selectedFilter == .selected {
+                enrolledList
+            } else {
+                if let errorText {
+                    PageStatusNotice(message:errorText) { Task { await load(force:true) } }
+                }
+                ForEach(filtered) { item in catalogCard(item) }
+                if classes.isEmpty {
+                    ContentUnavailableView("当前没有可选课程",systemImage:"tray")
+                }
             }
 
-            if filtered.isEmpty {
+            if selectedFilter != .selected && !classes.isEmpty && filtered.isEmpty {
                 ContentUnavailableView {
                     Label("未找到课程", systemImage: "magnifyingglass")
                 } description: {
@@ -188,8 +181,8 @@ struct ElectiveView: View {
             HStack {
                 Label(data.xsxm ?? "—", systemImage: "person")
                 Spacer(minLength: 8)
-                if selectedCount > 0 {
-                    Label("\(selectedCount) 已选", systemImage: "checkmark.circle.fill")
+                if let summary = enrolledModel.currentSummary, summary.term == data.xkxnxq {
+                    Label("\(summary.count) 已选", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 }
                 Text("\(filtered.count) 门").monospacedDigit()
@@ -201,7 +194,106 @@ struct ElectiveView: View {
         .padding(.top, 4)
     }
 
-    private var selectedCount: Int { classes.filter(\.isSelected).count }
+    private var selectedCount: Int {
+        selectedFilter == .selected ? (enrolledModel.snapshot?.count ?? 0) : (enrolledModel.currentSummary?.count ?? 0)
+    }
+
+    private var enrolledHeader: some View {
+        VStack(alignment:.leading,spacing:8) {
+            if let context = enrolledModel.context {
+                Menu {
+                    ForEach(context.terms,id:\.self) { term in
+                        Button(SchedulePresentation.termTitle(term)) {
+                            pending = nil; detail = nil; enrolledDetail = nil
+                            Task { await enrolledModel.load(term:term) }
+                        }
+                        .accessibilityIdentifier("enrolled-term-\(term)")
+                    }
+                } label: {
+                    Label(SchedulePresentation.termTitle(enrolledModel.selectedTerm ?? context.defaultTerm),systemImage:"calendar")
+                        .fixedSize(horizontal:false,vertical:true)
+                }
+                .accessibilityIdentifier("enrolled-term-menu")
+                .disabled(electiveState.isActionInProgress)
+            }
+            HStack {
+                Text("含自主选课与配课")
+                Spacer(minLength:8)
+                if let snapshot = enrolledModel.snapshot { Text("\(snapshot.count) 门").monospacedDigit() }
+            }
+        }
+        .font(.caption).foregroundStyle(.secondary)
+        .frame(maxWidth:.infinity,alignment:.leading)
+    }
+
+    private var filteredEnrolled: [EnrolledCourse] {
+        let kw = keyword.trimmingCharacters(in:.whitespacesAndNewlines)
+        return (enrolledModel.snapshot ?? []).filter { item in
+            kw.isEmpty || "\(item.kcmc ?? "") \(item.rkjs ?? "") \(item.kcbh ?? "")".localizedCaseInsensitiveContains(kw)
+        }
+    }
+
+    @ViewBuilder private var enrolledList: some View {
+        if enrolledModel.isLoading {
+            ProgressView("读取完整已选结果…")
+        }
+        if let message = enrolledModel.errorText {
+            VStack(spacing:8) {
+                Text(message).font(.subheadline).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("enrolled-read-error")
+                if enrolledModel.snapshot != nil { Text("当前显示上次结果，尚未重新核实").font(.caption).foregroundStyle(.secondary) }
+                Button("重试读取已选") { Task { await enrolledModel.load(refreshContext:true) } }
+                    .buttonStyle(.bordered)
+            }
+        }
+        ForEach(filteredEnrolled) { record in
+            if let item = enrolledModel.currentCourse(for:record,catalog:electiveState,catalogTerm:initData?.xkxnxq) {
+                catalogCard(item)
+            } else {
+                EnrolledCourseCard(record:record,readOnlyReason:enrolledReadOnlyReason)
+                    .contentShape(.rect)
+                    .onTapGesture { enrolledDetail = record }
+            }
+        }
+        if !enrolledModel.isLoading && enrolledModel.errorText == nil && filteredEnrolled.isEmpty {
+            ContentUnavailableView {
+                Label(enrolledModel.snapshot?.isEmpty == true ? "该学期没有已选课程" : "未找到课程",systemImage:"tray")
+            } description: {
+                Text(enrolledModel.snapshot?.isEmpty == true ? "教务系统返回该学期暂无个人课程。" : "请尝试其他课程名或教师。")
+            }
+        }
+    }
+
+    private var enrolledReadOnlyReason: String {
+        if !enrolledModel.isVerified || isLoading { return "课程结果尚未验证完成，仅供查看" }
+        if enrolledModel.selectedTerm != enrolledModel.context?.defaultTerm { return "历史学期课程，仅供查看" }
+        return "仅供查看，请在官方页面核实操作条件"
+    }
+
+    private func catalogCard(_ item: TeachingClass) -> some View {
+        let blockReason = actionBlockReason(for:item)
+        return ClassCard(item:item,
+            onAction:{ pending = PendingAction(courseID:item.id,title:item.kcmc,enrolling:!item.isSelected) },
+            isWorking:workingId == item.id,canPerformAction:blockReason == nil,actionBlockReason:blockReason)
+            .contentShape(.rect).onTapGesture { detail = item }
+    }
+
+    private static func makeEnrolledModel() -> EnrolledCoursesModel {
+        EnrolledCoursesModel(generation:{ CookieJar.generation },contextLoader:{ generation in
+            #if DEBUG
+            if InterfacePreview.enabled { return InterfacePreview.enrolledContext }
+            #endif
+            return try await APIClient.shared.enrolledCoursesContext(expectedGeneration:generation)
+        },coursesLoader:{ term,generation in
+            #if DEBUG
+            if InterfacePreview.enabled {
+                if InterfacePreview.selectedReadFailure { throw APIError.empty }
+                return InterfacePreview.enrolledCourses(term:term)
+            }
+            #endif
+            return try await APIClient.shared.enrolledCourses(term:term,expectedGeneration:generation)
+        })
+    }
 
     /// 执行选课/退课
     private func perform(_ action: PendingAction) async {
@@ -314,6 +406,7 @@ struct ElectiveView: View {
     /// A request from an old cookie generation must never keep or publish its account's data.
     private func handleCookieGenerationChange(expected: UInt64) -> Bool {
         let currentGeneration = CookieJar.generation
+        enrolledModel.discardIfAccountChanged()
         let hasCurrentGenerationSnapshot = electiveState.snapshotGeneration == currentGeneration
         guard !ElectiveMutationRecovery.canContinueAfterAwait(
             expectedGeneration: expected,
@@ -433,6 +526,7 @@ struct ElectiveView: View {
         if let expectedGeneration, handleCookieGenerationChange(expected: expectedGeneration) { return }
         activeLoadRequests += 1
         isLoading = true
+        enrolledModel.invalidate()
         defer {
             activeLoadRequests -= 1
             isLoading = activeLoadRequests > 0
@@ -442,6 +536,9 @@ struct ElectiveView: View {
                handleCookieGenerationChange(expected: expectedGeneration) { return }
             await fetch(force: force, refreshAuthentication: refreshAuthentication,
                         expectedGeneration: expectedGeneration)
+            if let expectedGeneration, handleCookieGenerationChange(expected:expectedGeneration) { return }
+            guard !Task.isCancelled else { return }
+            await enrolledModel.load(refreshContext:force)
         }
     }
 
@@ -469,7 +566,6 @@ struct ElectiveView: View {
             electiveState.publish(snapshot, generation: generation)
             guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
             initData = fixtureInit
-            onLoaded(snapshot.courses.filter(\.isSelected).count, fixtureInit.xkxnxq ?? "")
             previewPublicationCount += 1
             return
         }
@@ -528,7 +624,6 @@ struct ElectiveView: View {
             electiveState.publish(sortedSnapshot, generation: generation)
             guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
             self.initData = initData
-            onLoaded(sortedSnapshot.courses.filter(\.isSelected).count, initData.xkxnxq ?? "")
         } catch let e as APIError {
             guard !handleCookieGenerationChange(expected: generation) else { return }
             if Task.isCancelled {

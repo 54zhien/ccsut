@@ -819,6 +819,49 @@ struct SessionRegressionTests {
             check(false, "mobile exam page loads through real API boundary: \(error)")
         }
 
+        // Complete personal courses use their own strict flat-grid decoder and fixed read-only routes.
+        CookieJar.shared = [cookie("jw_uf", "personal-course-fixture")]
+        let courseGeneration = CookieJar.generation
+        resetProtocolRequests()
+        let personalTerms = ["2026-2027-1","2024-2025-1"]
+        SchoolProtocol.response = { request in
+            guard request.url?.scheme == "https", request.url?.host == "tls.ccsut.cn" else { throw URLError(.badURL) }
+            if request.url!.path == "/admin/xsd/yxkccx" {
+                guard request.httpMethod == "GET" else { throw URLError(.badServerResponse) }
+                return (200,request.url!,[:],"<select id='xnxq'><option value='2026-2027-1' selected>Current</option><option value='2024-2025-1'>Past</option></select>")
+            }
+            guard request.url!.path == "/admin/xsd/yxkccx/listYxkc", request.httpMethod == "POST",
+                  let body = SchoolProtocol.bodyText(request),
+                  let items = URLComponents(string:"https://fixture.invalid/?" + body)?.queryItems else { throw URLError(.badServerResponse) }
+            let form = Dictionary(items.map { ($0.name,$0.value ?? "") },uniquingKeysWith:{a,_ in a})
+            let query = URLComponents(url:request.url!,resolvingAgainstBaseURL:false)!.queryItems ?? []
+            guard let term = form["xnxq"], personalTerms.contains(term), form["query.xnxq||"] == term,
+                  form["page.size"] == "100", let pn = Int(form["page.pn"] ?? ""), (1...2).contains(pn),
+                  ["kklx","kcxz","xdxz","xklx"].allSatisfy({form[$0] == "" && form["query.\($0)||"] == ""}),
+                  query.contains(URLQueryItem(name:"gridtype",value:"jqgrid")), query.contains(URLQueryItem(name:"async",value:"1")),
+                  request.value(forHTTPHeaderField:"Referer") == "https://tls.ccsut.cn/admin/xsd/yxkccx" else { throw URLError(.badServerResponse) }
+            let payload: [String:Any] = ["ret":0,"page":pn,"rows":1,"total":2,"totalPages":2,"results":[
+                ["id":"personal-\(pn)","xnxq":term,"kcmc":"Fixture personal course","jxbbh":"fixture-\(pn)","xdfs":"1","xkfs":pn == 1 ? "选课" : "配课"]
+            ]]
+            return (200,request.url!,[:],String(decoding:try JSONSerialization.data(withJSONObject:payload),as:UTF8.self))
+        }
+        do {
+            let context = try await api.enrolledCoursesContext(expectedGeneration:courseGeneration)
+            check(context.terms == personalTerms && context.defaultTerm == personalTerms[0],"personal course context comes from the official selector, including history")
+            for term in personalTerms {
+                let courses = try await api.enrolledCourses(term:term,expectedGeneration:courseGeneration)
+                check(courses.count == 2 && courses.allSatisfy({$0.xnxq == term}),"real personal-course client follows server page size and preserves term attribution")
+            }
+            check(SchoolProtocol.requestCount == 5 && Set(SchoolProtocol.requestPaths) == ["/admin/xsd/yxkccx","/admin/xsd/yxkccx/listYxkc"],
+                  "current and past course reads use only discovery and result queries, with no mutations")
+        } catch { check(false,"personal-course discovery and grid load through the production API boundary: \(error)") }
+        resetProtocolRequests()
+        CookieJar.shared = [cookie("jw_uf", "replacement-course-fixture")]
+        do {
+            _ = try await api.enrolledCourses(term:personalTerms[0],expectedGeneration:courseGeneration)
+            check(false,"personal-course request rejects previous account generation")
+        } catch { check(SchoolProtocol.requestCount == 0,"personal-course request rejects previous account generation before transmission") }
+
         print("Session regression failures: \(failures)")
         exit(failures == 0 ? 0 : 1)
     }

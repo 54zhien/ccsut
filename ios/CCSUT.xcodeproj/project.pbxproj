@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		000000000000000000ED2002 /* EnrolledCourseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000ED1002; };
 		000000000000000000ED2001 /* EnrolledCourses.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000ED1001; };
 		000000000000000000EC2008 /* EcardPaymentPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1008; };
 		000000000000000000EC2006 /* EcardSSOClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1006; };
@@ -75,6 +76,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		000000000000000000ED1002 /* EnrolledCourseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrolledCourseView.swift; sourceTree = "<group>"; };
 		000000000000000000ED1001 /* EnrolledCourses.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrolledCourses.swift; sourceTree = "<group>"; };
 		000000000000000000EC1008 /* EcardPaymentPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardPaymentPersistence.swift; sourceTree = "<group>"; };
 		000000000000000000EC1006 /* EcardSSOClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardSSOClient.swift; sourceTree = "<group>"; };
@@ -203,6 +205,7 @@
 				B00000000000000000000022 /* AcademicAPI.swift */,
 				B00000000000000000000023 /* ElectiveState.swift */,
 				000000000000000000ED1001 /* EnrolledCourses.swift */,
+				000000000000000000ED1002 /* EnrolledCourseView.swift */,
 			);
 			path = CCSUT;
 			sourceTree = "<group>";
@@ -319,6 +322,7 @@
 				A00000000000000000000022 /* AcademicAPI.swift in Sources */,
 				A00000000000000000000023 /* ElectiveState.swift in Sources */,
 				000000000000000000ED2001 /* EnrolledCourses.swift in Sources */,
+				000000000000000000ED2002 /* EnrolledCourseView.swift in Sources */,
 				A0000000000000000000000A /* CCSUTApp.swift in Sources */,
 				A0000000000000000000000B /* Session.swift in Sources */,
 				A0000000000000000000000C /* API.swift in Sources */,

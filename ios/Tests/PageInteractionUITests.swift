@@ -44,6 +44,24 @@ final class PageInteractionUITests: XCTestCase {
         capture(app,"complete-selected-read-failure")
     }
 
+    func testSelectedHistoryLargeTextAndDarkAppearance() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected",
+                               "-UIPreferredContentSizeCategoryName","UICTContentSizeCategoryAccessibilityXXXL","-AppleInterfaceStyle","Dark"]
+        app.launch()
+        let selected = app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout:8)); selected.tap()
+        let menu = app.buttons["enrolled-term-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout:5)); XCTAssertTrue(menu.isHittable); menu.tap()
+        app.buttons["enrolled-term-2024-2025-1"].tap()
+        let historical = app.staticTexts["历史学期示例课程"]
+        XCTAssertTrue(historical.waitForExistence(timeout:5))
+        for _ in 0..<3 { if historical.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(historical.isHittable)
+        XCTAssertFalse(app.buttons["退课"].exists)
+        capture(app,"complete-selected-history-large-dark")
+    }
+
     func testCampusEntryAndRecords() {
         var app = launch("campus")
         for id in ["campus-leave", "campus-travel", "campus-electricity"] {

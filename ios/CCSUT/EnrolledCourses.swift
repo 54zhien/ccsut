@@ -150,7 +150,8 @@ struct EnrolledCoursesSummary: Equatable { let count: Int; let term: String }
         do {
             if context == nil || refreshContext {
                 let fetched = try await contextLoader(owner)
-                guard accepts(version,owner:owner), !Task.isCancelled else { return }
+                guard accepts(version,owner:owner) else { return }
+                try Task.checkCancellation()
                 context = fetched
             }
             guard let context else { throw APIError.empty }
@@ -159,14 +160,16 @@ struct EnrolledCoursesSummary: Equatable { let count: Int; let term: String }
             if selectedTerm != target { snapshot = nil }
             selectedTerm = target
             let courses = try await coursesLoader(target,owner)
-            guard accepts(version,owner:owner), !Task.isCancelled else { return }
+            guard accepts(version,owner:owner) else { return }
+            try Task.checkCancellation()
             guard courses.allSatisfy({$0.xnxq == target}) else { throw APIError.decoding("已选课程学期不匹配") }
             snapshot = courses.sorted { ($0.kcmc ?? "").localizedStandardCompare($1.kcmc ?? "") == .orderedAscending }
             isVerified = true
             if target == context.defaultTerm { currentSummary = EnrolledCoursesSummary(count:courses.count,term:target) }
         } catch {
-            guard accepts(version,owner:owner), !Task.isCancelled else { return }
-            errorText = (error as? APIError)?.localizedDescription ?? "完整已选结果读取失败，请重试"
+            guard accepts(version,owner:owner) else { return }
+            errorText = error is CancellationError || Task.isCancelled ? "已选课程读取已取消，请重试"
+                : (error as? APIError)?.localizedDescription ?? "完整已选结果读取失败，请重试"
         }
     }
     func invalidate() { requestVersion &+= 1; isVerified = false; isLoading = false }
