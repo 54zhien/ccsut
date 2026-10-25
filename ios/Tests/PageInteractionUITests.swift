@@ -459,6 +459,28 @@ final class PageInteractionUITests: XCTestCase {
         assertRefreshAfterSwitchingFromTimetable(entry: "academic-scores", content: "示例课程 1")
     }
 
+    func testMinimalNativeScrollRefreshFeedback() { assertMinimalRefreshFeedback("refresh-reference-scroll") }
+    func testMinimalWrappedScrollRefreshFeedback() { assertMinimalRefreshFeedback("refresh-reference-wrapper") }
+    func testMinimalListRefreshFeedback() { assertMinimalRefreshFeedback("refresh-reference-list") }
+
+    private func assertMinimalRefreshFeedback(_ page: String) {
+        let app = launch(page)
+        defer { app.terminate() }
+        let counter = app.staticTexts["minimal-refresh-count"]
+        XCTAssertTrue(counter.waitForExistence(timeout: 5))
+        XCTAssertEqual(counter.label, "0")
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertEqual(counter.label, "0", "The reference read is still waiting for explicit completion")
+        let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        image.name = "\(page)-before-completion"
+        image.lifetime = .keepAlways
+        add(image)
+        app.buttons["complete-minimal-refresh"].tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5), .completed)
+    }
+
     func testScoreRefreshControlRemainsActiveDuringSlowLoad() {
         assertScoreRefreshFeedback(omitTopBar: false)
     }

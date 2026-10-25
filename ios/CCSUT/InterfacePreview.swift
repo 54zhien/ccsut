@@ -1,6 +1,8 @@
 import Foundation
 
 #if DEBUG
+import SwiftUI
+
 /// UI tests release the second score load explicitly, so screenshots cannot race completion.
 @MainActor final class PreviewRefreshCompletionGate {
     static let shared = PreviewRefreshCompletionGate()
@@ -12,6 +14,51 @@ import Foundation
         let continuation = pending
         pending = nil
         continuation?.resume()
+    }
+}
+
+/// A small control independent of page chrome, geometry readers, pinned headers and load gates.
+struct MinimalRefreshReferenceView: View {
+    let kind: String
+    @State private var publications = 0
+
+    var body: some View {
+        Group {
+            if kind == "refresh-reference-list" {
+                List(0..<30) { index in Text("样例 \(index)") }
+                    .refreshable { await read() }
+            } else if kind == "refresh-reference-wrapper" {
+                rows.pageRefreshable { await read() }
+            } else {
+                rows.refreshable { await read() }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            Text("发布次数 \(publications)")
+                .accessibilityLabel("\(publications)")
+                .accessibilityIdentifier("minimal-refresh-count")
+                .padding(12)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Button("完成对照刷新") { PreviewRefreshCompletionGate.shared.release() }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("complete-minimal-refresh")
+                .padding(.trailing, 16).padding(.bottom, 90)
+        }
+    }
+    private var rows: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(0..<30) { index in
+                    Text("样例 \(index)").frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).padding(.horizontal, 16)
+                }
+            }
+        }
+        .scrollBounceBehavior(.always, axes: .vertical)
+    }
+    private func read() async {
+        await PreviewRefreshCompletionGate.shared.waitForRelease()
+        publications += 1
     }
 }
 #endif
