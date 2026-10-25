@@ -699,8 +699,8 @@ final class PageInteractionUITests: XCTestCase {
             screenshot.lifetime = .keepAlways
             add(screenshot)
             app.buttons["complete-controlled-refresh"].tap()
-            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label CONTAINS 'entered=1; completed=1'"), evaluatedWith: observation)], timeout: 8), .completed, page)
-            assertNativeRefreshReturned(observation, restingInset: restingInset)
+            let completedObservation = waitForCompletedRefreshObservation(in:app, captured:observation, stage:page)
+            assertNativeRefreshReturned(completedObservation, restingInset: restingInset)
             app.terminate()
         }
     }
@@ -786,6 +786,31 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(nativeRefreshValue(report, "controlY") + 1,
                                    nativeRefreshValue(report, "scrollY") + restingInset,
                                    "\(page): indicator is below the page header")
+    }
+
+    private func waitForCompletedRefreshObservation(in app: XCUIApplication, captured: XCUIElement,
+                                                    stage: String) -> XCUIElement {
+        // Native layout return can leave an earlier SwiftUI AX element stale.
+        // Query the app again for each delivery check; never repeat the tap.
+        var lastFreshReport = "not sampled"
+        let completed = NSPredicate { object, _ in
+            guard let currentApp = object as? XCUIApplication else { return false }
+            let current = currentApp.descendants(matching:.any).matching(identifier:"refresh-feedback-observation").firstMatch
+            let report = current.exists ? current.label : "missing fresh observation"
+            lastFreshReport = report
+            return report.hasPrefix("entered=1; completed=1;") && report.contains("cancelled=false")
+        }
+        let result = XCTWaiter.wait(for:[expectation(for:completed,evaluatedWith:app)],timeout:30)
+        let capturedReport = captured.exists ? captured.label : "missing captured observation"
+        let current = app.descendants(matching:.any).matching(identifier:"refresh-feedback-observation").firstMatch
+        let freshReport = current.exists ? current.label : "missing fresh observation"
+        print("[RefreshCompletion] \(stage): result=\(result.rawValue); applicationState=\(app.state.rawValue)")
+        print("[RefreshCompletion] \(stage) captured: \(capturedReport)")
+        print("[RefreshCompletion] \(stage) last-fresh-poll: \(lastFreshReport)")
+        print("[RefreshCompletion] \(stage) fresh-after: \(freshReport)")
+        XCTAssertEqual(result,.completed,
+                       "\(stage): exactly one completed, uncancelled callback must reach AX; captured=\(capturedReport); fresh=\(freshReport)")
+        return current
     }
 
     private func assertNativeRefreshReturned(_ observation: XCUIElement, restingInset: Double) {
