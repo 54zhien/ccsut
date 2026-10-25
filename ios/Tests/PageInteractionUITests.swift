@@ -535,6 +535,38 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5), .completed)
     }
 
+    func testOtherPagesRetainTimetableRefreshAnimation() {
+        for page in ["exams", "electives", "academic", "campus-leave", "campus-travel"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--preview-ui", "--preview-page", page, "--preview-refresh", "--preview-slow-refresh", "--preview-controlled-refresh"]
+            app.launch()
+            let anchor: XCUIElement
+            switch page {
+            case "exams": anchor = app.staticTexts["机械设计基础"].firstMatch
+            case "electives": anchor = app.textFields["课程名 / 教师"]
+            case "academic": anchor = app.buttons["academic-scores"]
+            case "campus-leave": anchor = app.buttons["申请请假"]
+            default: anchor = app.segmentedControls.firstMatch
+            }
+            XCTAssertTrue(anchor.waitForExistence(timeout: 8), page)
+            let restingY = anchor.frame.minY
+            let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
+            start.press(forDuration: 0.1, thenDragTo: end)
+            XCTAssertTrue(observation.label.contains("entered=1; completed=0"), page)
+            XCTAssertGreaterThan(anchor.frame.minY - restingY, 40, "\(page): retain the native refresh region until completion")
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            screenshot.name = "\(page)-held-refresh"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+            app.buttons["complete-controlled-refresh"].tap()
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label CONTAINS 'entered=1; completed=1'"), evaluatedWith: observation)], timeout: 8), .completed, page)
+            XCTAssertEqual(anchor.frame.minY, restingY, accuracy: 3, "\(page): return to the original position")
+            app.terminate()
+        }
+    }
+
     private func assertScoreRefreshFeedback(omitTopBar: Bool = false, experiment: String? = nil) {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", "scores", "--preview-refresh", "--preview-long-list", "--preview-slow-refresh", "--preview-controlled-refresh"]

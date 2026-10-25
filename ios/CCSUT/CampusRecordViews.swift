@@ -69,7 +69,10 @@ private struct CampusRecordContent: View {
     private struct ReadTask: Hashable { let model: ObjectIdentifier; let kind: CampusTravelKind }
 
     var body: some View {
-        ScrollView {
+        PageScrollSurface(refresh: {
+            if mode == .leave { await model.loadLeave(reset: true) }
+            else { await model.loadTravel(kind: selected) }
+        }) { _, _ in
             LazyVStack(alignment: .leading, spacing: 16) {
                 if mode == .travel {
                     Picker("记录类型", selection: $selected) {
@@ -91,12 +94,6 @@ private struct CampusRecordContent: View {
             }
             .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 28)
             .frame(maxWidth: 720).frame(maxWidth: .infinity)
-        }
-        .scrollEdgeEffectStyle(.soft, for: .top)
-        .scrollBounceBehavior(.always, axes: .vertical)
-        .pageRefreshable {
-            if mode == .leave { await model.loadLeave(reset: true) }
-            else { await model.loadTravel(kind: selected) }
         }
         // A real account/session replacement must start reads even when the selected kind
         // did not change; SwiftUI may retain this content view's identity across model swaps.
@@ -211,15 +208,26 @@ private struct CampusRecordContent: View {
 
 #if DEBUG
 private actor CampusPreviewReader: CampusReading {
+    private var leaveReads = 0
+    private var travelReads: [CampusTravelKind: Int] = [:]
+
     func leaveRecords(page: Int, size: Int) async throws -> CampusLeavePage {
-        try CampusDecoder.leavePage(Data("""
+        leaveReads += 1
+        if leaveReads > 1 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
+            await PreviewRefreshCompletionGate.shared.waitForRelease()
+        }
+        return try CampusDecoder.leavePage(Data("""
         {"data":{"list":[{"id":"preview-leave","leaveTypeName":"事假","beginTime":"2026-10-01 08:00",
         "endTime":"2026-10-02 18:00","leaveDay":2,"status":0,"reason":"示例请假记录"}],
         "pageNum":1,"pageSize":20,"total":1,"hasNextPage":false}}
         """.utf8))
     }
     func travelRecords(kind: CampusTravelKind) async throws -> [CampusTravelRecord] {
-        try CampusDecoder.travelRecords(Data("""
+        travelReads[kind, default: 0] += 1
+        if travelReads[kind, default: 0] > 1 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
+            await PreviewRefreshCompletionGate.shared.waitForRelease()
+        }
+        return try CampusDecoder.travelRecords(Data("""
         {"code":"2000","data":[{"openid":"preview-travel","typeName":"节假日登记","status":"待审核",
         "startDate":"2026-10-01","endDate":"2026-10-07","txdz":"示例区县","jtgj":"公共交通"}]}
         """.utf8))
