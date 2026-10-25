@@ -26,6 +26,10 @@ enum InterfacePreview {
         ProcessInfo.processInfo.arguments.contains("--preview-empty")
     }
 
+    static var refreshFixtureDelay: Duration {
+        ProcessInfo.processInfo.arguments.contains("--preview-slow-refresh") ? .seconds(2) : .milliseconds(250)
+    }
+
     static var electiveInit: ElectiveInit {
         decode("""
         {"xsxm":"预览同学","xkxnxq":"2026-2027-1"}

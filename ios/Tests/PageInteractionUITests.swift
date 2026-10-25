@@ -459,6 +459,31 @@ final class PageInteractionUITests: XCTestCase {
         assertRefreshAfterSwitchingFromTimetable(entry: "academic-scores", content: "示例课程 1")
     }
 
+    func testScoreRefreshControlRemainsActiveDuringSlowLoad() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-ui", "--preview-page", "scores", "--preview-refresh", "--preview-long-list", "--preview-slow-refresh"]
+        app.launch()
+        defer { app.terminate() }
+        let counter = app.descendants(matching: .any).matching(identifier: "academic-publication-count").firstMatch
+        XCTAssertTrue(counter.waitForExistence(timeout: 8))
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 8), .completed)
+        let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
+        XCTAssertTrue(observation.waitForExistence(timeout: 3))
+        print("[RefreshFeedback] before-pull: \(observation.label)")
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        capture(app, "score-slow-refresh-after-release")
+        print("[RefreshFeedback] after-release: \(observation.label)")
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '2'"), evaluatedWith: counter)], timeout: 8), .completed)
+        let report = observation.label
+        print("[RefreshFeedback] after-publication: \(report)")
+        capture(app, "score-slow-refresh-after-publication")
+        XCTAssertTrue(report.contains("entered=1; completed=1"), "The refresh callback must finish exactly once: \(report)")
+        XCTAssertTrue(report.contains("refreshingSeen=true"), "The native refresh control must become active: \(report)")
+        XCTAssertTrue(report.contains("prematurelyStopped=false"), "The native refresh control must remain active until the awaited load finishes: \(report)")
+    }
+
     func testExamsRefreshAfterSwitchingFromTimetable() {
         assertRefreshAfterSwitchingFromTimetable(entry: "academic-exams", content: "示例考试 1")
     }

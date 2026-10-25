@@ -177,11 +177,128 @@ private struct PageRefreshable: ViewModifier {
     func body(content: Content) -> some View {
         content
             .scrollBounceBehavior(.always, axes: .vertical)
-            .refreshable { await action() }
+            .refreshable {
+                #if DEBUG
+                await MainActor.run {
+                    if RefreshFeedbackObservation.enabled { RefreshFeedbackObservation.shared.beginCallback() }
+                }
+                #endif
+                await action()
+                #if DEBUG
+                let cancelled = Task.isCancelled
+                await MainActor.run {
+                    if RefreshFeedbackObservation.enabled { RefreshFeedbackObservation.shared.endCallback(cancelled: cancelled) }
+                }
+                #endif
+            }
+            #if DEBUG
+            .background {
+                if RefreshFeedbackObservation.enabled {
+                    RefreshFeedbackNativeProbe().frame(width: 1, height: 1).allowsHitTesting(false).accessibilityHidden(true)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if RefreshFeedbackObservation.enabled {
+                    TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                        Text(RefreshFeedbackObservation.shared.report)
+                            .font(.system(size: 1)).foregroundStyle(.clear).frame(width: 1, height: 1)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(RefreshFeedbackObservation.shared.report)
+                            .accessibilityIdentifier("refresh-feedback-observation")
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
+            #endif
     }
 }
 
 #if DEBUG
+/// Reference-only observations avoid publishing @State from the refresh callback.
+/// The probe never installs/replaces a refresh control or changes any gesture delegate.
+@MainActor private final class RefreshFeedbackObservation {
+    static let shared = RefreshFeedbackObservation()
+    static var enabled: Bool {
+        InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-slow-refresh")
+    }
+    private var entered = 0
+    private var completed = 0
+    private var cancelled = false
+    private var activeSince: CFTimeInterval?
+    private var refreshingSeen = false
+    private var prematurelyStopped = false
+    private var maximumPull: CGFloat = 0
+    private var native = "native=unobserved"
+
+    func beginCallback() {
+        entered += 1
+        activeSince = CACurrentMediaTime()
+        refreshingSeen = false
+        prematurelyStopped = false
+    }
+    func endCallback(cancelled: Bool) {
+        completed += 1
+        self.cancelled = cancelled
+        activeSince = nil
+    }
+    func observe(_ scroll: UIScrollView) {
+        let control = scroll.refreshControl
+        let pull = max(0, -(scroll.contentOffset.y + scroll.adjustedContentInset.top))
+        maximumPull = max(maximumPull, pull)
+        if let since = activeSince {
+            if control?.isRefreshing == true { refreshingSeen = true }
+            else if refreshingSeen && CACurrentMediaTime() - since > 0.1 { prematurelyStopped = true }
+        }
+        let frame = control.map { $0.convert($0.bounds, to: scroll.window) } ?? .zero
+        native = "control=\(control.map { NSStringFromClass(type(of: $0)) } ?? "nil"); refreshing=\(control?.isRefreshing ?? false); hidden=\(control?.isHidden ?? false); alpha=\(control?.alpha ?? 0); controlY=\(Int(frame.minY)); controlH=\(Int(frame.height)); maxPull=\(Int(maximumPull))"
+    }
+    var report: String {
+        "entered=\(entered); completed=\(completed); cancelled=\(cancelled); active=\(activeSince != nil); refreshingSeen=\(refreshingSeen); prematurelyStopped=\(prematurelyStopped); \(native)"
+    }
+}
+
+private struct RefreshFeedbackNativeProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> ProbeView { ProbeView() }
+    func updateUIView(_ view: ProbeView, context: Context) {}
+    static func dismantleUIView(_ view: ProbeView, coordinator: ()) { view.stop() }
+
+    @MainActor final class ProbeView: UIView {
+        private var timer: Timer?
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            backgroundColor = .clear
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            stop()
+            if window != nil {
+                let timer = Timer(timeInterval: 0.025, target: self, selector: #selector(sample), userInfo: nil, repeats: true)
+                self.timer = timer
+                RunLoop.main.add(timer, forMode: .common)
+            }
+        }
+        func stop() { timer?.invalidate(); timer = nil }
+        @objc private func sample() {
+            guard let window else { return }
+            var candidates: [UIScrollView] = []
+            func collect(_ view: UIView) {
+                guard !view.isHidden, view.alpha > 0.01 else { return }
+                if let scroll = view as? UIScrollView {
+                    let visible = scroll.convert(scroll.bounds, to: window).intersection(window.bounds)
+                    if visible.width > window.bounds.width * 0.75, visible.height > window.bounds.height * 0.4 {
+                        candidates.append(scroll)
+                    }
+                }
+                for child in view.subviews { collect(child) }
+            }
+            collect(window)
+            if let scroll = candidates.last { RefreshFeedbackObservation.shared.observe(scroll) }
+        }
+    }
+}
+
 /// Exposes fixture publication to UI tests without observing SwiftUI refresh-task cancellation.
 struct PageRefreshPublicationDiagnostics: View {
     let count: Int

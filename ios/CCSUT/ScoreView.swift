@@ -246,7 +246,7 @@ struct ScoreView: View {
         if InterfacePreview.enabled {
             isLoading = true
             defer { isLoading = false }
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(for: InterfacePreview.refreshFixtureDelay)
             guard !Task.isCancelled else { return }
             let previewItems = InterfacePreview.emptyPage ? [] : InterfacePreview.scores
             items = previewItems
