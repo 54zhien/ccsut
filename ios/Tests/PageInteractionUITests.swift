@@ -158,6 +158,50 @@ final class PageInteractionUITests: XCTestCase {
         capture(app, "campus-electricity-amount")
     }
 
+    func testPaymentRecoveryEntry() {
+        for kind in ["read", "version", "corrupt", "missing"] {
+            let app = launch("campus-electricity-recovery-" + kind)
+            let retry = app.buttons["payment-recovery-retry"]
+            XCTAssertTrue(retry.waitForExistence(timeout: 8))
+            XCTAssertFalse(app.buttons["立即缴费"].exists)
+            XCTAssertFalse(app.textFields["缴费金额，单位元"].exists)
+            XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+            retry.tap()
+            XCTAssertTrue(retry.exists, "Retry must not dismiss an unresolved recovery state")
+            app.buttons["payment-recovery-help"].tap()
+            let close = app.buttons["payment-recovery-close"]
+            XCTAssertTrue(close.waitForExistence(timeout: 5))
+            XCTAssertEqual(app.textFields.count, 0, "Phase one must not accept arbitrary order IDs")
+            XCTAssertFalse(app.buttons["立即缴费"].exists)
+            capture(app, "payment-recovery-help-" + kind)
+            close.tap()
+            XCTAssertTrue(retry.waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["立即缴费"].exists, "Closing guidance never unlocks payment")
+            capture(app, "payment-recovery-" + kind)
+            app.terminate()
+        }
+    }
+
+    func testPaymentRecoveryLargeText() {
+        let app = launch("campus-electricity-recovery-corrupt", largeText: true)
+        let retry = app.buttons["payment-recovery-retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 8))
+        if !retry.isHittable { app.swipeUp() }
+        XCTAssertTrue(retry.isHittable)
+        let help = app.buttons["payment-recovery-help"]
+        if !help.isHittable { app.swipeUp() }
+        XCTAssertTrue(help.isHittable)
+        capture(app, "payment-recovery-largest-type")
+        help.tap()
+        let close = app.buttons["payment-recovery-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        XCTAssertTrue(close.isHittable)
+        app.swipeUp()
+        capture(app, "payment-recovery-help-largest-type")
+        close.tap()
+        XCTAssertFalse(app.buttons["立即缴费"].exists)
+    }
+
     func testCampusAdaptiveLayout() {
         defer { XCUIDevice.shared.orientation = .portrait }
         for page in ["campus-form-leave", "campus-form-departure", "campus-electricity"] {

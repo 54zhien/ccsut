@@ -6,6 +6,7 @@ struct EcardPaymentView: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.dynamicTypeSize) private var textSize
     @State private var model = EcardPaymentModel()
+    @State private var showingRecoveryHelp = false
     @FocusState private var amountFocused: Bool
 
     init() {
@@ -24,6 +25,14 @@ struct EcardPaymentView: View {
             value.rooms = [option("101 室", "preview-room")]; value.room = "preview-room"
             let context = MeterContext()
             value.detail = MeterDetail(context: context, show: ["房间信息": "示例宿舍 1 栋 · 101 室", "表类型": "电表", "剩余金额": "36.80"], dataType: nil)
+            if InterfacePreview.page.hasPrefix("campus-electricity-recovery") {
+                switch InterfacePreview.page {
+                case "campus-electricity-recovery-read": value.recoveryIssue = .readUnavailable
+                case "campus-electricity-recovery-version": value.recoveryIssue = .unsupportedVersion(99)
+                case "campus-electricity-recovery-missing": value.recoveryIssue = .missingRecord
+                default: value.recoveryIssue = .corrupted
+                }
+            }
             if InterfacePreview.page == "campus-electricity-confirmation" {
                 value.confirmation = .init(amount: 50, room: "示例宿舍 1 栋 · 101 室", roomValue: "preview-room", context: context)
             } else if InterfacePreview.page == "campus-electricity-result" || InterfacePreview.page == "campus-electricity-pending" {
@@ -38,13 +47,14 @@ struct EcardPaymentView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                if let receipt = model.receipt { result(receipt) }
+                if let issue = model.recoveryIssue { recoveryCard(issue) }
+                else if let receipt = model.receipt { result(receipt) }
                 else {
                     if let detail = model.detail { meterCard(detail) }
                     roomSelection
                     amountSelection
                 }
-                if let message = model.errorText {
+                if model.recoveryIssue == nil, let message = model.errorText {
                     VStack(alignment: .leading, spacing: 10) {
                         Label(CampusPrivacy.redact(message), systemImage: "exclamationmark.circle")
                             .font(.footnote).foregroundStyle(.secondary)
@@ -62,7 +72,7 @@ struct EcardPaymentView: View {
                     ProgressView("正在连接一卡通…").font(.footnote).foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
                 }
-                if model.canOpenLogin {
+                if model.recoveryIssue == nil, model.canOpenLogin {
                     Button("打开认证页面", action: model.openLogin)
                         .font(.subheadline.weight(.semibold)).padding(.horizontal, 4)
                 }
@@ -73,7 +83,7 @@ struct EcardPaymentView: View {
         .scrollDismissesKeyboard(.interactively)
         .scrollEdgeEffectStyle(.soft, for: .top)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if model.receipt == nil { payBar }
+            if model.recoveryIssue == nil, model.receipt == nil { payBar }
         }
         .background(Color(.systemGroupedBackground))
         .academicDetailChrome(title: "电费缴费")
@@ -86,6 +96,11 @@ struct EcardPaymentView: View {
                 .presentationDragIndicator(model.isSubmitting ? .hidden : .visible)
                 .interactiveDismissDisabled(model.isSubmitting)
         }
+        .sheet(isPresented: $showingRecoveryHelp) { recoveryHelp }
+        .onChange(of: session.studentId) { _, _ in showingRecoveryHelp = false }
+        .onChange(of: model.recoveryIssue) { _, issue in
+            if issue == nil { showingRecoveryHelp = false }
+        }
         .task {
             #if DEBUG
             // No client, account or network preparation exists in these synthetic fixtures.
@@ -96,6 +111,50 @@ struct EcardPaymentView: View {
             model.start(account: session.studentId)
         }
         .onDisappear { model.stopQueries() }
+    }
+
+    private func recoveryCard(_ issue: EcardReceiptRecoveryError) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("待确认订单需要恢复", systemImage: "exclamationmark.shield")
+                .font(.title3.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+            Text(issue.localizedDescription)
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("在找回原订单并核实结果前，暂不能发起新的缴费。")
+                .font(.footnote).foregroundStyle(.secondary)
+            Button("重试读取") { model.retryRecovery(account: session.studentId) }
+                .buttonStyle(.borderedProminent).controlSize(.large)
+                .disabled(model.isStarting || model.isSubmitting || model.isChecking)
+                .accessibilityIdentifier("payment-recovery-retry")
+            Button("核实原订单") { showingRecoveryHelp = true }
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("payment-recovery-help")
+        }
+        .padding(24).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+        .accessibilityIdentifier("payment-recovery-card")
+    }
+
+    private var recoveryHelp: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("先核实，再处理").font(.title2.weight(.semibold))
+                    Text("请通过学校官方缴费记录或联系一卡通服务人员，核实上次电费缴费的扣款与到账情况。可准备缴费时间、金额和房间信息，避免再次缴费。")
+                    Text("如果只是暂时无法读取，解锁设备后返回重试；如果提示版本不支持，请更新 App 后重试。请保留此 App 的数据，卸载或清除数据可能丢失原订单线索。")
+                    Text("本页只提供处理说明，不会查询服务器或解锁付款。即使已在线下核实，也不能在这里手动确认或清除记录。找回原待确认记录后，App 才能继续查询原订单；记录仍无法恢复时，请保留现状等待进一步处理。")
+                        .foregroundStyle(.secondary)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(24).frame(maxWidth: 720).frame(maxWidth: .infinity)
+            }
+            .navigationTitle("核实原订单").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("关闭") { showingRecoveryHelp = false }
+                        .accessibilityIdentifier("payment-recovery-close")
+                }
+            }
+        }
     }
 
     private var roomSelection: some View {

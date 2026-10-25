@@ -66,7 +66,8 @@ final class EcardPaymentModel {
     @ObservationIgnored private var boundGeneration: UInt64?
     @ObservationIgnored private var submissionID: UUID?
     @ObservationIgnored private var checkingID: UUID?
-    private var recoveryError: String?
+    var recoveryIssue: EcardReceiptRecoveryError?
+    private var recoveryError: String? { recoveryIssue?.localizedDescription }
     typealias CachedCredential = (token: String, nativeCookies: Bool)
     @ObservationIgnored private let pendingStore: EcardPendingReceiptStore
     @ObservationIgnored private let currentGeneration: @MainActor () -> UInt64
@@ -131,17 +132,37 @@ final class EcardPaymentModel {
         EcardTokenBridge.cancelPreparation()
         self.account = account
         boundGeneration = generation
-        recoveryError = nil; receipt = nil
-        do { receipt = try pendingStore.load(account: account) }
-        catch { recoveryError = error.localizedDescription }
+        let wasBlocked = recoveryIssue != nil && sameSession
+        recoveryIssue = nil; receipt = nil; confirmation = nil
+        do {
+            receipt = try pendingStore.load(account: account)
+            if wasBlocked && receipt == nil { recoveryIssue = .missingRecord }
+        } catch { recoveryIssue = error as? EcardReceiptRecoveryError ?? .storageUnavailable }
         campus = nil; building = nil; room = nil; detail = nil
         campuses = []; buildings = []; rooms = []; fee = nil
         client = nil
         amountText = ""; errorText = recoveryError; isStarting = true
+        if recoveryIssue != nil { isStarting = false; return }
         if let credential = cachedCredential(account) {
             acceptToken(credential.token, nativeCookies: credential.nativeCookies)
         } else {
             beginBackgroundLogin(account: account)
+        }
+    }
+
+    /// Local reads only until the original pending receipt has been recovered.
+    /// A nil result is not evidence that the uncertain payment never happened.
+    func retryRecovery(account: String?) {
+        guard let account, account == self.account, boundGeneration == currentGeneration(),
+              recoveryIssue != nil, !isStarting, !isSubmitting, !isChecking else { return }
+        do {
+            guard try pendingStore.load(account: account) != nil else {
+                recoveryIssue = .missingRecord; errorText = recoveryError; return
+            }
+            start(account: account, force: true)
+        } catch {
+            recoveryIssue = error as? EcardReceiptRecoveryError ?? .storageUnavailable
+            errorText = recoveryError
         }
     }
 
@@ -388,7 +409,7 @@ final class EcardPaymentModel {
                 confirmation = nil; return
             }
         } catch {
-            recoveryError = error.localizedDescription; errorText = recoveryError
+            recoveryIssue = error as? EcardReceiptRecoveryError ?? .storageUnavailable; errorText = recoveryError
             confirmation = nil; return
         }
         let operation = UUID(), current = revision, generation = currentGeneration()
@@ -427,7 +448,7 @@ final class EcardPaymentModel {
                                       orderID: nil, message: error.localizedDescription)
                 }
             } catch {
-                recoveryError = error.localizedDescription; errorText = recoveryError
+                recoveryIssue = error as? EcardReceiptRecoveryError ?? .storageUnavailable; errorText = recoveryError
             }
         }
     }

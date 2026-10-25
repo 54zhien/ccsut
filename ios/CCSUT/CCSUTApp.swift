@@ -24,7 +24,9 @@ struct CCSUTApp: App {
                     case "campus-privacy": CampusPrivacyPreview()
                     case "campus-form-leave": CampusFormView(kind: .leave, account: "preview-account")
                     case "campus-form-departure": CampusFormView(kind: .departure, account: "preview-account")
-                    case "campus-electricity", "campus-electricity-confirmation", "campus-electricity-result", "campus-electricity-pending":
+                    case "campus-electricity", "campus-electricity-confirmation", "campus-electricity-result", "campus-electricity-pending",
+                         "campus-electricity-recovery-read", "campus-electricity-recovery-version",
+                         "campus-electricity-recovery-corrupt", "campus-electricity-recovery-missing":
                         NavigationStack { EcardPaymentView() }
                     #endif
                     default: MainTabs()

@@ -1,10 +1,14 @@
 import Foundation
 
-enum EcardReceiptRecoveryError: Error, LocalizedError {
-    case unreadable, storageUnavailable, unresolvedOrder
+enum EcardReceiptRecoveryError: Error, LocalizedError, Equatable {
+    case readUnavailable, unsupportedVersion(Int), corrupted, missingRecord
+    case storageUnavailable, unresolvedOrder
     var errorDescription: String? {
         switch self {
-        case .unreadable: return "有一笔无法读取的待确认订单，请先核实原订单，勿重复缴费"
+        case .readUnavailable: return "暂时无法读取待确认订单，请解锁设备后重试读取，勿重复缴费"
+        case .unsupportedVersion: return "待确认订单由不支持的版本保存，请更新 App 后重试，勿重复缴费"
+        case .corrupted: return "待确认订单记录已损坏，请先核实原订单，勿重复缴费"
+        case .missingRecord: return "此前无法读取的待确认订单记录现已缺失，请先核实原订单，勿重复缴费"
         case .storageUnavailable: return "无法保存或更新支付恢复记录，请稍后重试，勿重复缴费"
         case .unresolvedOrder: return "已有待确认订单，请先查询原订单，勿重复缴费"
         }
@@ -14,6 +18,7 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
 /// Account-scoped recovery boundary. The regression runner supplies an isolated
 /// directory/defaults suite, never the app's production records.
 @MainActor final class EcardPendingReceiptStore {
+    private struct Header: Decodable { let version: Int }
     private struct Journal: Codable {
         enum State: String, Codable { case pending, cleared }
         let version: Int
@@ -22,6 +27,7 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
     }
     private let directory: URL?
     private let defaults: UserDefaults
+    private var blockedAccounts: Set<String> = []
 
     init(directory: URL? = nil, defaults: UserDefaults = .standard) {
         self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
@@ -30,19 +36,35 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
     }
 
     func load(account: String) throws -> EcardPaymentModel.Receipt? {
+        do { return try read(account: account) }
+        catch {
+            // Never change the unreadable original. Remember failure separately
+            // so a subsequent missing file cannot silently enable a new debit.
+            blockedAccounts.insert(account)
+            if let file = try? fileURL(account: account) {
+                try? writeData(Data("recovery-required".utf8), to: blockURL(file))
+            }
+            throw error
+        }
+    }
+
+    private func read(account: String) throws -> EcardPaymentModel.Receipt? {
         let file = try fileURL(account: account)
-        if FileManager.default.fileExists(atPath: file.path) {
-            guard let data = try? Data(contentsOf: file) else { throw EcardReceiptRecoveryError.unreadable }
-            guard let journal = try? JSONDecoder().decode(Journal.self, from: data), journal.version == 1 else {
-                throw EcardReceiptRecoveryError.unreadable
+        if let data = try readIfPresent(file) {
+            guard let header = try? JSONDecoder().decode(Header.self, from: data) else {
+                throw EcardReceiptRecoveryError.corrupted
+            }
+            guard header.version == 1 else { throw EcardReceiptRecoveryError.unsupportedVersion(header.version) }
+            guard let journal = try? JSONDecoder().decode(Journal.self, from: data) else {
+                throw EcardReceiptRecoveryError.corrupted
             }
             let receipt: EcardPaymentModel.Receipt?
             switch journal.state {
             case .pending:
-                guard let saved = journal.receipt else { throw EcardReceiptRecoveryError.unreadable }
+                guard let saved = journal.receipt else { throw EcardReceiptRecoveryError.corrupted }
                 try validate(saved); receipt = saved
             case .cleared:
-                guard journal.receipt == nil else { throw EcardReceiptRecoveryError.unreadable }
+                guard journal.receipt == nil else { throw EcardReceiptRecoveryError.corrupted }
                 receipt = nil
             }
             // Migration can be interrupted between atomic write and removing
@@ -51,14 +73,31 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
             defaults.removeObject(forKey: "ecard.pending.\(account)")
             return receipt
         }
+        if try blockedAccounts.contains(account) || readIfPresent(blockURL(file)) != nil {
+            throw EcardReceiptRecoveryError.missingRecord
+        }
         let key = "ecard.pending.\(account)"
         guard defaults.object(forKey: key) != nil else { return nil }
-        guard let data = defaults.data(forKey: key) else { throw EcardReceiptRecoveryError.unreadable }
+        guard let data = defaults.data(forKey: key) else { throw EcardReceiptRecoveryError.corrupted }
         let receipt = try decode(data)
         // Remove the old copy only after its atomic replacement exists.
         try write(receipt, to: file)
         defaults.removeObject(forKey: key)
         return receipt
+    }
+
+    private func blockURL(_ file: URL) -> URL { file.appendingPathExtension("recovery-block") }
+
+    private func readIfPresent(_ file: URL) throws -> Data? {
+        do { return try Data(contentsOf: file) }
+        catch {
+            let failure = error as NSError
+            // fileExists also returns false for inaccessible files. Only an
+            // actual not-found read result permits the no-record/legacy path.
+            if failure.domain == NSCocoaErrorDomain,
+               failure.code == NSFileReadNoSuchFileError || failure.code == NSFileNoSuchFileError { return nil }
+            throw EcardReceiptRecoveryError.readUnavailable
+        }
     }
 
     func save(_ receipt: EcardPaymentModel.Receipt, account: String) throws {
@@ -88,7 +127,7 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
 
     private func decode(_ data: Data) throws -> EcardPaymentModel.Receipt {
         guard let receipt = try? JSONDecoder().decode(EcardPaymentModel.Receipt.self, from: data) else {
-            throw EcardReceiptRecoveryError.unreadable
+            throw EcardReceiptRecoveryError.corrupted
         }
         try validate(receipt)
         return receipt
@@ -96,11 +135,17 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
 
     private func validate(_ receipt: EcardPaymentModel.Receipt) throws {
         guard receipt.status == .pending, let orderID = receipt.orderID, !orderID.isEmpty else {
-            throw EcardReceiptRecoveryError.unreadable
+            throw EcardReceiptRecoveryError.corrupted
         }
     }
 
     private func write(_ receipt: EcardPaymentModel.Receipt?, to file: URL) throws {
+        let journal = Journal(version: 1, state: receipt == nil ? .cleared : .pending, receipt: receipt)
+        do { try writeData(JSONEncoder().encode(journal), to: file) }
+        catch { throw EcardReceiptRecoveryError.storageUnavailable }
+    }
+
+    private func writeData(_ data: Data, to file: URL) throws {
         do {
             let parent = file.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
@@ -113,8 +158,7 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
             #if os(iOS)
             options.insert(.completeFileProtectionUntilFirstUserAuthentication)
             #endif
-            let journal = Journal(version: 1, state: receipt == nil ? .cleared : .pending, receipt: receipt)
-            try JSONEncoder().encode(journal).write(to: file, options: options)
+            try data.write(to: file, options: options)
         } catch { throw EcardReceiptRecoveryError.storageUnavailable }
     }
 }

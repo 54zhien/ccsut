@@ -156,6 +156,58 @@ private actor ModelServer {
             check(descriptions.count == 4, "read failure, unsupported version, corruption and missing record have distinct explanations")
         }
 
+        do {
+            let journal = store("retry"), epoch = Epoch(), server = ModelServer(status: 1)
+            try journal.save(receipt("original-order"), account: "fixture-A")
+            let file = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("retry"), includingPropertiesForKeys: nil).first!
+            let original = try Data(contentsOf: file)
+            try Data("broken-json".utf8).write(to: file)
+            let model = make(server, journal, epoch); await ready(model)
+            check(model.recoveryIssue == .corrupted, "corrupt payload has typed recovery state")
+            for _ in 0..<3 { model.retryRecovery(account: "fixture-A") }
+            check(model.recoveryIssue == .corrupted && !model.canPay && model.receipt == nil, "repeated failed retries stay blocked")
+            check(try Data(contentsOf: file) == Data("broken-json".utf8), "retries preserve original corrupt bytes")
+            try original.write(to: file)
+            model.retryRecovery(account: "fixture-B")
+            check(model.recoveryIssue == .corrupted && model.receipt == nil, "retry rejects a different account")
+            epoch.value += 1
+            model.retryRecovery(account: "fixture-A")
+            check(model.recoveryIssue == .corrupted && model.receipt == nil, "retry rejects an invalidated session")
+            model.start(account: "fixture-A", force: true)
+            _ = await waitUntil { !model.isStarting }
+            check(model.receipt?.orderID == "original-order" && model.recoveryIssue == nil && !model.canPay,
+                  "restored original journal returns to pending receipt without enabling payment")
+            await model.checkOrder()
+            let completed = try journal.load(account: "fixture-A")
+            check(model.receipt?.status == .completed && completed == nil,
+                  "recovered original can complete through existing server check")
+            let counts = await server.counts()
+            check(counts.creations == 0 && counts.debits == 0, "recovery and original-order check never create or debit")
+            model.stopQueries()
+        }
+        do {
+            let journal = store("retry-read"), server = ModelServer(), epoch = Epoch()
+            try journal.save(receipt("read-order"), account: "fixture-A")
+            let file = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("retry-read"), includingPropertiesForKeys: nil).first!
+            let original = try Data(contentsOf: file)
+            try FileManager.default.removeItem(at: file)
+            try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+            let model = make(server, journal, epoch); await ready(model)
+            check(model.recoveryIssue == .readUnavailable, "read error is distinct from malformed content")
+            try FileManager.default.removeItem(at: file)
+            try original.write(to: file)
+            model.retryRecovery(account: "fixture-A")
+            _ = await waitUntil { !model.isStarting }
+            check(model.receipt?.orderID == "read-order" && model.recoveryIssue == nil && !model.canPay,
+                  "explicit retry restores the original pending receipt after transient read failure")
+            model.start(account: "fixture-B")
+            _ = await waitUntil { !model.isStarting }
+            model.retryRecovery(account: "fixture-A")
+            check(model.receipt == nil && model.recoveryIssue == nil && confirm(model) != nil,
+                  "account switch removes old recovery state and stale retry cannot restore it")
+            model.stopQueries()
+        }
+
         // Restart while the server has received the debit, before its response.
         do {
             let gate = Gate(), journal = store("restart"), epoch = Epoch()
