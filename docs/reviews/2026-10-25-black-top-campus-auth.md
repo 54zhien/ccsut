@@ -21,4 +21,11 @@ The user reported that the previous package still looked white/gray at the top i
 - Browser policy regressions cover blocked subframes/popups without global failure, cancellation of HTTP subframes without replacing the top document, safe default-port upgrade of the main document, and continued rejection of foreign hosts/non-default ports. Successful navigation clears old error state; old completion/failure callbacks check navigation identity.
 - The device's rejected URL/frame remains unknown. Anonymous read-only school probes confirm the original serverName parameter and initial CAS service URL match the public flow; XHR/document headers had equivalent anonymous responses. Neither fragments nor headers were established as the device root cause, and the allowlist was not expanded.
 - Fixed authentication stage/outcome/credential-change diagnostics exist only in `CampusClient` memory and are not yet displayed by the record UI. They contain no URLs, account IDs, tokens, cookies, response bodies, or hashes. The concurrent-rotation regression proves a code defect, not that it is the sole cause of the reported device symptom.
-- Product Swift syntax and whitespace checks passed. WebKit typechecking and final package verification are pending; physical-device re-login/cold-start acceptance remains open. No full test suite was run.
+- Product Swift syntax and whitespace checks passed. Release compilation (including WebKit typechecking) and packaging passed at b1cc6f4646787c6c4ebb6ea14ea03043dedd9dd7, run 40203020944. Physical-device re-login/cold-start acceptance remains open. No full test suite was run.
+
+## Delivered package
+
+- Artifact 12602123603, unsigned IPA, 5,821,218 bytes.
+- SHA-256: `ba955b4f056ad3afab29f6c1dee5738a3d4af75eef2fed9297af9ca1e407d549`.
+- ZIP CRC valid; display name 长工院, bundle identifier `com.imzhien.ccsut`, minimum iOS 26.0, arm64 Mach-O.
+- Appearance evidence is pinned to b71f385 (the later product changes touch authentication only). Authentication evidence is 84 targeted PASS assertions; the package contains both changes.
