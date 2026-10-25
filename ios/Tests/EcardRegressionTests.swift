@@ -47,21 +47,56 @@ final class EcardProtocol: URLProtocol {
         print("\(value ? "PASS" : "FAIL") \(name)")
         if !value { failures += 1 }
     }
-    static func pause() async { try? await Task.sleep(nanoseconds: 15_000_000) }
+    struct ReadinessFailure: Error, CustomStringConvertible {
+        let description: String
+    }
+    static func waitUntil(_ description: String, timeout: TimeInterval = 5,
+                          condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(timeout))
+        while !condition() {
+            guard ContinuousClock.now < deadline else {
+                throw ReadinessFailure(description: "Timed out waiting for \(description)")
+            }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+    }
+    static func navigation(_ view: OfflineEcardWebView, count: Int,
+                           _ description: String) async throws -> WKNavigation {
+        try await waitUntil("\(description): navigation count >= \(count)") {
+            view.navigations.count >= count
+        }
+        return view.navigations[count - 1]
+    }
+    // A negative assertion needs a bounded observation window while the request
+    // remains live; readiness of positive callbacks is always condition-based.
+    static func observesUnexpectedCallback(_ condition: () -> Bool) async throws -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(0.5))
+        repeat {
+            if condition() { return true }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        } while ContinuousClock.now < deadline
+        return condition()
+    }
     static func jwt(_ account: String = "student-B", seconds: TimeInterval = 3600) -> String {
         let data = try! JSONSerialization.data(withJSONObject: ["sno": account, "exp": Date().timeIntervalSince1970 + seconds])
         let payload = data.base64EncodedString().replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
         return "e30.\(payload).fixture-signature"
     }
-    static func bridge() -> (EcardTokenBridge, OfflineEcardWebView) {
+    static func bridge(timeout: TimeInterval = 10,
+                       preparationDelay: UInt64 = 0) -> (EcardTokenBridge, OfflineEcardWebView) {
         EcardTokenBridge.clearCachedToken()
         #if ECARD_WEBKIT_DOUBLE
-        let bridge = EcardTokenBridge(timeout: 0.2)
+        let bridge = EcardTokenBridge(timeout: timeout)
         return (bridge, bridge.webView)
         #else
         let view = OfflineEcardWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        return (EcardTokenBridge(timeout: 0.2, webView: view, nativeTokenProvider: { _, _ in throw EcardSSOError.serviceUnavailable }), view)
+        return (EcardTokenBridge(timeout: timeout, webView: view, nativeTokenProvider: { _, _ in
+            // Controlled offline preparation delay exceeds the old 15 ms wait;
+            // the real cookie restoration still runs before navigation starts.
+            if preparationDelay > 0 { try await Task.sleep(nanoseconds: preparationDelay) }
+            throw EcardSSOError.serviceUnavailable
+        }), view)
         #endif
     }
     static func setURL(_ view: OfflineEcardWebView, _ url: URL) {
@@ -81,7 +116,8 @@ final class EcardProtocol: URLProtocol {
         setbuf(stdout, nil)
         #endif
         await paymentTests()
-        await loginTests()
+        do { try await loginTests() }
+        catch { check(false, "callback fixture readiness: \(error)") }
         print("Ecard regression failures: \(failures)")
         if failures > 0 { exit(1) }
     }
@@ -158,8 +194,8 @@ final class EcardProtocol: URLProtocol {
     }
     nonisolated(unsafe) static var checkFormID: String?
 
-    static func loginTests() async {
-        let (retryLogin, _) = bridge()
+    static func loginTests() async throws {
+        let (retryLogin, _) = bridge(timeout: 0.2)
         for attempt in 1...2 {
             do {
                 _ = try await retryLogin.fetchToken(forAccount: "student-B")
@@ -168,14 +204,16 @@ final class EcardProtocol: URLProtocol {
                 check(true, "attempt \(attempt) finishes with its actual authentication stage timeout")
             } catch { check(false, "attempt \(attempt) timeout reason: \(error)") }
         }
-        let (cancelLogin, cancelView) = bridge()
+        let (cancelLogin, cancelView) = bridge(preparationDelay: 50_000_000)
         let canceled = Task { try await cancelLogin.fetchToken(forAccount: "student-B") }
-        await pause()
+        defer { canceled.cancel() }
+        _ = try await navigation(cancelView, count: 1, "cancelable request")
         canceled.cancel()
         let following = Task { try await cancelLogin.fetchToken(forAccount: "student-B") }
-        await pause()
+        defer { following.cancel() }
+        let followingNavigation = try await navigation(cancelView, count: 2, "request following cancellation")
         let followingToken = jwt()
-        deliver(cancelLogin, cancelView, navigation: cancelView.navigations.last!, token: followingToken)
+        deliver(cancelLogin, cancelView, navigation: followingNavigation, token: followingToken)
         let canceledValue = try? await canceled.value
         let followingValue = try? await following.value
         check(canceledValue == nil && followingValue == followingToken,
@@ -187,13 +225,12 @@ final class EcardProtocol: URLProtocol {
 
         let (login, view) = bridge()
         let first = Task { try await login.fetchToken(forAccount: "student-B") }
-        await pause()
-        let oldNavigation = view.navigations.last!
+        defer { first.cancel() }
+        let oldNavigation = try await navigation(view, count: 1, "original navigation")
         let second = Task { try await login.fetchToken(forAccount: "student-B") }
-        await pause()
-        let newNavigation = view.navigations.last!
+        defer { second.cancel() }
+        let newNavigation = try await navigation(view, count: 2, "replacement navigation")
         login.webView(view, didFailProvisionalNavigation: oldNavigation, withError: URLError(.cannotFindHost))
-        await pause()
         let fresh = jwt()
         deliver(login, view, navigation: newNavigation, token: fresh)
         check((try? await second.value) == fresh, "old navigation error cannot terminate the replacement request")
@@ -201,33 +238,39 @@ final class EcardProtocol: URLProtocol {
 
         let (scriptLogin, scriptView) = bridge()
         let scriptFirst = Task { try await scriptLogin.fetchToken(forAccount: "student-B") }
-        await pause()
+        defer { scriptFirst.cancel() }
+        let scriptNavigation = try await navigation(scriptView, count: 1, "storage fallback request")
         setURL(scriptView, URL(string: "https://ecard.ccsut.cn/charge-app/")!)
-        scriptLogin.webView(scriptView, didFinish: scriptView.navigations.last!)
-        await pause()
-        let oldScript = scriptView.scriptCompletion
+        scriptLogin.webView(scriptView, didFinish: scriptNavigation)
+        try await waitUntil("trusted payment storage script") { scriptView.storageScriptCompletion != nil }
+        let oldScript = scriptView.storageScriptCompletion
         check(oldScript != nil, "trusted payment page starts storage fallback")
         let scriptSecond = Task { try await scriptLogin.fetchToken(forAccount: "student-B") }
-        await pause()
+        defer { scriptSecond.cancel() }
+        let replacementNavigation = try await navigation(scriptView, count: 2, "replacement storage request")
         oldScript?(jwt(seconds: 7200), nil)
-        await pause()
+        // Let the retired script's resumed consumer run while the replacement
+        // is still pending. Immediate token delivery could hide a broken fence.
+        _ = try await observesUnexpectedCallback { EcardTokenBridge.cachedToken(forAccount: "student-B") != nil }
         let replacement = jwt(seconds: 10800)
-        deliver(scriptLogin, scriptView, navigation: scriptView.navigations.last!, token: replacement)
+        deliver(scriptLogin, scriptView, navigation: replacementNavigation, token: replacement)
         check((try? await scriptSecond.value) == replacement, "old JavaScript result cannot finish a newer request")
         _ = try? await scriptFirst.value
 
         let (logoutLogin, logoutView) = bridge()
         let logoutTask = Task { try await logoutLogin.fetchToken(forAccount: "student-B") }
-        await pause()
+        defer { logoutTask.cancel() }
+        let logoutNavigation = try await navigation(logoutView, count: 1, "logout request")
         EcardTokenBridge.clearCachedToken()
-        deliver(logoutLogin, logoutView, navigation: logoutView.navigations.last!, token: jwt())
+        deliver(logoutLogin, logoutView, navigation: logoutNavigation, token: jwt())
         check((try? await logoutTask.value) == nil && EcardTokenBridge.cachedToken(forAccount: "student-B") == nil,
               "logout invalidates in-flight token and prevents cache resurrection")
 
         let (deliveredLogin, deliveredView) = bridge()
         let deliveredTask = Task { try await deliveredLogin.fetchToken(forAccount: "student-B") }
-        await pause()
-        deliver(deliveredLogin, deliveredView, navigation: deliveredView.navigations.last!, token: jwt())
+        defer { deliveredTask.cancel() }
+        let deliveredNavigation = try await navigation(deliveredView, count: 1, "resumed token request")
+        deliver(deliveredLogin, deliveredView, navigation: deliveredNavigation, token: jwt())
         // The continuation is resumed, but its caller has not run yet.
         EcardTokenBridge.clearCachedToken()
         check((try? await deliveredTask.value) == nil,
@@ -237,20 +280,21 @@ final class EcardProtocol: URLProtocol {
                          "https://ecard.ccsut.cn/charge-app-other/"] {
             let (restricted, restrictedView) = bridge()
             let waiting = Task { try await restricted.fetchToken(forAccount: "student-B") }
-            await pause()
+            defer { waiting.cancel() }
+            let restrictedNavigation = try await navigation(restrictedView, count: 1, "restricted page \(location)")
             setURL(restrictedView, URL(string: location)!)
-            restricted.webView(restrictedView, didFinish: restrictedView.navigations.last!)
-            await pause()
-            let scriptStarted = restrictedView.scriptCompletion != nil
-            restrictedView.scriptCompletion?(jwt(), nil)
+            restricted.webView(restrictedView, didFinish: restrictedNavigation)
+            let scriptStarted = try await observesUnexpectedCallback { restrictedView.storageScriptCompletion != nil }
+            restrictedView.storageScriptCompletion?(jwt(), nil)
             waiting.cancel()
             _ = try? await waiting.value
             check(!scriptStarted, "storage fallback rejects \(location)")
         }
-        let (expiry, expiryView) = bridge()
+        let (expiry, expiryView) = bridge(timeout: 0.2)
         let expiryTask = Task { try await expiry.fetchToken(forAccount: "student-B") }
-        await pause()
-        deliver(expiry, expiryView, navigation: expiryView.navigations.last!, token: jwt(seconds: -3600))
+        defer { expiryTask.cancel() }
+        let expiryNavigation = try await navigation(expiryView, count: 1, "expired token request")
+        deliver(expiry, expiryView, navigation: expiryNavigation, token: jwt(seconds: -3600))
         let expiryResult = try? await expiryTask.value
         check(expiryResult == nil, "expired token is never returned")
     }

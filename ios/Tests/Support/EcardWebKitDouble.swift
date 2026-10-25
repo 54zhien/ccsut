@@ -14,7 +14,7 @@ class WKWebView: NSObject {
     weak var navigationDelegate: (any WKNavigationDelegate)?
     var url: URL?
     var navigations: [WKNavigation] = []
-    var scriptCompletion: ((Any?, Error?) -> Void)?
+    var storageScriptCompletion: ((Any?, Error?) -> Void)?
     var stopped = false
     init(frame: CGRect, configuration: WKWebViewConfiguration) {}
     func load(_ request: URLRequest) -> WKNavigation? {
@@ -24,8 +24,9 @@ class WKWebView: NSObject {
     }
     func stopLoading() { stopped = true }
     func evaluateJavaScript(_ script: String) async throws -> Any? {
-        try await withCheckedThrowingContinuation { continuation in
-            scriptCompletion = { value, error in
+        guard script.contains("sessionStorage.getItem"), script.contains("access_token_pay") else { return nil }
+        return try await withCheckedThrowingContinuation { continuation in
+            storageScriptCompletion = { value, error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume(returning: value) }
             }
@@ -43,13 +44,14 @@ import WebKit
     private static let navigationFactory = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
     var navigations: [WKNavigation] = []
     var pageURL: URL?
-    var scriptCompletion: (@MainActor @Sendable (Any?, Error?) -> Void)?
+    var storageScriptCompletion: (@MainActor @Sendable (Any?, Error?) -> Void)?
     var stopped = false
     override var url: URL? { pageURL }
     override func load(_ request: URLRequest) -> WKNavigation? {
         Self.navigationFactory.stopLoading()
         guard let nav = Self.navigationFactory.loadHTMLString("<html></html>", baseURL: nil) else {
-            preconditionFailure("WebKit did not return a local navigation handle")
+            // The test's bounded navigation wait reports an explicit failure.
+            return nil
         }
         navigations.append(nav)
         return nav
@@ -57,7 +59,12 @@ import WebKit
     override func stopLoading() { stopped = true }
     override func evaluateJavaScript(_ javaScriptString: String,
                                     completionHandler: (@MainActor @Sendable (Any?, (any Error)?) -> Void)? = nil) {
-        scriptCompletion = completionHandler
+        guard javaScriptString.contains("sessionStorage.getItem"),
+              javaScriptString.contains("access_token_pay") else {
+            completionHandler?(nil, nil)
+            return
+        }
+        storageScriptCompletion = completionHandler
     }
 }
 #endif
