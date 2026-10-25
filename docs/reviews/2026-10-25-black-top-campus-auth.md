@@ -1,5 +1,7 @@
 # Black top material, campus entries and re-login recovery
 
+Follow-up: `2026-10-25-campus-live-spa-redirect.md` records a later real-account reproduction and the confirmed fragment-redirect root cause. The cookie-rotation evidence below remains valid for that separate code defect; this package did not resolve the user's reported authentication symptom.
+
 The user reported that the previous package still looked white/gray at the top in dark mode, requested removal of campus entry subtitles, then supplied screenshots of campus re-login failure. Keep the previously requested compile/package delivery and no-full-tests boundary.
 
 ## Evidence and scope
