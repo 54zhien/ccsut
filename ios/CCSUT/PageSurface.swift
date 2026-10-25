@@ -170,22 +170,27 @@ struct PageScrollSurface<Content: View>: View {
     let refresh: @MainActor () async -> Void
     var onOffsetChange: (CGFloat) -> Void = { _ in }
     @ViewBuilder var content: (CGSize, ScrollViewProxy) -> Content
-    @State private var offset: CGFloat = 0
 
     var body: some View {
         GeometryReader { viewport in
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     content(viewport.size, proxy)
+                        .background {
+                            NativePageRefreshAnchor(action: refresh)
+                                .frame(width: 0, height: 0)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
                 }
-                .scrollIndicators(.hidden)
                 .scrollEdgeEffectStyle(.soft, for: .top)
                 .scrollBounceBehavior(.always, axes: .vertical)
-                .pageRefreshable(action: refresh)
+                #if DEBUG
+                .modifier(PageRefreshDiagnostics())
+                #endif
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
                     max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
                 } action: { _, value in
-                    offset = value
                     onOffsetChange(value)
                 }
             }
@@ -224,6 +229,15 @@ private struct PageRefreshable: ViewModifier {
                 #endif
             }
             #if DEBUG
+            .modifier(PageRefreshDiagnostics())
+            #endif
+    }
+}
+
+#if DEBUG
+private struct PageRefreshDiagnostics: ViewModifier {
+    func body(content: Content) -> some View {
+        content
             .background {
                 if RefreshFeedbackObservation.enabled {
                     RefreshFeedbackNativeProbe().frame(width: 1, height: 1).allowsHitTesting(false).accessibilityHidden(true)
@@ -254,7 +268,86 @@ private struct PageRefreshable: ViewModifier {
                         .padding(.trailing, 16).padding(.bottom, 90)
                 }
             }
+    }
+}
+#endif
+
+/// Own the native control independently of SwiftUI's RefreshAction environment.
+/// Installing it as a scroll-view subview preserves the system pull animation and
+/// held inset when a pushed page updates its layout during an asynchronous read.
+private struct NativePageRefreshAnchor: UIViewRepresentable {
+    let action: @MainActor () async -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+    func makeUIView(context: Context) -> AnchorView {
+        let view = AnchorView()
+        view.coordinator = context.coordinator
+        view.isUserInteractionEnabled = false
+        return view
+    }
+    func updateUIView(_ view: AnchorView, context: Context) {
+        context.coordinator.action = action
+        view.connect()
+    }
+    static func dismantleUIView(_ view: AnchorView, coordinator: Coordinator) { coordinator.detach() }
+
+    @MainActor final class AnchorView: UIView {
+        weak var coordinator: Coordinator?
+        override func didMoveToWindow() { super.didMoveToWindow(); connect() }
+        override func didMoveToSuperview() { super.didMoveToSuperview(); connect() }
+        override func layoutSubviews() { super.layoutSubviews(); connect() }
+        func connect() {
+            guard window != nil else { return }
+            var parent = superview
+            while let view = parent {
+                if let scroll = view as? UIScrollView { coordinator?.attach(to: scroll); return }
+                parent = view.superview
+            }
+        }
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var action: @MainActor () async -> Void
+        private let control = UIRefreshControl()
+        private weak var scroll: UIScrollView?
+        private var task: Task<Void, Never>?
+        private var revision: UInt64 = 0
+        init(action: @escaping @MainActor () async -> Void) {
+            self.action = action
+            super.init()
+            control.addTarget(self, action: #selector(refresh), for: .valueChanged)
+        }
+        func attach(to scroll: UIScrollView) {
+            guard self.scroll !== scroll else { return }
+            detach()
+            self.scroll = scroll
+            scroll.alwaysBounceVertical = true
+            scroll.addSubview(control)
+        }
+        @objc private func refresh() {
+            guard task == nil else { return }
+            let expectedRevision = revision
+            let action = action
+            #if DEBUG
+            if RefreshFeedbackObservation.enabled { RefreshFeedbackObservation.shared.beginCallback() }
             #endif
+            task = Task { @MainActor [weak self] in
+                await action()
+                guard let self, revision == expectedRevision else { return }
+                control.endRefreshing()
+                task = nil
+                #if DEBUG
+                if RefreshFeedbackObservation.enabled { RefreshFeedbackObservation.shared.endCallback(cancelled: Task.isCancelled) }
+                #endif
+            }
+        }
+        func detach() {
+            revision &+= 1
+            task?.cancel()
+            task = nil
+            control.endRefreshing()
+            control.removeFromSuperview()
+            scroll = nil
+        }
     }
 }
 
@@ -357,7 +450,7 @@ struct NativeRefreshSubviewReference: UIViewRepresentable {
         activeSince = nil
     }
     func observe(_ scroll: UIScrollView) {
-        let control = scroll.refreshControl
+        let control = scroll.refreshControl ?? scroll.subviews.compactMap { $0 as? UIRefreshControl }.first
         let pull = max(0, -(scroll.contentOffset.y + scroll.adjustedContentInset.top))
         maximumPull = max(maximumPull, pull)
         if let since = activeSince {
