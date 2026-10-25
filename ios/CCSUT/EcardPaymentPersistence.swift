@@ -14,6 +14,12 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
 /// Account-scoped recovery boundary. The regression runner supplies an isolated
 /// directory/defaults suite, never the app's production records.
 @MainActor final class EcardPendingReceiptStore {
+    private struct Journal: Codable {
+        enum State: String, Codable { case pending, cleared }
+        let version: Int
+        let state: State
+        let receipt: EcardPaymentModel.Receipt?
+    }
     private let directory: URL?
     private let defaults: UserDefaults
 
@@ -27,7 +33,18 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
         let file = try fileURL(account: account)
         if FileManager.default.fileExists(atPath: file.path) {
             guard let data = try? Data(contentsOf: file) else { throw EcardReceiptRecoveryError.unreadable }
-            let receipt = try decode(data)
+            guard let journal = try? JSONDecoder().decode(Journal.self, from: data), journal.version == 1 else {
+                throw EcardReceiptRecoveryError.unreadable
+            }
+            let receipt: EcardPaymentModel.Receipt?
+            switch journal.state {
+            case .pending:
+                guard let saved = journal.receipt else { throw EcardReceiptRecoveryError.unreadable }
+                try validate(saved); receipt = saved
+            case .cleared:
+                guard journal.receipt == nil else { throw EcardReceiptRecoveryError.unreadable }
+                receipt = nil
+            }
             // Migration can be interrupted between atomic write and removing
             // defaults. Retire that shadow copy before a later completion clears
             // the durable file, otherwise the completed order would resurrect.
@@ -45,9 +62,8 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
     }
 
     func save(_ receipt: EcardPaymentModel.Receipt, account: String) throws {
-        guard receipt.status == .pending, let orderID = receipt.orderID, !orderID.isEmpty else {
-            throw EcardReceiptRecoveryError.unreadable
-        }
+        try validate(receipt)
+        let orderID = receipt.orderID
         if let existing = try load(account: account), existing.orderID != orderID {
             throw EcardReceiptRecoveryError.unresolvedOrder
         }
@@ -56,8 +72,10 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
 
     func clear(account: String, orderID: String) throws {
         if try load(account: account)?.orderID == orderID {
-            do { try FileManager.default.removeItem(at: fileURL(account: account)) }
-            catch { throw EcardReceiptRecoveryError.storageUnavailable }
+            // Keep an atomic tombstone: deleting the file would let an older,
+            // not-yet-flushed defaults snapshot resurrect the completed order.
+            // No room, amount or order information is retained in this marker.
+            try write(nil, to: fileURL(account: account))
         }
     }
 
@@ -69,14 +87,20 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
     }
 
     private func decode(_ data: Data) throws -> EcardPaymentModel.Receipt {
-        guard let receipt = try? JSONDecoder().decode(EcardPaymentModel.Receipt.self, from: data),
-              receipt.status == .pending, let orderID = receipt.orderID, !orderID.isEmpty else {
+        guard let receipt = try? JSONDecoder().decode(EcardPaymentModel.Receipt.self, from: data) else {
             throw EcardReceiptRecoveryError.unreadable
         }
+        try validate(receipt)
         return receipt
     }
 
-    private func write(_ receipt: EcardPaymentModel.Receipt, to file: URL) throws {
+    private func validate(_ receipt: EcardPaymentModel.Receipt) throws {
+        guard receipt.status == .pending, let orderID = receipt.orderID, !orderID.isEmpty else {
+            throw EcardReceiptRecoveryError.unreadable
+        }
+    }
+
+    private func write(_ receipt: EcardPaymentModel.Receipt?, to file: URL) throws {
         do {
             let parent = file.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
@@ -89,7 +113,8 @@ enum EcardReceiptRecoveryError: Error, LocalizedError {
             #if os(iOS)
             options.insert(.completeFileProtectionUntilFirstUserAuthentication)
             #endif
-            try JSONEncoder().encode(receipt).write(to: file, options: options)
+            let journal = Journal(version: 1, state: receipt == nil ? .cleared : .pending, receipt: receipt)
+            try JSONEncoder().encode(journal).write(to: file, options: options)
         } catch { throw EcardReceiptRecoveryError.storageUnavailable }
     }
 }

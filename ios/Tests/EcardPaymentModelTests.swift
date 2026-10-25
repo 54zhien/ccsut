@@ -72,7 +72,9 @@ private actor ModelServer {
         func check(_ value: Bool, _ name: String) {
             print("\(value ? "PASS" : "FAIL") \(name)"); if !value { failures += 1 }
         }
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("payment-tests-" + UUID().uuidString)
+        let temporary = FileManager.default.temporaryDirectory.standardizedFileURL
+        let root = temporary.appendingPathComponent("payment-tests-" + UUID().uuidString).standardizedFileURL
+        precondition(root.deletingLastPathComponent().path == temporary.path, "test cleanup must stay in its owned temporary directory")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         var suites: [String] = []
         defer {
@@ -181,6 +183,11 @@ private actor ModelServer {
             legacy.set(try JSONEncoder().encode(receipt("original-order")), forKey: "ecard.pending.fixture-A")
             try journal.clear(account: "fixture-A", orderID: "original-order")
             check(try journal.load(account: "fixture-A") == nil, "completed migrated order cannot resurrect from leftover defaults")
+            // Model the older defaults snapshot surviving an asynchronous flush
+            // when the process terminates immediately after completing payment.
+            legacy.set(try JSONEncoder().encode(receipt("original-order")), forKey: "ecard.pending.fixture-A")
+            check(try journal.load(account: "fixture-A") == nil,
+                  "durable cleared marker defeats an older defaults snapshot after restart")
         }
         do {
             let journal = store("corrupt-file")
@@ -283,6 +290,28 @@ private actor ModelServer {
             check(model.receipt?.orderID == "order-B" && model.receipt?.status == .pending && !model.isSubmitting,
                   "late payment completion cannot replace a new account's pending receipt")
             check(try journal.load(account: "fixture-B")?.orderID == "order-B", "late payment completion clears only its captured account/order")
+            model.stopQueries()
+        }
+        do {
+            let oldLogin = Gate(), newLogin = Gate(), epoch = Epoch()
+            let server = ModelServer()
+            let client = EcardClient(token: "fixture-token", transport: { try await server.respond($0) })
+            let model = EcardPaymentModel(pendingStore: store("late-dismiss"), currentGeneration: { epoch.value },
+                cachedCredential: { _ in nil }, clientFactory: { _, _, _ in client },
+                fetchLoginToken: { _, account in
+                    if account == "fixture-A" { await oldLogin.wait() } else { await newLogin.wait() }
+                    return "fixture-token"
+                })
+            model.start(account: "fixture-A")
+            _ = await waitUntil { await oldLogin.entered }
+            model.openLogin()
+            check(model.loginRequest != nil, "old account owns a presented login request")
+            epoch.value += 1; model.start(account: "fixture-B")
+            _ = await waitUntil { await newLogin.entered }
+            model.loginDismissed() // A's delayed SwiftUI callback, after B started.
+            check(model.isStarting && model.errorText == nil, "old sheet dismissal cannot cancel replacement login")
+            await oldLogin.release(); await newLogin.release()
+            check(await waitUntil { model.fee != nil && !model.isStarting }, "replacement login completes after old sheet dismissal")
             model.stopQueries()
         }
         do {

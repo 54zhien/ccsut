@@ -44,7 +44,13 @@ final class EcardPaymentModel {
     var isSubmitting = false
     var isChecking = false
     var canOpenLogin = false
-    var loginRequest: LoginRequest?
+    var loginRequest: LoginRequest? {
+        didSet {
+            if let previous = oldValue, previous.id != loginRequest?.id {
+                dismissedLoginID = previous.id
+            }
+        }
+    }
     var confirmation: Confirmation?
     var receipt: Receipt?
 
@@ -56,6 +62,7 @@ final class EcardPaymentModel {
     @ObservationIgnored private var loginTask: Task<Void, Never>?
     @ObservationIgnored private var loginPromptTask: Task<Void, Never>?
     @ObservationIgnored private var pendingLogin: LoginRequest?
+    @ObservationIgnored private var dismissedLoginID: UUID?
     @ObservationIgnored private var boundGeneration: UInt64?
     @ObservationIgnored private var submissionID: UUID?
     @ObservationIgnored private var checkingID: UUID?
@@ -298,6 +305,10 @@ final class EcardPaymentModel {
     }
     func loginDismissed() {
         // SwiftUI clears the sheet item before calling onDismiss.
+        // A replaced sheet's callback may arrive after a new startup begins.
+        guard let dismissed = dismissedLoginID else { return }
+        dismissedLoginID = nil
+        guard pendingLogin?.id == dismissed else { return }
         if isStarting, client == nil {
             // Cookie handoff is asynchronous too. Closing the sheet in that
             // window must not let its pending snapshot restart data loading.
