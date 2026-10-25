@@ -346,6 +346,19 @@ final class EcardTokenBridge: NSObject {
         return url.path == "/plat" || url.path.hasPrefix("/plat/")
     }
 
+    /// The WebKit callback overload returns Void. Bridge its result explicitly
+    /// so action strings and interaction booleans cannot be silently discarded.
+    private func authenticationScript(_ body: String, arguments: [String: Any]) async throws -> Any? {
+        try await withCheckedThrowingContinuation { (result: CheckedContinuation<Any?, Error>) in
+            webView.callAsyncJavaScript(body, arguments: arguments, in: nil, in: .page) {
+                switch $0 {
+                case .success(let value): result.resume(returning: value)
+                case .failure(let error): result.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     /// Only follow the observed official SSO/project entries. Never match or
     /// activate payment/confirmation controls. Manual login remains available.
     private func advancePortal(pageURL: URL, generation gen: Int) async {
@@ -377,10 +390,10 @@ final class EcardTokenBridge: NSObject {
         }
         return '';
         """
-        let value = try? await webView.callAsyncJavaScript(script, arguments: [
+        let value = try? await authenticationScript(script, arguments: [
             "allowCAS": !attemptedPortalActions.contains("cas"),
             "allowElectricity": !attemptedPortalActions.contains("electricity")
-        ], in: nil, in: .page)
+        ])
         guard gen == generation, continuation != nil else { return }
         if let action = value as? String, ["cas", "electricity"].contains(action) {
             attemptedPortalActions.insert(action)
@@ -413,9 +426,9 @@ final class EcardTokenBridge: NSObject {
         }
         return false;
         """
-        let needsInteraction = try? await webView.callAsyncJavaScript(script, arguments: [
+        let needsInteraction = try? await authenticationScript(script, arguments: [
             "portalOnly": Self.isPortalPage(pageURL), "expectedURL": pageURL.absoluteString
-        ], in: nil, in: .page)
+        ])
         guard gen == generation, continuation != nil, webView.url == pageURL,
               currentNavigation === navigation, !webView.isLoading,
               needsInteraction as? Bool == true else { return }
