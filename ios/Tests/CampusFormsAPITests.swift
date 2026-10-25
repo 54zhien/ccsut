@@ -41,12 +41,50 @@ actor FormTransport: CampusTransport {
     }
 }
 
+/// Simulates a live CAS proxy whose cached token has expired at a business service.
+actor ExpiredFormTransport: CampusTransport {
+    let failureStatus: Int
+    private var renewed = false
+    var requests: [URLRequest] = []
+    init(failureStatus: Int) { self.failureStatus = failureStatus }
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        let path = request.url!.path
+        var reply = FormTransport.reply(path)
+        var headers: [String: String] = [:]
+        if path.hasSuffix("redirect") {
+            renewed = true
+            reply = (200, "official landing")
+        } else if path.hasSuffix("validate_full"), renewed {
+            reply.1 = reply.1.replacingOccurrences(of: "fixture-token", with: "renewed-token")
+        } else if path.hasSuffix("querySysConfigItems"), !renewed {
+            reply = (failureStatus, "")
+            if failureStatus == 302 { headers["Location"] = "https://auth.ccsut.cn/backstage/cas/login?service=fixture" }
+        }
+        return (Data(reply.1.utf8), HTTPURLResponse(url: request.url!, statusCode: reply.0, httpVersion: nil, headerFields: headers)!)
+    }
+}
+
 @main struct CampusFormsAPITests {
     static func main() async throws {
         var failures = 0
         func check(_ ok: Bool, _ name: String) { print("\(ok ? "PASS" : "FAIL") \(name)"); if !ok { failures += 1 } }
         let credentials = FormCredentials(), transport = FormTransport()
         let client = CampusClient(account: "fixture-account", credentials: credentials, transport: transport)
+        for status in [401, 302] {
+            let expired = ExpiredFormTransport(failureStatus: status)
+            do {
+                let recovered = try await CampusClient(account: "fixture-account", credentials: FormCredentials(), transport: expired).loadForm(.leave)
+                let sent = await expired.requests
+                let metadata = sent.filter { $0.url!.path.hasSuffix("querySysConfigItems") }
+                check(recovered.choices.map(\.id) == ["sick"] && metadata.count == 2 &&
+                      metadata.last?.value(forHTTPHeaderField: "Authorization") == "Bearer renewed-token",
+                      "form metadata \(status) renews CAS instead of reusing a rejected validation token")
+                check(sent.filter { $0.url!.path.hasSuffix("redirect") }.count == 1 &&
+                      !sent.contains { $0.url!.path.hasSuffix("submitLeaveApply") || $0.url!.path.contains("filecenter") },
+                      "form recovery authenticates once and never submits or uploads")
+            } catch { check(false, "form metadata \(status) renews CAS instead of reusing a rejected validation token") }
+        }
         let config = try await client.loadForm(.leave)
         check(config.choices.map(\.id) == ["sick"] && config.parentPhone == "18000000001", "form loads verified choices and minimal masked-contact source")
         let role = try await client.approvers(type: "sick", days: 0.5)

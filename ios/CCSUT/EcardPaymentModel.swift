@@ -52,6 +52,14 @@ final class EcardPaymentModel {
     @ObservationIgnored private var loginTask: Task<Void, Never>?
     @ObservationIgnored private var loginPromptTask: Task<Void, Never>?
     @ObservationIgnored private var pendingLogin: LoginRequest?
+    @ObservationIgnored private let makeClient: @MainActor (String, UInt64, WKWebsiteDataStore?) -> EcardClient
+    @ObservationIgnored private let makeBridge: @MainActor () -> EcardTokenBridge
+
+    init(clientFactory: (@MainActor (String, UInt64, WKWebsiteDataStore?) -> EcardClient)? = nil,
+         bridgeFactory: (@MainActor () -> EcardTokenBridge)? = nil) {
+        makeClient = clientFactory ?? { Self.authenticatedClient(token: $0, generation: $1, store: $2) }
+        makeBridge = bridgeFactory ?? { EcardTokenBridge(dataStore: WebStore.dataStore) }
+    }
 
     var amount: Decimal? {
         let value = amountText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -102,7 +110,7 @@ final class EcardPaymentModel {
     private func beginBackgroundLogin(account: String) {
         let current = revision
         let generation = CookieJar.generation
-        let request = LoginRequest(bridge: EcardTokenBridge(dataStore: WebStore.dataStore), account: account)
+        let request = LoginRequest(bridge: makeBridge(), account: account)
         let requestID = request.id
         pendingLogin = request
         request.bridge.onNeedsInteraction = { [weak self] in
@@ -157,8 +165,7 @@ final class EcardPaymentModel {
                         CookieJar.upsert(cookies, generation: generation)
                     }
                     guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
-                    let client = Self.authenticatedClient(token: token, generation: generation,
-                                                          store: nativeCookies ? nil : store)
+                    let client = makeClient(token, generation, nativeCookies ? nil : store)
                     self.client = client
                     loginRequest = nil
                     do {
