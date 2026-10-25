@@ -120,6 +120,42 @@ private actor ModelServer {
             model.prepareConfirmation(); return model.confirmation
         }
 
+        // Recovery failures must be distinguishable and remain blocking even
+        // when the original unreadable file subsequently disappears.
+        do {
+            var descriptions: Set<String> = []
+            for kind in ["read", "version", "corrupt"] {
+                let journal = store("recovery-" + kind)
+                try journal.save(receipt("original-order"), account: "fixture-A")
+                let folder = root.appendingPathComponent("recovery-" + kind)
+                let file = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil).first!
+                if kind == "read" {
+                    try FileManager.default.removeItem(at: file)
+                    try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+                } else {
+                    try Data((kind == "version" ? #"{"version":99,"futurePayload":{}}"# : "broken-json").utf8).write(to: file)
+                }
+                do { _ = try journal.load(account: "fixture-A"); check(false, "invalid recovery record must throw") }
+                catch { descriptions.insert(error.localizedDescription) }
+                var credentialReads = 0
+                let server = ModelServer(), model = make(server, journal, Epoch(), observedAccounts: { _ in credentialReads += 1 })
+                await ready(model)
+                check(credentialReads == 0 && model.fee == nil, "blocked \(kind) recovery stops before authentication")
+                try FileManager.default.removeItem(at: file)
+                let restarted = store("recovery-" + kind)
+                do { _ = try restarted.load(account: "fixture-A"); check(false, "missing \(kind) journal remains blocked after restart") }
+                catch { descriptions.insert(error.localizedDescription) }
+                check(try restarted.load(account: "fixture-B") == nil, "recovery block is isolated to its account")
+                model.start(account: "fixture-A", force: true)
+                _ = await waitUntil { !model.isStarting }
+                check(confirm(model) == nil && !model.canPay, "force reload cannot bypass missing \(kind) journal")
+                let counts = await server.counts()
+                check(counts.creations == 0 && counts.debits == 0, "blocked recovery has no payment requests")
+                model.stopQueries()
+            }
+            check(descriptions.count == 4, "read failure, unsupported version, corruption and missing record have distinct explanations")
+        }
+
         // Restart while the server has received the debit, before its response.
         do {
             let gate = Gate(), journal = store("restart"), epoch = Epoch()
