@@ -88,6 +88,35 @@ struct SessionRegressionTests {
                          generation: CookieJar.generation)
         check(CookieJar.shared.isEmpty, "native cookie deletion removes the normalized domain identity")
 
+        // The SSO boundary must carry scope metadata, not flatten it into a header.
+        CookieJar.shared = [
+            cookie("TGC", "root", domain: "ecard.ccsut.cn"),
+            cookie("TGC", "narrow", domain: "ecard.ccsut.cn", path: "/berserker-auth"),
+            cookie("TGC", "other-host", domain: "auth.ccsut.cn"),
+            cookie("TGC", "expired", expires: Date(timeIntervalSinceNow: -60), domain: "ecard.ccsut.cn", path: "/berserker-auth/oauth")
+        ]
+        let ssoCredentials = EcardCookieCredentials()
+        let ssoGeneration = ssoCredentials.generation
+        let tokenURL = URL(string: "https://ecard.ccsut.cn/berserker-auth/oauth/token")!
+        do {
+            let scoped = try ssoCredentials.cookies(for: tokenURL, expectedGeneration: ssoGeneration)
+            check(scoped.count == 2 && Set(scoped.map(\.path)) == Set(["/", "/berserker-auth"])
+                    && Set(scoped.map(\.value)) == Set(["root", "narrow"]),
+                  "real SSO credentials retain both cookie identities and exclude expired or unrelated cookies")
+            let boundary = try ssoCredentials.cookies(for: URL(string: "https://ecard.ccsut.cn/berserker-authentication")!,
+                                                     expectedGeneration: ssoGeneration)
+            check(boundary.count == 1 && boundary.first?.value == "root", "SSO snapshot respects cookie path boundaries")
+            let insecure = try ssoCredentials.cookies(for: URL(string: "http://ecard.ccsut.cn/berserker-auth/oauth/token")!,
+                                                     expectedGeneration: ssoGeneration)
+            check(insecure.isEmpty, "SSO snapshot excludes Secure cookies on HTTP")
+            CookieJar.shared = [cookie("TGC", "next-account", domain: "ecard.ccsut.cn")]
+            do {
+                _ = try ssoCredentials.cookies(for: tokenURL, expectedGeneration: ssoGeneration)
+                check(false, "SSO snapshot rejects the previous account generation")
+            } catch is CancellationError { check(true, "SSO snapshot rejects the previous account generation") }
+            catch { check(false, "SSO snapshot rejects the previous account generation with cancellation") }
+        } catch { check(false, "real SSO credential scope snapshot succeeds") }
+
         let protected = cookie("jw_uf", "protected", httpOnly: true)
         check(protected.isHTTPOnly && StoredCookie(protected).asHTTPCookie?.isHTTPOnly == true,
               "Keychain roundtrip preserves HttpOnly")

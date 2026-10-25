@@ -98,7 +98,7 @@ private final class SyntheticCredentials: EcardSSOCredentials, @unchecked Sendab
         return generationValue
     }
 
-    func header(for url: URL, expectedGeneration: UInt64) throws -> String? {
+    func cookies(for url: URL, expectedGeneration: UInt64) throws -> [HTTPCookie] {
         lock.lock(); defer { lock.unlock() }
         guard generationValue == expectedGeneration else { throw EcardSSOError.identityMismatch }
         let requestPath = url.path.isEmpty ? "/" : url.path
@@ -109,9 +109,11 @@ private final class SyntheticCredentials: EcardSSOCredentials, @unchecked Sendab
             return (url.host == domain || url.host?.hasSuffix("." + domain) == true)
                 && pathMatches && (cookie.expiresDate ?? .distantFuture) > Date()
         }.sorted { $0.path.count > $1.path.count }
-        let current = cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
-        if current.isEmpty { return url.host == "ecard.ccsut.cn" ? "TGC=fixture" : nil }
-        return current
+        if cookies.isEmpty && url.host == "ecard.ccsut.cn" {
+            return [HTTPCookie(properties: [.domain: "ecard.ccsut.cn", .path: "/",
+                                           .name: "TGC", .value: "fixture", .secure: "TRUE"])!]
+        }
+        return cookies
     }
 
     func accept(_ cookies: [HTTPCookie], generation: UInt64) {

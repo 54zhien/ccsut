@@ -652,22 +652,33 @@ enum CookieJar {
         try requestCookies(for: url, expectedGeneration: expectedGeneration).header
     }
 
+    /// Keep scope metadata and validate ownership under the same lock for SSO overlays.
+    static func scopedCookies(for url: URL, expectedGeneration: UInt64) throws -> [HTTPCookie] {
+        lock.lock(); defer { lock.unlock() }
+        guard expectedGeneration == revision else { throw CancellationError() }
+        return matchingCookies(for: url, cookies: activeCookiesLocked)
+    }
+
     private static var activeCookiesLocked: [HTTPCookie] {
         cookies.filter { isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
     }
 
     private static func makeHeader(for url: URL, cookies: [HTTPCookie]) -> String? {
-        guard let host = url.host?.lowercased() else { return nil }
+        let matched = matchingCookies(for: url, cookies: cookies)
+        guard !matched.isEmpty else { return nil }
+        return matched.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+    }
+
+    private static func matchingCookies(for url: URL, cookies: [HTTPCookie]) -> [HTTPCookie] {
+        guard let host = url.host?.lowercased() else { return [] }
         let path = url.path.isEmpty ? "/" : url.path
-        let matched = cookies.filter { c in
+        return cookies.filter { c in
             let d = c.domain.hasPrefix(".") ? String(c.domain.dropFirst()) : c.domain
             let domainMatches = host == d || (c.domain.hasPrefix(".") && host.hasSuffix("." + d))
             let pathMatches = path == c.path || (path.hasPrefix(c.path) &&
                 (c.path.hasSuffix("/") || path.dropFirst(c.path.count).hasPrefix("/")))
             return domainMatches && pathMatches && (!c.isSecure || url.scheme == "https")
         }.sorted { $0.path.count > $1.path.count }
-        guard !matched.isEmpty else { return nil }
-        return matched.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
     }
 
     static var names: [String] { shared.map(\.name).sorted() }

@@ -5,7 +5,7 @@ import FoundationNetworking
 
 protocol EcardSSOCredentials: Sendable {
     var generation: UInt64 { get }
-    func header(for url: URL, expectedGeneration: UInt64) throws -> String?
+    func cookies(for url: URL, expectedGeneration: UInt64) throws -> [HTTPCookie]
     func accept(_ cookies: [HTTPCookie], generation: UInt64)
 }
 
@@ -385,24 +385,20 @@ actor EcardSSOClient {
     private func attachCookies(to request: inout URLRequest, generation: UInt64, flow: FlowState) async throws {
         try check(generation)
         guard let url = request.url else { throw EcardSSOError.invalidResponse }
-        let supplied = try credentials.header(for: url, expectedGeneration: generation)
+        let supplied = try credentials.cookies(for: url, expectedGeneration: generation)
         try check(generation)
-        var values: [String: CookieCandidate] = [:]
-        let staged = flow.cookies.values.filter { Self.cookieDomainPathApplies($0, to: url) }
-        let deletedNames = Set(staged.filter { Self.isExpired($0) }.map(\.name))
-        if let supplied, !supplied.isEmpty {
-            for pair in supplied.split(separator: ";", omittingEmptySubsequences: false) {
-                let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-                guard parts.count == 2 else { throw EcardSSOError.invalidResponse }
-                let name = String(parts[0]).trimmingCharacters(in: .whitespaces)
-                let value = String(parts[1]).trimmingCharacters(in: .whitespaces)
-                guard Self.isCookieName(name), Self.isCookieValue(value) else { throw EcardSSOError.invalidResponse }
-                if values[name] == nil && !deletedNames.contains(name) {
-                    values[name] = CookieCandidate(value: value, path: "", domain: "")
-                }
-            }
+        // Preserve identity until replacements/deletions have been applied.
+        // A Cookie header alone cannot distinguish same-name scopes.
+        var merged: [CookieKey: HTTPCookie] = [:]
+        for cookie in supplied {
+            merged[CookieKey(name: cookie.name, domain: Self.normalizedDomain(cookie.domain), path: cookie.path)] = cookie
         }
-        for cookie in staged where Self.cookieApplies(cookie, to: url) {
+        for (key, cookie) in flow.cookies {
+            if Self.isExpired(cookie) { merged.removeValue(forKey: key) }
+            else { merged[key] = cookie }
+        }
+        var values: [String: CookieCandidate] = [:]
+        for cookie in merged.values where Self.cookieApplies(cookie, to: url) {
             guard Self.isCookieName(cookie.name), Self.isCookieValue(cookie.value) else {
                 throw EcardSSOError.invalidResponse
             }
@@ -441,8 +437,8 @@ actor EcardSSOClient {
         }
         for cookie in parsed {
             let key = CookieKey(name: cookie.name, domain: Self.normalizedDomain(cookie.domain), path: cookie.path)
-            // Keep expired cookies as deletion tombstones: they suppress stale values
-            // from the persistent header during this flow and delete them on commit.
+            // Keep expired cookies as deletion tombstones: they suppress matching identities
+            // from persistent cookies during this flow and delete them on commit.
             flow.cookies[key] = cookie
         }
         try check(generation)

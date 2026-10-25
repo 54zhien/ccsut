@@ -7,10 +7,8 @@ state.json
 node_modules/
 .pnpm-store/
 
-# CI 预览产物（本地下载的构建目录，不入库）
-dist/campus*/
-dist/native-preview-*/
-dist/native-regression-*/
+# 本地分发产物、截图和诊断说明可能含个人信息，整个目录不入库
+/dist/
 
 # iOS
 ios/build/
