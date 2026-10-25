@@ -10,6 +10,28 @@ import WebKit
     }
 }
 
+/// The external WebKit boundary returns actual callback values without loading a school page.
+@MainActor private final class ScriptedEcardWebView: WKWebView {
+    let fixtureNavigation = WKNavigation()
+    var fixtureURL = URL(string: "https://auth.ccsut.cn/backstage/cas/login")!
+    var interactionResult = true
+    var callbackCount = 0
+    var allowedCASActions: [Bool] = []
+    override var url: URL? { fixtureURL }
+    override var isLoading: Bool { false }
+    override func load(_ request: URLRequest) -> WKNavigation? { fixtureNavigation }
+    override func callAsyncJavaScript(_ functionBody: String, arguments: [String: Any] = [:],
+                                     in frame: WKFrameInfo?, in contentWorld: WKContentWorld,
+                                     completionHandler: ((Result<Any, Error>) -> Void)? = nil) {
+        let result: Any
+        if let allowCAS = arguments["allowCAS"] as? Bool {
+            allowedCASActions.append(allowCAS)
+            result = allowCAS ? "cas" : ""
+        } else { result = interactionResult }
+        if let completionHandler { callbackCount += 1; completionHandler(.success(result)) }
+    }
+}
+
 // Runs the production Session.swift/API.swift/APIResponse.swift/Models.swift on macOS without a device
 // or school credentials. The only fake is the external HTTP boundary.
 final class SchoolProtocol: URLProtocol {
@@ -293,6 +315,45 @@ struct SessionRegressionTests {
         do { _ = try await switchedBridge.fetchToken(forAccount: "fixture-native"); check(false, "late native result after account change must fail") }
         catch { check(switchedWebView.loadedRequests.isEmpty && EcardTokenBridge.cachedToken(forAccount: "fixture-native") == nil,
                       "account change discards a late native token without fallback or caching") }
+        EcardTokenBridge.clearCachedToken()
+
+        let interactionView = ScriptedEcardWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let interactionBridge = EcardTokenBridge(timeout: 5, webView: interactionView, nativeTokenProvider: { _, _ in
+            throw EcardSSOError.requiresInteraction
+        })
+        var interactionReports = 0
+        interactionBridge.onNeedsInteraction = { interactionReports += 1 }
+        let interactionFetch = Task { @MainActor in try await interactionBridge.fetchToken(forAccount: "fixture-native") }
+        for _ in 0..<100 { if interactionView.navigationDelegate != nil { break }; try? await Task.sleep(for: .milliseconds(10)) }
+        // Wait for the native fallback's load to bind this navigation to the active request.
+        try? await Task.sleep(for: .milliseconds(100))
+        interactionBridge.webView(interactionView, didFinish: interactionView.fixtureNavigation)
+        try? await Task.sleep(for: .milliseconds(100))
+        check(interactionReports == 1 && interactionView.callbackCount == 1,
+              "fallback consumes the WebKit boolean result and reports real login interaction")
+        interactionBridge.webView(interactionView, didFinish: interactionView.fixtureNavigation)
+        try? await Task.sleep(for: .milliseconds(50))
+        check(interactionReports == 1, "the same fallback login is reported only once")
+        interactionFetch.cancel()
+        _ = try? await interactionFetch.value
+        EcardTokenBridge.clearCachedToken()
+
+        let portalView = ScriptedEcardWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        portalView.fixtureURL = URL(string: "https://ecard.ccsut.cn/plat/login")!
+        portalView.interactionResult = false
+        let portalBridge = EcardTokenBridge(timeout: 5, webView: portalView, nativeTokenProvider: { _, _ in
+            throw EcardSSOError.requiresInteraction
+        })
+        let portalFetch = Task { @MainActor in try await portalBridge.fetchToken(forAccount: "fixture-native") }
+        try? await Task.sleep(for: .milliseconds(100))
+        portalBridge.webView(portalView, didFinish: portalView.fixtureNavigation)
+        try? await Task.sleep(for: .milliseconds(100))
+        portalBridge.webView(portalView, didFinish: portalView.fixtureNavigation)
+        try? await Task.sleep(for: .milliseconds(100))
+        check(portalView.allowedCASActions == [true, false] && portalView.callbackCount == 2,
+              "fallback consumes the portal action result and does not repeat the CAS entry")
+        portalFetch.cancel()
+        _ = try? await portalFetch.value
         EcardTokenBridge.clearCachedToken()
 
         CookieJar.shared = [cookie("jw_uf", "native-only")]
