@@ -599,11 +599,10 @@ final class PageInteractionUITests: XCTestCase {
 
         for empty in [false, true] {
             for page in ["scores", "exams", "electives"] {
-                let app = launch(page, refresh: true, empty: empty)
+                let app = launch(page, refresh: true, empty: empty, arguments:["--preview-refresh-observation"])
                 let counter = app.descendants(matching: .any).matching(identifier: "academic-publication-count").firstMatch
-                XCTAssertTrue(counter.waitForExistence(timeout: 5))
-                XCTAssertTrue(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5) == .completed,
-                              "Wait for the initial snapshot before testing a separate pull refresh")
+                let stage = "\(page)-empty-\(empty)"
+                guard waitForInitialPublication(counter, in:app, stage:stage) else { app.terminate(); continue }
                 let expectedContent: String
                 switch (page, empty) {
                 case ("scores", true): expectedContent = "暂无成绩"
@@ -617,14 +616,22 @@ final class PageInteractionUITests: XCTestCase {
                 XCTAssertTrue(content.waitForExistence(timeout: 3))
                 XCTAssertFalse(app.buttons["page-refresh"].exists)
                 XCTAssertFalse(app.buttons["刷新"].exists)
+                let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
+                guard let restingInset = waitForNativeRefreshAtRest(observation, stage:stage) else { app.terminate(); continue }
                 logPageRefreshDiagnostic(app, "\(page)-empty-\(empty)-before-pull")
-                // Drag the body away from the semester menu.
-                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.35))
-                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.85))
+                // Use the native proof's body gesture, below the pinned term header.
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
                 start.press(forDuration: 0.1, thenDragTo: end)
                 let refreshed = XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '2'"), evaluatedWith: counter)], timeout: 5) == .completed
+                let completed = XCTWaiter.wait(for: [expectation(for: NSPredicate(format:"label BEGINSWITH 'entered=1; completed=1;'"), evaluatedWith:observation)], timeout:5) == .completed
+                let report = observation.exists ? observation.label : "missing observation"
+                print("[RefreshFeedback] \(stage) after-pull: restingInset=\(restingInset); \(report)")
                 logPageRefreshDiagnostic(app, "\(page)-empty-\(empty)-after-pull")
                 XCTAssertTrue(refreshed, "\(page) must publish exactly one refreshed snapshot even when empty=\(empty)")
+                XCTAssertTrue(completed, "\(stage): the single pull must enter and complete exactly once: \(report)")
+                XCTAssertTrue(report.contains("cancelled=false"), "\(stage): refresh must complete without cancellation: \(report)")
+                assertNativeRefreshReturned(observation, restingInset:restingInset)
                 XCTAssertTrue(content.waitForExistence(timeout: 3))
                 capture(app, "pull-refresh-\(page)-empty-\(empty)")
                 XCTAssertEqual(counter.label, "2")
@@ -703,13 +710,11 @@ final class PageInteractionUITests: XCTestCase {
         let app = launch("scores", arguments:["--preview-refresh", "--preview-long-list", "--preview-slow-refresh", "--preview-controlled-refresh"])
         defer { app.terminate() }
         let counter = app.descendants(matching: .any).matching(identifier: "academic-publication-count").firstMatch
-        XCTAssertTrue(counter.waitForExistence(timeout: 8))
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 8), .completed)
+        guard waitForInitialPublication(counter, in:app, stage:"score-\(mode)") else { return }
         let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
-        XCTAssertTrue(observation.waitForExistence(timeout: 3))
+        guard let restingInset = waitForNativeRefreshAtRest(observation, stage:"score-\(mode)") else { return }
         let topContent = app.staticTexts["学业概览"]
         XCTAssertTrue(topContent.exists)
-        let restingInset = nativeRefreshValue(observation.label, "adjustedTop")
         print("[RefreshFeedback] \(mode) before-pull: \(observation.label)")
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
@@ -733,6 +738,34 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(report.contains("refreshingSeen=true"), "The native refresh control must become active: \(report)")
         XCTAssertTrue(report.contains("prematurelyStopped=false"), "The native refresh control must remain active until the awaited load finishes: \(report)")
         assertNativeRefreshReturned(observation, restingInset: restingInset)
+    }
+
+    /// Fixture publication has no performance deadline. Bound readiness once,
+    /// and report its actual state before deciding whether a gesture is valid.
+    private func waitForInitialPublication(_ counter: XCUIElement, in app: XCUIApplication, stage: String) -> Bool {
+        let initial = NSPredicate { _, _ in counter.exists && counter.label == "1" }
+        let result = XCTWaiter.wait(for:[expectation(for:initial,evaluatedWith:counter)],timeout:30)
+        let count = counter.exists ? counter.label : "missing"
+        let observation = app.descendants(matching:.any).matching(identifier:"refresh-feedback-observation").firstMatch
+        let native = observation.exists ? observation.label : "missing observation"
+        print("[RefreshReadiness] \(stage): result=\(result.rawValue); counter=\(count); applicationState=\(app.state.rawValue); \(native)")
+        XCTAssertEqual(result,.completed,"\(stage): initial publication must be exactly 1 before any pull; actual counter=\(count), appState=\(app.state.rawValue), \(native)")
+        return result == .completed
+    }
+
+    private func waitForNativeRefreshAtRest(_ observation: XCUIElement, stage: String) -> Double? {
+        let atRest = NSPredicate { _, _ in
+            guard observation.exists else { return false }
+            let report = observation.label
+            return report.contains("control=") && !report.contains("control=nil") &&
+                report.contains("refreshing=false") && report.hasPrefix("entered=0; completed=0;") &&
+                abs(self.nativeRefreshValue(report,"offsetY") + self.nativeRefreshValue(report,"adjustedTop")) < 1
+        }
+        let result = XCTWaiter.wait(for:[expectation(for:atRest,evaluatedWith:observation)],timeout:10)
+        let report = observation.exists ? observation.label : "missing observation"
+        print("[RefreshReadiness] \(stage) native-rest: result=\(result.rawValue); \(report)")
+        XCTAssertEqual(result,.completed,"\(stage): wait for an attached native control at its resting offset before one pull: \(report)")
+        return result == .completed ? nativeRefreshValue(report,"adjustedTop") : nil
     }
 
     // SwiftUI AX frames can remain unchanged while UIKit adjusts the refresh

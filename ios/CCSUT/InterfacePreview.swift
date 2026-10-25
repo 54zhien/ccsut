@@ -47,6 +47,10 @@ enum InterfacePreview {
         ProcessInfo.processInfo.arguments.contains("--preview-slow-refresh") ? .seconds(2) : .milliseconds(250)
     }
 
+    static var refreshObservation: Bool {
+        ProcessInfo.processInfo.arguments.contains("--preview-refresh-observation")
+    }
+
     static var longList: Bool {
         ProcessInfo.processInfo.arguments.contains("--preview-long-list")
     }

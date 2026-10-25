@@ -362,7 +362,8 @@ private struct NativePageRefreshAnchor: UIViewRepresentable {
 @MainActor private final class RefreshFeedbackObservation {
     static let shared = RefreshFeedbackObservation()
     static var enabled: Bool {
-        InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-slow-refresh")
+        InterfacePreview.enabled && (InterfacePreview.refreshObservation ||
+            ProcessInfo.processInfo.arguments.contains("--preview-slow-refresh"))
     }
     private var entered = 0
     private var completed = 0
