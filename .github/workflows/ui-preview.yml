@@ -18,7 +18,7 @@ on:
         options: [all, refresh-and-search, refresh-navigation]
         default: all
       test_environment:
-        description: 'Default stable simulator or the reported iPhone 15 Pro Max / iOS 27.2 environment'
+        description: 'Stable simulator or iOS 27.2 (logs the compatible device actually used)'
         type: choice
         options: [stable, ios-27-2]
         default: stable
@@ -40,15 +40,30 @@ jobs:
           xcodebuild -downloadPlatform iOS -buildVersion 27.2 -architectureVariant arm64
           xcrun simctl list runtimes
           xcrun simctl list runtimes -j > "$RUNNER_TEMP/ui-screenshots/runtimes.json"
-          RUNTIME=$(python3 -c '
-          import json,sys
+          xcrun simctl list devicetypes -j > "$RUNNER_TEMP/ui-screenshots/device-types.json"
+          python3 -c '
+          import json,re,sys
           runtimes=json.load(open(sys.argv[1]))["runtimes"]
           matches=[r for r in runtimes if r.get("isAvailable") and r.get("version")=="27.2"]
           if len(matches)!=1: raise SystemExit("Expected one available iOS 27.2 runtime: " + repr(matches))
-          print(matches[0]["identifier"])
-          ' "$RUNNER_TEMP/ui-screenshots/runtimes.json")
-          DEVICE=$(xcrun simctl create 'CCSUT iPhone 15 Pro Max iOS 27.2' \
-            com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro-Max "$RUNTIME")
+          runtime=matches[0]
+          types=json.load(open(sys.argv[2]))["devicetypes"]
+          allowed={t["identifier"] for t in runtime.get("supportedDeviceTypes",[])}
+          suffix=re.search(r"iPhone(\d+)-(\d+)$",runtime["identifier"])
+          model=("iPhone"+suffix[1]+","+suffix[2]) if suffix else None
+          compatible=[t for t in types if t.get("productFamily")=="iPhone" and
+                      (t["identifier"] in allowed if allowed else
+                       t.get("modelIdentifier")==model if model else t["name"]=="iPhone 15 Pro Max")]
+          if not compatible: raise SystemExit("No compatible iPhone type: " + repr(runtime))
+          device=next((t for t in compatible if t["name"]=="iPhone 15 Pro Max"),compatible[0])
+          print("Selected simulator: " + device["name"] + "; runtime=" + runtime["identifier"])
+          if device["name"]!="iPhone 15 Pro Max":
+              print("Reported physical model is iPhone 15 Pro Max; this runtime does not support that simulator type.")
+          json.dump({"runtime":runtime["identifier"],"device":device["identifier"],"name":device["name"]},open(sys.argv[3],"w"))
+          ' "$RUNNER_TEMP/ui-screenshots/runtimes.json" "$RUNNER_TEMP/ui-screenshots/device-types.json" "$RUNNER_TEMP/ui-screenshots/selected-simulator.json"
+          RUNTIME=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime"])' "$RUNNER_TEMP/ui-screenshots/selected-simulator.json")
+          DEVICE_TYPE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["device"])' "$RUNNER_TEMP/ui-screenshots/selected-simulator.json")
+          DEVICE=$(xcrun simctl create 'CCSUT iOS 27.2 refresh diagnosis' "$DEVICE_TYPE" "$RUNTIME")
           echo "CCSUT_PREVIEW_DEVICE=$DEVICE" >> "$GITHUB_ENV"
       - name: Test timetable presentation
         run: |
