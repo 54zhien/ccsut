@@ -47,7 +47,7 @@ final class PageInteractionUITests: XCTestCase {
     func testSelectedHistoryLargeTextAndDarkAppearance() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected",
-                               "-UIPreferredContentSizeCategoryName","UICTContentSizeCategoryAccessibilityXXXL","-AppleInterfaceStyle","Dark"]
+                               "-UIPreferredContentSizeCategoryName","UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
         let selected = app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch
         XCTAssertTrue(selected.waitForExistence(timeout:8)); selected.tap()
