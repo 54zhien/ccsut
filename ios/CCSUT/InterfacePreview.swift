@@ -35,6 +35,10 @@ enum InterfacePreview {
     }
 
     #if DEBUG
+    static var refreshFixtureDelay: Duration {
+        ProcessInfo.processInfo.arguments.contains("--preview-slow-refresh") ? .seconds(2) : .milliseconds(250)
+    }
+
     static var longList: Bool {
         ProcessInfo.processInfo.arguments.contains("--preview-long-list")
     }
