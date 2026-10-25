@@ -37,6 +37,19 @@ jobs:
           set -e
           xcrun swiftc -swift-version 6 -parse-as-library ios/CCSUT/EcardSSOClient.swift ios/Tests/EcardSSOClientTests.swift -o "$RUNNER_TEMP/ecard-sso"
           "$RUNNER_TEMP/ecard-sso"
+      - name: Run payment recovery and state regressions
+        if: always()
+        run: |
+          set -e
+          SOURCES=(ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift
+            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift
+            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift
+            ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift
+            ios/CCSUT/EcardPaymentPersistence.swift ios/CCSUT/EcardPaymentModel.swift)
+          xcrun swiftc -parse-as-library "${SOURCES[@]}" ios/Tests/EcardPaymentAPITests.swift -o "$RUNNER_TEMP/payment-api"
+          "$RUNNER_TEMP/payment-api"
+          xcrun swiftc -parse-as-library "${SOURCES[@]}" ios/Tests/EcardPaymentModelTests.swift -o "$RUNNER_TEMP/payment-model"
+          "$RUNNER_TEMP/payment-model"
       - name: Run embedded login script regressions
         if: always()
         run: node --test ios/Tests/login-script.test.mjs ios/Tests/campus-web-privacy.test.mjs ios/Tests/cas-script.test.mjs

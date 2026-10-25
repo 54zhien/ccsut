@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		000000000000000000EC2008 /* EcardPaymentPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1008; };
 		000000000000000000EC2006 /* EcardSSOClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1006; };
 		000000000000000000EC2007 /* EcardSSOSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1007; };
 		000000000000000000EC2005 /* WebSessionCookies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1005; };
@@ -73,6 +74,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		000000000000000000EC1008 /* EcardPaymentPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardPaymentPersistence.swift; sourceTree = "<group>"; };
 		000000000000000000EC1006 /* EcardSSOClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardSSOClient.swift; sourceTree = "<group>"; };
 		000000000000000000EC1007 /* EcardSSOSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardSSOSession.swift; sourceTree = "<group>"; };
 		000000000000000000EC1005 /* WebSessionCookies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSessionCookies.swift; sourceTree = "<group>"; };
@@ -171,6 +173,7 @@
 				000000000000000000EC1007 /* EcardSSOSession.swift */,
 				000000000000000000EC1005 /* WebSessionCookies.swift */,
 				000000000000000000EC1003 /* EcardPaymentModel.swift */,
+				000000000000000000EC1008 /* EcardPaymentPersistence.swift */,
 				000000000000000000EC1004 /* EcardPaymentView.swift */,
 				B0000000000000000000000A /* CCSUTApp.swift */,
 				B0000000000000000000000B /* Session.swift */,
@@ -305,6 +308,7 @@
 				000000000000000000EC2007 /* EcardSSOSession.swift in Sources */,
 				000000000000000000EC2005 /* WebSessionCookies.swift in Sources */,
 				000000000000000000EC2003 /* EcardPaymentModel.swift in Sources */,
+				000000000000000000EC2008 /* EcardPaymentPersistence.swift in Sources */,
 				000000000000000000EC2004 /* EcardPaymentView.swift in Sources */,
 				A0000000000000000000001F /* AcademicNavigation.swift in Sources */,
 				A00000000000000000000020 /* APIResponse.swift in Sources */,

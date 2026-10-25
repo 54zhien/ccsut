@@ -1,6 +1,10 @@
 import Foundation
 import Observation
+#if canImport(WebKit)
 import WebKit
+#else
+import FoundationNetworking
+#endif
 
 @Observable @MainActor
 final class EcardPaymentModel {
@@ -52,6 +56,28 @@ final class EcardPaymentModel {
     @ObservationIgnored private var loginTask: Task<Void, Never>?
     @ObservationIgnored private var loginPromptTask: Task<Void, Never>?
     @ObservationIgnored private var pendingLogin: LoginRequest?
+    typealias CachedCredential = (token: String, nativeCookies: Bool)
+    @ObservationIgnored private let pendingStore: EcardPendingReceiptStore
+    @ObservationIgnored private let currentGeneration: @MainActor () -> UInt64
+    @ObservationIgnored private let cachedCredential: @MainActor (String) -> CachedCredential?
+    @ObservationIgnored private let clientFactory: @MainActor (String, UInt64, WKWebsiteDataStore?) -> EcardClient
+    @ObservationIgnored private let fetchLoginToken: @MainActor (EcardTokenBridge, String) async throws -> String
+
+    init(pendingStore: EcardPendingReceiptStore? = nil,
+         currentGeneration: @escaping @MainActor () -> UInt64 = { CookieJar.generation },
+         cachedCredential: (@MainActor (String) -> CachedCredential?)? = nil,
+         clientFactory: (@MainActor (String, UInt64, WKWebsiteDataStore?) -> EcardClient)? = nil,
+         fetchLoginToken: (@MainActor (EcardTokenBridge, String) async throws -> String)? = nil) {
+        self.pendingStore = pendingStore ?? EcardPendingReceiptStore()
+        self.currentGeneration = currentGeneration
+        self.cachedCredential = cachedCredential ?? { account in
+            EcardTokenBridge.cachedToken(forAccount: account).map {
+                ($0, EcardTokenBridge.cachedTokenUsesNativeCookies(forAccount: account))
+            }
+        }
+        self.clientFactory = clientFactory ?? Self.authenticatedClient
+        self.fetchLoginToken = fetchLoginToken ?? { try await $0.fetchToken(forAccount: $1) }
+    }
 
     var amount: Decimal? {
         let value = amountText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -92,8 +118,8 @@ final class EcardPaymentModel {
         campuses = []; buildings = []; rooms = []; fee = nil
         client = nil
         amountText = ""; errorText = nil; isStarting = true
-        if let token = EcardTokenBridge.cachedToken(forAccount: account) {
-            acceptToken(token, nativeCookies: EcardTokenBridge.cachedTokenUsesNativeCookies(forAccount: account))
+        if let credential = cachedCredential(account) {
+            acceptToken(credential.token, nativeCookies: credential.nativeCookies)
         } else {
             beginBackgroundLogin(account: account)
         }
@@ -101,18 +127,18 @@ final class EcardPaymentModel {
 
     private func beginBackgroundLogin(account: String) {
         let current = revision
-        let generation = CookieJar.generation
+        let generation = currentGeneration()
         let request = LoginRequest(bridge: EcardTokenBridge(dataStore: WebStore.dataStore), account: account)
         let requestID = request.id
         pendingLogin = request
         request.bridge.onNeedsInteraction = { [weak self] in
-            guard let self, current == self.revision, CookieJar.generation == generation,
+            guard let self, current == self.revision, self.currentGeneration() == generation,
                   self.pendingLogin?.id == requestID else { return }
             self.openLogin()
         }
         loginPromptTask = Task {
             do { try await Task.sleep(for: .seconds(8)) } catch { return }
-            guard current == revision, CookieJar.generation == generation, pendingLogin?.id == request.id else { return }
+            guard current == revision, currentGeneration() == generation, pendingLogin?.id == request.id else { return }
             canOpenLogin = true
         }
         loginTask = Task {
@@ -125,12 +151,12 @@ final class EcardPaymentModel {
                 request.bridge.onNeedsInteraction = nil
             }
             do {
-                let token = try await request.bridge.fetchToken(forAccount: account)
-                guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
+                let token = try await fetchLoginToken(request.bridge, account)
+                guard current == revision, currentGeneration() == generation, !Task.isCancelled else { return }
                 acceptToken(token, store: request.bridge.webView.configuration.websiteDataStore,
                             nativeCookies: request.bridge.usesNativeCookies)
             } catch {
-                if current == revision, CookieJar.generation == generation, !Task.isCancelled { loginFailed(error) }
+                if current == revision, currentGeneration() == generation, !Task.isCancelled { loginFailed(error) }
             }
         }
     }
@@ -142,7 +168,7 @@ final class EcardPaymentModel {
 
     private func acceptToken(_ token: String, store: WKWebsiteDataStore? = nil, nativeCookies: Bool = false) {
         let current = revision
-        let generation = CookieJar.generation
+        let generation = currentGeneration()
         let store = store ?? WebStore.dataStore
         initialTask = Task {
             defer { if current == revision { isStarting = false } }
@@ -153,12 +179,11 @@ final class EcardPaymentModel {
                 for attempt in 0..<4 {
                     if !nativeCookies {
                         let cookies = try await store.httpCookieStore.cookieSnapshot()
-                        guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
+                        guard current == revision, currentGeneration() == generation, !Task.isCancelled else { return }
                         CookieJar.upsert(cookies, generation: generation)
                     }
-                    guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
-                    let client = Self.authenticatedClient(token: token, generation: generation,
-                                                          store: nativeCookies ? nil : store)
+                    guard current == revision, currentGeneration() == generation, !Task.isCancelled else { return }
+                    let client = clientFactory(token, generation, nativeCookies ? nil : store)
                     self.client = client
                     loginRequest = nil
                     do {
@@ -174,13 +199,13 @@ final class EcardPaymentModel {
                     }
                 }
                 guard let (loadedFee, loadedCampuses) = loaded else { throw EcardError.noToken }
-                guard current == revision, CookieJar.generation == generation, !Task.isCancelled else { return }
+                guard current == revision, currentGeneration() == generation, !Task.isCancelled else { return }
                 fee = loadedFee; campuses = loadedCampuses
                 isStarting = false
                 if loadedCampuses.count == 1 { selectCampus(loadedCampuses[0].value) }
                 else if loadedCampuses.isEmpty { errorText = "暂无可选校区，请稍后重新加载" }
             } catch {
-                if current == revision, CookieJar.generation == generation, !Task.isCancelled {
+                if current == revision, currentGeneration() == generation, !Task.isCancelled {
                     handleLoadError(error)
                     loginRequest = nil
                 }
@@ -351,15 +376,11 @@ final class EcardPaymentModel {
         if let room { selectRoom(room) }
     }
     private func pendingReceipt(for account: String) -> Receipt? {
-        guard let data = UserDefaults.standard.data(forKey: "ecard.pending.\(account)"),
-              let saved = try? JSONDecoder().decode(Receipt.self, from: data), saved.status == .pending else { return nil }
-        return saved
+        try? pendingStore.load(account: account)
     }
     private func persistPending() {
         guard let account else { return }
-        let key = "ecard.pending.\(account)"
-        if let receipt, receipt.status == .pending, let data = try? JSONEncoder().encode(receipt) {
-            UserDefaults.standard.set(data, forKey: key)
-        } else { UserDefaults.standard.removeObject(forKey: key) }
+        if let receipt, receipt.status == .pending { try? pendingStore.save(receipt, account: account) }
+        else if let orderID = receipt?.orderID { try? pendingStore.clear(account: account, orderID: orderID) }
     }
 }

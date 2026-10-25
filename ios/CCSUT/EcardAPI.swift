@@ -21,6 +21,9 @@
 //
 
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // MARK: - 错误
 
@@ -839,7 +842,8 @@ final class EcardClient {
     func rechargeElectricity(amount: Decimal,
                              context: MeterContext,
                              expectedRoom: String? = nil,
-                             feeitemID: String = EcardClient.electricityFeeItemID) async throws -> RechargeOutcome {
+                             feeitemID: String = EcardClient.electricityFeeItemID,
+                             beforePayment: (@MainActor (String) throws -> Void)? = nil) async throws -> RechargeOutcome {
         let order = try await createOrder(amount: amount,
                                           context: context,
                                           expectedRoom: expectedRoom,
@@ -865,21 +869,18 @@ final class EcardClient {
         }
 
         guard !Task.isCancelled else { throw EcardError.canceled }
+        // The caller must finish its durable recovery checkpoint before debit.
+        // A checkpoint failure is outside the uncertain-payment catch below.
+        if let beforePayment { try await beforePayment(orderID) }
         do {
             _ = try await pay(orderID: orderID, payTypeID: payTypeID, payTypeCode: payTypeCode)
-        } catch let error as EcardError {
-            switch error {
-            case .transport, .http, .decoding, .canceled, .authenticationRequired, .sessionSynchronization:
-                // 支付可能已被服务端处理（超时 / 网关 5xx）。
-                // 先查单；查不到也把订单号交给 UI 显示「结果待确认」，
-                // 绝不直接抛错，否则用户会再缴一次。
-                if let status = try? await orderStatus(orderID: orderID), status == 1 {
-                    return .completed(orderID: orderID)
-                }
-                return .pending(orderID: orderID)
-            default:
-                throw error
+        } catch {
+            // Neither HTTP nor business failure proves the debit had no effect.
+            // Retain the known order and reconcile; never create/pay another one.
+            if let status = try? await orderStatus(orderID: orderID), status == 1 {
+                return .completed(orderID: orderID)
             }
+            return .pending(orderID: orderID)
         }
 
         // 只有订单状态明确为「已完成」才算成功
