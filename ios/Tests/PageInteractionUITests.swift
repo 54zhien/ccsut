@@ -479,6 +479,14 @@ final class PageInteractionUITests: XCTestCase {
         assertScoreRefreshFeedback(experiment: "outer-attachment")
     }
 
+    func testScoreRefreshWithoutLoadingStatePublication() {
+        assertScoreRefreshFeedback(experiment: "without-loading-state")
+    }
+
+    func testScoreRefreshWithInlineLoad() {
+        assertScoreRefreshFeedback(experiment: "inline-load")
+    }
+
     private func assertScoreRefreshFeedback(omitTopBar: Bool = false, experiment: String? = nil) {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", "scores", "--preview-refresh", "--preview-long-list", "--preview-slow-refresh"]

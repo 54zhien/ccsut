@@ -244,14 +244,21 @@ struct ScoreView: View {
     // MARK: - 加载
 
     private func load(force: Bool = false) async {
+        #if DEBUG
+        if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh-inline-load") {
+            await fetch(force: force)
+            return
+        }
+        #endif
         await loadGate.run { await fetch(force: force) }
     }
 
     private func fetch(force: Bool) async {
         #if DEBUG
         if InterfacePreview.enabled {
-            isLoading = true
-            defer { isLoading = false }
+            let publishesLoading = !ProcessInfo.processInfo.arguments.contains("--preview-refresh-without-loading-state")
+            if publishesLoading { isLoading = true }
+            defer { if publishesLoading { isLoading = false } }
             try? await Task.sleep(for: InterfacePreview.refreshFixtureDelay)
             guard !Task.isCancelled else { return }
             let previewItems = InterfacePreview.emptyPage ? [] : InterfacePreview.scores
