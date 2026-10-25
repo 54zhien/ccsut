@@ -548,6 +548,9 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 8), .completed)
         let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
         XCTAssertTrue(observation.waitForExistence(timeout: 3))
+        let topContent = app.staticTexts["学业概览"]
+        XCTAssertTrue(topContent.exists)
+        let restingY = topContent.frame.minY
         print("[RefreshFeedback] \(mode) before-pull: \(observation.label)")
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
@@ -559,6 +562,8 @@ final class PageInteractionUITests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
         print("[RefreshFeedback] \(mode) after-release: \(observation.label)")
+        XCTAssertGreaterThan(topContent.frame.minY - restingY, 40,
+                             "Like the timetable, keep the content below a visible refresh region until loading completes")
         let completion = app.buttons["complete-controlled-refresh"]
         XCTAssertTrue(completion.isHittable)
         completion.tap()
