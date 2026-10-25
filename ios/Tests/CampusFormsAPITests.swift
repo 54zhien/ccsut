@@ -11,6 +11,10 @@ final class FormCredentials: CampusSessionCredentials, @unchecked Sendable {
         guard expectedGeneration == generation else { throw CancellationError() }; return "fixture=session"
     }
     func accept(_ cookies: [HTTPCookie], generation: UInt64) {}
+    func scopedCookies(for url: URL, expectedGeneration: UInt64) throws -> [HTTPCookie] {
+        guard expectedGeneration == generation else { throw CancellationError() }
+        return [HTTPCookie(properties: [.name: "fixture", .value: "session", .domain: url.host!, .path: "/"])!]
+    }
 }
 actor FormTransport: CampusTransport {
     let override: @Sendable (URLRequest, Int) throws -> (Int, String)?

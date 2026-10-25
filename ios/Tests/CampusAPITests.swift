@@ -31,6 +31,63 @@ final class FixtureCredentials: CampusSessionCredentials, @unchecked Sendable {
         }
     }
     var accepted: Int { lock.lock(); defer { lock.unlock() }; return receivedCookies }
+    func scopedCookies(for url: URL, expectedGeneration: UInt64) throws -> [HTTPCookie] {
+        guard let header = try header(for: url, expectedGeneration: expectedGeneration),
+              let separator = header.firstIndex(of: "=") else { return [] }
+        return [HTTPCookie(properties: [.name: String(header[..<separator]), .value: String(header[header.index(after: separator)...]),
+                                      .domain: url.host!, .path: "/", .secure: "TRUE"])!]
+    }
+}
+
+/// Retains real cookie scope and tombstones at the credentials boundary.
+final class ScopedCampusCredentials: CampusSessionCredentials, @unchecked Sendable {
+    private let lock = NSLock()
+    private var revision: UInt64 = 1
+    private var cookies: [HTTPCookie] = [
+        HTTPCookie(properties: [.name: "ehall", .value: "original-root", .domain: "ehall.ccsut.cn", .path: "/"])!,
+        HTTPCookie(properties: [.name: "ehall", .value: "original-narrow", .domain: "ehall.ccsut.cn", .path: "/backstage"])!,
+        HTTPCookie(properties: [.name: "ehall", .value: "original-auth", .domain: "auth.ccsut.cn", .path: "/"])!
+    ]
+    private var publications = 0
+    var generation: UInt64 { lock.lock(); defer { lock.unlock() }; return revision }
+    var accepted: Int { lock.lock(); defer { lock.unlock() }; return publications }
+    func replaceAccount() { lock.lock(); defer { lock.unlock() }; revision += 1 }
+    func scopedCookies(for url: URL, expectedGeneration: UInt64) throws -> [HTTPCookie] {
+        lock.lock(); defer { lock.unlock() }
+        guard revision == expectedGeneration else { throw CancellationError() }
+        return cookies.filter { cookie in
+            let path = url.path.isEmpty ? "/" : url.path
+            return cookie.domain == url.host && (path == cookie.path || path.hasPrefix(cookie.path.hasSuffix("/") ? cookie.path : cookie.path + "/"))
+        }.sorted { $0.path.count > $1.path.count }
+    }
+    func header(for url: URL, expectedGeneration: UInt64) throws -> String? {
+        let matched = try scopedCookies(for: url, expectedGeneration: expectedGeneration)
+        return matched.isEmpty ? nil : matched.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+    }
+    func accept(_ incoming: [HTTPCookie], generation: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        guard revision == generation else { return }
+        if !incoming.isEmpty { publications += 1 }
+        for cookie in incoming {
+            cookies.removeAll { $0.name == cookie.name && $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")) == cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")) && $0.path == cookie.path }
+            if (cookie.expiresDate ?? .distantFuture) > Date() { cookies.append(cookie) }
+        }
+    }
+}
+
+actor CampusFixtureBarrier {
+    private var blocked = false
+    private var arrival: CheckedContinuation<Void, Never>?
+    private var continuation: CheckedContinuation<Void, Never>?
+    func suspend() async {
+        blocked = true
+        arrival?.resume(); arrival = nil
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func waitUntilBlocked() async {
+        if !blocked { await withCheckedContinuation { arrival = $0 } }
+    }
+    func release() { continuation?.resume(); continuation = nil }
 }
 
 actor FixtureCampusTransport: CampusTransport {
@@ -327,6 +384,159 @@ struct CampusAPITests {
             try handoff.accept(identity: Data(identity.utf8), cookies: [sessionCookie])
             check(false, "late official handoff rejected")
         } catch { check(error is CancellationError && webCredentials.accepted == 1, "late official handoff cannot restore prior credentials") }
+        await cookieTransactionRegressions(check)
         if failures > 0 { exit(1) }
+    }
+
+    @MainActor
+    static func cookieTransactionRegressions(_ check: @MainActor (Bool, String) -> Void) async {
+        // A mismatched identity, invalid token, or failed follow-up must never
+        // publish the cookies returned before the rejection.
+        for rejection in ["wrong-account", "invalid-token", "failed-validation", "transport-failure"] {
+            let credentials = ScopedCampusCredentials()
+            let transport = FixtureCampusTransport { req, index in
+                if index == 1 {
+                    if rejection == "wrong-account" {
+                        return (200, ["Set-Cookie": "ehall=other-account; Path=/"], identity.replacingOccurrences(of: "fixture-account", with: "other-account"))
+                    }
+                    if rejection == "invalid-token" {
+                        return (200, ["Set-Cookie": "ehall=invalid-token; Path=/"], identity.replacingOccurrences(of: "fixture-access-token", with: ""))
+                    }
+                    return (200, ["Set-Cookie": "ehall=unverified-first; Path=/"], "null")
+                }
+                if req.url!.path.hasSuffix("redirect") { return (200, ["Set-Cookie": "ehall=unverified-renewal; Path=/"], "landing") }
+                if rejection == "transport-failure" { throw URLError(.timedOut) }
+                return (200, ["Set-Cookie": "ehall=unverified-last; Path=/"], "null")
+            }
+            do {
+                _ = try await CampusClient(account: "fixture-account", credentials: credentials, transport: transport).leaveRecords()
+                check(false, "rejected \(rejection) authentication discards its cookie transaction")
+            } catch {
+                let header = try? credentials.header(for: URL(string: "https://ehall.ccsut.cn/backstage/read")!, expectedGeneration: 1)
+                check(credentials.accepted == 0 && header == "ehall=original-narrow; ehall=original-root",
+                      "rejected \(rejection) authentication discards its cookie transaction")
+            }
+        }
+
+        let credentials = ScopedCampusCredentials()
+        let staged = FixtureCampusTransport { req, index in
+            switch index {
+            case 1: return (200, ["Set-Cookie": "ehall=initial-stage; Path=/"], "null")
+            case 2: return (302, ["Location": "http://auth.ccsut.cn:80/backstage/cas/login?service=a%2Fb%2Bc"], "")
+            case 3: return (302, ["Set-Cookie": "CAS=cas-stage; Path=/", "Location": "https://auth.ccsut.cn/continue"], "")
+            case 4: return (302, ["Set-Cookie": "ehall=auth-stage; Path=/", "Location": "https://ehall.ccsut.cn/backstage/delete"], "")
+            case 5: return (302, ["Set-Cookie": "ehall=; Max-Age=0; Path=/backstage", "Location": "https://ehall.ccsut.cn/backstage/finish"], "")
+            case 6: return (200, ["Set-Cookie": "ehall=verified-stage; Path=/"], "landing")
+            case 7:
+                // The shared jar must still belong entirely to its old session.
+                guard credentials.accepted == 0 else { return (500, [:], "premature publication") }
+                return (200, ["Set-Cookie": "validated=yes; Path=/"], identity)
+            default: return (200, ["Set-Cookie": "ehall=business-rotation; Path=/"], emptyPage)
+            }
+        }
+        do {
+            _ = try await CampusClient(account: "fixture-account", credentials: credentials, transport: staged).leaveRecords()
+            let sent = await staged.requests
+            check(sent.count == 8 && sent[1].value(forHTTPHeaderField: "Cookie") == "ehall=original-narrow; ehall=initial-stage" &&
+                  sent[3].value(forHTTPHeaderField: "Cookie")?.contains("CAS=cas-stage") == true &&
+                  sent[4].value(forHTTPHeaderField: "Cookie") == "ehall=original-narrow; ehall=initial-stage" &&
+                  sent[5].value(forHTTPHeaderField: "Cookie") == "ehall=initial-stage" &&
+                  sent[6].value(forHTTPHeaderField: "Cookie") == "ehall=verified-stage",
+                  "staged CAS rotation and scoped deletion reach later hops and final validation")
+            let finalHeader = try credentials.header(for: URL(string: "https://ehall.ccsut.cn/backstage/read")!, expectedGeneration: 1) ?? ""
+            let authHeader = try credentials.header(for: URL(string: "https://auth.ccsut.cn/")!, expectedGeneration: 1) ?? ""
+            check(credentials.accepted == 2 && finalHeader.contains("ehall=business-rotation") && finalHeader.contains("validated=yes") &&
+                  finalHeader.components(separatedBy: "ehall=").count == 2 && !finalHeader.contains("auth-stage") && authHeader.contains("ehall=auth-stage"),
+                  "validated transaction commits all scopes once and preserves business cookie rotation")
+            check(sent[2].url?.absoluteString == "https://auth.ccsut.cn/backstage/cas/login?service=a%2Fb%2Bc",
+                  "explicit HTTP port 80 upgrades to default HTTPS with encoded query intact")
+        } catch {
+            check(false, "staged CAS rotation and scoped deletion reach later hops and final validation")
+            check(false, "validated transaction commits all scopes once and preserves business cookie rotation")
+            check(false, "explicit HTTP port 80 upgrades to default HTTPS with encoded query intact")
+        }
+
+        for invalidation in ["cancel", "generation"] {
+            let credentials = ScopedCampusCredentials()
+            let barrier = CampusFixtureBarrier()
+            let transport = FixtureCampusTransport { _, index in
+                if index == 1 { return (200, ["Set-Cookie": "ehall=staged-before-invalidation; Path=/"], "null") }
+                await barrier.suspend()
+                return (200, ["Set-Cookie": "ehall=late; Path=/"], "landing")
+            }
+            let client = CampusClient(account: "fixture-account", credentials: credentials, transport: transport)
+            let task = Task { try await client.leaveRecords() }
+            await barrier.waitUntilBlocked()
+            if invalidation == "cancel" { task.cancel() } else { credentials.replaceAccount() }
+            await barrier.release()
+            do { _ = try await task.value; check(false, "\(invalidation) discards cookies staged by earlier authentication hops") }
+            catch { check(error is CancellationError && credentials.accepted == 0, "\(invalidation) discards cookies staged by earlier authentication hops") }
+        }
+
+        // Actor reentrancy permits a different subsystem to authenticate while
+        // this rejected account's response is suspended.
+        let concurrentCredentials = ScopedCampusCredentials()
+        let barrier = CampusFixtureBarrier()
+        let concurrentTransport = FixtureCampusTransport { req, index in
+            if index == 1 { return (200, ["Set-Cookie": "leaked=wrong-account; Path=/"], "null") }
+            if req.url!.path.hasSuffix("redirect") {
+                await barrier.suspend()
+                return (200, [:], "landing")
+            }
+            if req.url!.path.hasSuffix("validate_full") {
+                if req.url!.query?.contains("leaveadmin") == true {
+                    return (200, [:], identity.replacingOccurrences(of: "fixture-account", with: "wrong-account"))
+                }
+                return (200, ["Set-Cookie": "travel=verified; Path=/"], identity)
+            }
+            return (200, [:], #"{"code":"2000","data":[]}"#)
+        }
+        let concurrentClient = CampusClient(account: "fixture-account", credentials: concurrentCredentials, transport: concurrentTransport)
+        let leave = Task { try await concurrentClient.leaveRecords() }
+        await barrier.waitUntilBlocked()
+        do { _ = try await concurrentClient.travelRecords(kind: .departure) }
+        catch { check(false, "parallel subsystem authenticates independently") }
+        await barrier.release()
+        do { _ = try await leave.value } catch { }
+        let concurrentHeader = try? concurrentCredentials.header(for: URL(string: "https://ehall.ccsut.cn/backstage/read")!, expectedGeneration: 1)
+        check(concurrentHeader?.contains("travel=verified") == true && concurrentHeader?.contains("leaked=") == false && concurrentCredentials.accepted == 1,
+              "parallel subsystem commits only its own validated cookie transaction")
+
+        for (destination, expected) in [
+            ("http://auth.ccsut.cn/backstage/cas/log%69n?service=a%2Fb%2Bc&x=%252f", "https://auth.ccsut.cn/backstage/cas/log%69n?service=a%2Fb%2Bc&x=%252f"),
+            ("http://auth.ccsut.cn:80/login", "https://auth.ccsut.cn/login"),
+            ("https://auth.ccsut.cn/login", "https://auth.ccsut.cn/login"),
+            ("https://auth.ccsut.cn:443/login", "https://auth.ccsut.cn:443/login")
+        ] {
+            let transport = FixtureCampusTransport { _, index in
+                switch index {
+                case 1: return (200, [:], "null")
+                case 2: return (302, ["Location": destination], "")
+                case 3: return (200, [:], "landing")
+                case 4: return (200, [:], identity)
+                default: return (200, [:], emptyPage)
+                }
+            }
+            do {
+                _ = try await CampusClient(account: "fixture-account", credentials: FixtureCredentials(), transport: transport).leaveRecords()
+                let sent = await transport.requests
+                check(sent.count == 5 && sent[2].url?.absoluteString == expected,
+                      "allowed authentication URL preserves encoded path and query: \(destination)")
+            } catch { check(false, "allowed authentication URL preserves encoded path and query: \(destination)") }
+        }
+
+        for destination in ["http://auth.ccsut.cn:443/login", "http://auth.ccsut.cn:81/login", "https://auth.ccsut.cn:80/login",
+                            "https://auth.ccsut.cn:444/login", "https://auth.ccsut.cn/login#fragment", "https://user:secret@auth.ccsut.cn/login",
+                            "https://outside.invalid/login"] {
+            let transport = FixtureCampusTransport { _, index in
+                index == 1 ? (200, [:], "null") : (302, ["Location": destination], "")
+            }
+            do {
+                _ = try await CampusClient(account: "fixture-account", credentials: FixtureCredentials(), transport: transport).leaveRecords()
+                check(false, "abnormal authentication destination rejected: \(destination)")
+            } catch {
+                check(await transport.requests.count == 2, "abnormal authentication destination rejected: \(destination)")
+            }
+        }
     }
 }

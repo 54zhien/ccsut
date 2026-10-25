@@ -6,6 +6,9 @@ struct CampusCookieCredentials: CampusSessionCredentials {
     func header(for url: URL, expectedGeneration: UInt64) throws -> String? {
         try CookieJar.header(for: url, expectedGeneration: expectedGeneration)
     }
+    func scopedCookies(for url: URL, expectedGeneration: UInt64) throws -> [HTTPCookie] {
+        try CookieJar.scopedCookies(for: url, expectedGeneration: expectedGeneration)
+    }
     func accept(_ cookies: [HTTPCookie], generation: UInt64) {
         CookieJar.upsert(cookies, generation: generation)
     }

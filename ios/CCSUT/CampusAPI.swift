@@ -6,6 +6,7 @@ import FoundationNetworking
 protocol CampusSessionCredentials: Sendable {
     var generation: UInt64 { get }
     func header(for url: URL, expectedGeneration: UInt64) throws -> String?
+    func scopedCookies(for url: URL, expectedGeneration: UInt64) throws -> [HTTPCookie]
     func accept(_ cookies: [HTTPCookie], generation: UInt64)
 }
 
@@ -111,6 +112,61 @@ actor CampusClient: CampusReading {
     var formAttemptIDs: Set<UUID> = []
     private var identities: [Subsystem: Identity] = [:]
 
+    private struct CookieKey: Hashable {
+        let name: String
+        let domain: String
+        let path: String
+        init(_ cookie: HTTPCookie) {
+            name = cookie.name
+            let domain = cookie.domain.lowercased()
+            self.domain = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+            path = cookie.path
+        }
+    }
+
+    /// Local to one identity attempt, including its initial validation and CAS
+    /// hops. Never actor-wide: other subsystems may authenticate while we await.
+    private final class AuthenticationCookies {
+        var updates: [CookieKey: HTTPCookie] = [:]
+
+        func stage(_ incoming: [HTTPCookie]) {
+            for cookie in incoming {
+                var staged = cookie
+                // Foundation implementations may retain Max-Age without deriving
+                // expiresDate for version-0 cookies. Preserve deletion/expiry for
+                // both the overlay and CookieJar's eventual expiresDate upsert.
+                if var properties = cookie.properties, let rawAge = properties[.maximumAge],
+                   let age = TimeInterval(String(describing: rawAge)), age.isFinite {
+                    properties.removeValue(forKey: .maximumAge)
+                    properties[.expires] = age <= 0 ? Date.distantPast : Date().addingTimeInterval(age)
+                    staged = HTTPCookie(properties: properties) ?? cookie
+                }
+                updates[CookieKey(staged)] = staged
+            }
+        }
+
+        func header(for url: URL, base: [HTTPCookie]) -> String? {
+            var merged: [CookieKey: HTTPCookie] = [:]
+            for cookie in base { merged[CookieKey(cookie)] = cookie }
+            // Keep expired replacements as tombstones until the final commit.
+            for (key, cookie) in updates { merged[key] = cookie }
+            let host = url.host?.lowercased() ?? ""
+            let path = url.path.isEmpty ? "/" : url.path
+            let matched = merged.values.filter { cookie in
+                let domain = CookieKey(cookie).domain
+                let domainMatches = host == domain || (cookie.domain.hasPrefix(".") && host.hasSuffix("." + domain))
+                let pathMatches = path == cookie.path || path.hasPrefix(cookie.path.hasSuffix("/") ? cookie.path : cookie.path + "/")
+                return domainMatches && pathMatches && (!cookie.isSecure || url.scheme == "https") &&
+                    (cookie.expiresDate ?? .distantFuture) > Date()
+            }.sorted {
+                if $0.path.count != $1.path.count { return $0.path.count > $1.path.count }
+                if $0.name != $1.name { return $0.name < $1.name }
+                return $0.domain < $1.domain
+            }
+            return matched.isEmpty ? nil : matched.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+        }
+    }
+
     init(account: String, credentials: any CampusSessionCredentials, transport: any CampusTransport = CampusURLTransport()) {
         self.account = account
         self.credentials = credentials
@@ -158,30 +214,33 @@ actor CampusClient: CampusReading {
         // A business 401 has already rejected this session's bearer. The proxy
         // can still return that same token from validate_full, so bypassing only
         // our dictionary is insufficient: renew CAS before validating again.
+        let cookies = AuthenticationCookies()
         var result: Identity?
         if force { identities[subsystem] = nil }
-        else { result = try await validate(callback: callback) }
+        else { result = try await validate(callback: callback, cookies: cookies) }
         if result == nil {
             let redirect = request("/backstage/cas-proxy/app/redirect", query: [
                 URLQueryItem(name: "serverName", value: "https://ehall.ccsut.cn")
             ])
-            do { _ = try await send(redirect, authentication: true) }
+            do { _ = try await send(redirect, authenticationCookies: cookies) }
             catch Failure.unauthorized { throw CampusError.authentication }
-            result = try await validate(callback: callback)
+            result = try await validate(callback: callback, cookies: cookies)
         }
         guard let result else { throw CampusError.authentication }
+        try checkState()
+        credentials.accept(Array(cookies.updates.values), generation: generation)
         try checkState()
         identities[subsystem] = result
         return result
     }
 
-    private func validate(callback: URL) async throws -> Identity? {
+    private func validate(callback: URL, cookies: AuthenticationCookies) async throws -> Identity? {
         let req = request("/backstage/cas-proxy/app/validate_full", query: [
             URLQueryItem(name: "callback", value: callback.absoluteString),
             URLQueryItem(name: "timestamp", value: String(Int64(Date().timeIntervalSince1970 * 1000)))
         ])
         let data: Data
-        do { data = try await send(req, authentication: true).0 }
+        do { data = try await send(req, authenticationCookies: cookies).0 }
         catch Failure.unauthorized { return nil }
         guard let identity = try? JSONDecoder().decode(Identity.self, from: data),
               identity.errcode == 2000, !identity.userId.isEmpty else { return nil }
@@ -201,7 +260,12 @@ actor CampusClient: CampusReading {
     }
 
     /// Follow only the official CAS/ehall chain, with fresh Cookie matching per hop.
-    func send(_ original: URLRequest, authentication: Bool = false) async throws -> (Data, HTTPURLResponse) {
+    func send(_ original: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        try await send(original, authenticationCookies: nil)
+    }
+
+    private func send(_ original: URLRequest, authenticationCookies: AuthenticationCookies?) async throws -> (Data, HTTPURLResponse) {
+        let authentication = authenticationCookies != nil
         var request = original
         let deadline = Date().addingTimeInterval(30)
         for _ in 0..<12 {
@@ -210,7 +274,13 @@ actor CampusClient: CampusReading {
                   authentication || url.host == "ehall.ccsut.cn" else { throw CampusError.authentication }
             request.url = url
             request.httpShouldHandleCookies = false
-            request.setValue(try credentials.header(for: url, expectedGeneration: generation), forHTTPHeaderField: "Cookie")
+            let header: String?
+            if let authenticationCookies {
+                header = authenticationCookies.header(for: url, base: try credentials.scopedCookies(for: url, expectedGeneration: generation))
+            } else {
+                header = try credentials.header(for: url, expectedGeneration: generation)
+            }
+            request.setValue(header, forHTTPHeaderField: "Cookie")
             let remaining = deadline.timeIntervalSinceNow
             guard remaining > 0 else { throw CampusError.serviceUnavailable }
             request.timeoutInterval = min(20, remaining)
@@ -222,7 +292,12 @@ actor CampusClient: CampusReading {
             catch { throw CampusError.serviceUnavailable }
             try checkState()
             if let fields = response.allHeaderFields as? [String: String] {
-                credentials.accept(HTTPCookie.cookies(withResponseHeaderFields: fields, for: url), generation: generation)
+                let incoming = HTTPCookie.cookies(withResponseHeaderFields: fields, for: url)
+                if let authenticationCookies {
+                    authenticationCookies.stage(incoming)
+                } else {
+                    credentials.accept(incoming, generation: generation)
+                }
             }
             if response.statusCode == 401 { throw Failure.unauthorized }
             if response.statusCode == 403 { throw CampusError.forbidden }
@@ -256,10 +331,14 @@ actor CampusClient: CampusReading {
     private static func trustedURL(_ url: URL) -> URL? {
         guard ["ehall.ccsut.cn", "auth.ccsut.cn"].contains(url.host?.lowercased() ?? ""),
               url.user == nil, url.password == nil,
-              url.port == nil || url.port == 443,
+              url.fragment == nil,
               ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        let isHTTP = url.scheme?.lowercased() == "http"
+        guard url.port == nil || url.port == (isHTTP ? 80 : 443) else { return nil }
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         components?.scheme = "https"
+        components?.host = url.host?.lowercased()
+        if isHTTP { components?.port = nil }
         return components?.url
     }
 }
