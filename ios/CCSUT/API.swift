@@ -183,6 +183,28 @@ extension APIClient {
         try await post("/admin/xsd/xk/listV2")
     }
 
+    /// Personal course results are independent of currently advertised selection batches.
+    func enrolledCoursesContext(expectedGeneration: UInt64) async throws -> EnrolledCoursesContext {
+        let (data, _) = try await send(makeRequest("/admin/xsd/yxkccx",method:"GET"),expectedGeneration:expectedGeneration)
+        guard let html = String(data:data,encoding:.utf8) else { throw APIError.decoding("已选课程页面格式无效") }
+        return try EnrolledCoursesContext.parse(html:html)
+    }
+
+    func enrolledCourses(term: String, expectedGeneration: UInt64) async throws -> [EnrolledCourse] {
+        try await EnrolledCoursesLoader.load(term:term) { page in
+            var form = ["queryFields":"id,parentId,kcid,xnxq,xdxz,xdfs,kcbh,kcmc,jxbmc,jxbbh,rkjs,xf,xkfs,sksjdd,kcxz,kclx,skfs,",
+                        "_search":"false", "page.size":"100", "page.pn":String(page), "sort":"id", "order":"asc",
+                        "xnxq":term, "kklx":"", "kcxz":"", "xdxz":"", "xklx":""]
+            for key in ["xnxq","kklx","kcxz","xdxz","xklx"] { form["query.\(key)||"] = form[key] }
+            var request = makeRequest("/admin/xsd/yxkccx/listYxkc",method:"POST",query:[
+                URLQueryItem(name:"gridtype",value:"jqgrid"),URLQueryItem(name:"async",value:"1")
+            ],form:form)
+            request.setValue("https://tls.ccsut.cn/admin/xsd/yxkccx",forHTTPHeaderField:"Referer")
+            let (data, _) = try await send(request,expectedGeneration:expectedGeneration)
+            return data
+        }
+    }
+
     /// 教学班列表
     /// - Parameters:
     ///   - keyword: 课程名模糊搜索

@@ -23,6 +23,7 @@ jobs:
         run: |
           xcrun swiftc -parse-as-library \
             ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift \
+            ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift \
             ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift \
             ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift \
             ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift \
@@ -47,6 +48,7 @@ jobs:
         run: |
           set -e
           SOURCES=(ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift
+            ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift
             ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift
             ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift
             ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift
@@ -87,6 +89,8 @@ jobs:
           "$RUNNER_TEMP/api-response-tests"
           xcrun swiftc -parse-as-library ios/CCSUT/ElectiveState.swift ios/Tests/ElectiveStateTests.swift -o "$RUNNER_TEMP/elective-state-tests"
           "$RUNNER_TEMP/elective-state-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift ios/CCSUT/ElectiveState.swift ios/CCSUT/EnrolledCourses.swift ios/Tests/EnrolledCoursesTests.swift -o "$RUNNER_TEMP/enrolled-courses-tests"
+          "$RUNNER_TEMP/enrolled-courses-tests"
           xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/CCSUT/AcademicCalendar.swift ios/Tests/AcademicReliabilityTests.swift -o "$RUNNER_TEMP/academic-tests"
           "$RUNNER_TEMP/academic-tests"
       - name: Run timetable presentation regressions

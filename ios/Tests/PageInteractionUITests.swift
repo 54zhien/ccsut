@@ -3,6 +3,47 @@ import XCTest
 final class PageInteractionUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
+    func testCompleteSelectedIncludesClosedBatch() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["示例线上已选课"].waitForExistence(timeout:8))
+        app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch.tap()
+        let search = app.textFields["课程名 / 教师"]
+        search.tap(); search.typeText("示例线下")
+        XCTAssertTrue(app.staticTexts["示例线下已选课"].waitForExistence(timeout:5))
+        XCTAssertTrue(app.staticTexts["正常修读"].exists)
+        XCTAssertFalse(app.buttons["退课"].exists)
+        capture(app,"complete-selected-closed-batch")
+    }
+
+    func testSelectedHistoryIsReadOnlyWithEmptyCatalog() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected","--preview-empty-catalog"]
+        app.launch()
+        let selected = app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout:8)); selected.tap()
+        let menu = app.buttons["enrolled-term-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout:5)); menu.tap()
+        app.buttons["enrolled-term-2024-2025-1"].tap()
+        XCTAssertTrue(app.staticTexts["历史学期示例课程"].waitForExistence(timeout:5))
+        XCTAssertFalse(app.staticTexts["示例线下已选课"].exists)
+        XCTAssertFalse(app.buttons["退课"].exists)
+        XCTAssertFalse(app.buttons["选课"].exists)
+        capture(app,"complete-selected-history")
+    }
+
+    func testSelectedReadFailureDoesNotPretendToBeComplete() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected","--preview-selected-failure"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["示例线上已选课"].waitForExistence(timeout:8))
+        app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["enrolled-read-error"].waitForExistence(timeout:5))
+        XCTAssertFalse(app.staticTexts["示例线上已选课"].exists)
+        capture(app,"complete-selected-read-failure")
+    }
+
     func testCampusEntryAndRecords() {
         var app = launch("campus")
         for id in ["campus-leave", "campus-travel", "campus-electricity"] {

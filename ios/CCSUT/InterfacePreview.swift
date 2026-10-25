@@ -26,6 +26,25 @@ enum InterfacePreview {
         ProcessInfo.processInfo.arguments.contains("--preview-empty")
     }
 
+    static var completeSelected: Bool { ProcessInfo.processInfo.arguments.contains("--preview-complete-selected") }
+    static var selectedReadFailure: Bool { ProcessInfo.processInfo.arguments.contains("--preview-selected-failure") }
+    static var emptyCatalog: Bool { ProcessInfo.processInfo.arguments.contains("--preview-empty-catalog") }
+
+    static var enrolledContext: EnrolledCoursesContext {
+        EnrolledCoursesContext(terms:["2026-2027-1","2024-2025-1"],defaultTerm:"2026-2027-1")
+    }
+
+    static func enrolledCourses(term: String) -> [EnrolledCourse] {
+        if emptyPage { return [] }
+        if term == "2024-2025-1" {
+            return decode(#"[{"id":"past","xnxq":"2024-2025-1","kcmc":"历史学期示例课程","jxbbh":"PREVIEW-PAST","rkjs":"示例教师","xf":"1","xdfs":"1","xkfs":"选课"}]"#)
+        }
+        if completeSelected {
+            return decode(#"[{"id":"online","xnxq":"2026-2027-1","kcmc":"示例线上已选课","jxbbh":"PREVIEW-ONLINE","rkjs":"示例教师","xf":"1","xdfs":"1","xkfs":"选课"},{"id":"closed","xnxq":"2026-2027-1","kcmc":"示例线下已选课","jxbbh":"PREVIEW-CLOSED","rkjs":"示例教师","xf":"1","xdfs":"1","xkfs":"选课","sksjdd":"第8–15周 周四5–6节"},{"id":"assigned","xnxq":"2026-2027-1","kcmc":"示例配课课程","jxbbh":"PREVIEW-ASSIGNED","rkjs":"示例教师","xf":"3","xdfs":"1","xkfs":"配课"}]"#)
+        }
+        return decode(#"[{"id":"1","xnxq":"2026-2027-1","kcmc":"工程制图","rkjs":"示例教师","xf":"3","xdfs":"1","xkfs":"配课"}]"#)
+    }
+
     static var electiveInit: ElectiveInit {
         decode("""
         {"xsxm":"预览同学","xkxnxq":"2026-2027-1"}
@@ -50,7 +69,11 @@ enum InterfacePreview {
     }
 
     static var classes: [TeachingClass] {
-        decode("""
+        if emptyCatalog { return [] }
+        if completeSelected {
+            return decode(#"[{"id":"online","kcmc":"示例线上已选课","jxbbh":"PREVIEW-ONLINE","teacher":"示例教师","xf":"1","yxrl":"20/40","status":"1","sfkxk":"1"}]"#)
+        }
+        return decode("""
         [{"id":"1","kcmc":"工程制图","teacher":"示例教师","xf":"3","yxrl":"28/40","sksjdd":"周四 1–2节 · 9-205","sfkxk":"1","status":"1"},
          {"id":"2","kcmc":"大学英语","teacher":"示例教师","xf":"3","yxrl":"32/40","sksjdd":"周二 1–2节 · 6-208","sfkxk":"1","status":"0"},
          {"id":"3","kcmc":"机械设计基础","teacher":"示例教师","xf":"3.5","yxrl":"40/40","sksjdd":"周一 3–4节 · 9-112","sfkxk":"1","status":"0"}]

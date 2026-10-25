@@ -1,0 +1,46 @@
+name: Complete selected courses preview
+on:
+  push:
+    branches: [codex/elective-complete-results]
+    paths: ['ios/**', '.github/workflows/elective-results-preview.yml']
+  workflow_dispatch:
+jobs:
+  selected-ui:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build simulator app
+        run: |
+          set -o pipefail
+          xcodebuild build -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/UIPreview" \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/selected-build.log"
+      - name: Boot simulator
+        run: bash ios/Tests/render-preview.sh --boot-only
+      - name: Verify complete and historical results
+        run: |
+          set -o pipefail
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/selected-tests.xcresult" \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCompleteSelectedIncludesClosedBatch \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testSelectedHistoryIsReadOnlyWithEmptyCatalog \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testSelectedReadFailureDoesNotPretendToBeComplete \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testElectiveEmptySearchCanResetAndDisabledReasonIsVisible \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/selected-tests.log"
+      - name: Export screenshots
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/selected-tests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/selected-tests.xcresult" --output-path "$RUNNER_TEMP/selected-attachments"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CCSUT-selected-results
+          path: |
+            ${{ runner.temp }}/selected-build.log
+            ${{ runner.temp }}/selected-tests.log
+            ${{ runner.temp }}/selected-attachments/
+          retention-days: 14
