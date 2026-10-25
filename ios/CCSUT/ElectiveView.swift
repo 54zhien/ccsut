@@ -131,7 +131,8 @@ struct ElectiveView: View {
                 }
                 ForEach(filtered) { item in catalogCard(item) }
                 if classes.isEmpty {
-                    ContentUnavailableView("当前没有可选课程",systemImage:"tray")
+                    ContentUnavailableView(errorText == nil ? "当前没有可选课程" : AppMessages.loadFailure,
+                                           systemImage:errorText == nil ? "tray" : "exclamationmark.icloud")
                 }
             }
 
