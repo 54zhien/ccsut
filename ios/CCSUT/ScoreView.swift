@@ -78,7 +78,11 @@ struct ScoreView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemGroupedBackground))
+            #if DEBUG
+            .modifier(ScoreChromeDiagnosticPlacement(inner: true))
+            #else
             .academicDetailChrome(title: "成绩单")
+            #endif
 #if DEBUG
             .modifier(ScoreRefreshDiagnosticPlacement(outer: true, action: { await load(force: true) }))
             .overlay(alignment: .topTrailing) {
@@ -87,6 +91,9 @@ struct ScoreView: View {
 #endif
             .task { if items.isEmpty { await load() } }
         }
+        #if DEBUG
+        .modifier(ScoreChromeDiagnosticPlacement(inner: false))
+        #endif
     }
 
     // MARK: - 内容
@@ -305,6 +312,15 @@ struct ScoreView: View {
 // MARK: - 单行
 
 #if DEBUG
+private struct ScoreChromeDiagnosticPlacement: ViewModifier {
+    let inner: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        let outside = InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-refresh-chrome-outside-reader")
+        if inner != outside { content.academicDetailChrome(title: "成绩单") }
+        else { content }
+    }
+}
+
 private struct ScoreRefreshDiagnosticPlacement: ViewModifier {
     let outer: Bool
     let action: @MainActor () async -> Void

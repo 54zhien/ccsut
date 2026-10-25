@@ -509,6 +509,31 @@ final class PageInteractionUITests: XCTestCase {
         assertScoreRefreshFeedback(experiment: "inline-load")
     }
 
+    func testScoreRefreshWithChromeOutsideReader() {
+        assertScoreRefreshFeedback(experiment: "chrome-outside-reader")
+    }
+
+    func testTimetableControlledRefreshAnimationReference() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-ui", "--preview-page", "interactions", "--preview-refresh", "--preview-slow-refresh", "--preview-controlled-refresh"]
+        app.launch()
+        defer { app.terminate() }
+        let counter = app.staticTexts["refresh-count"]
+        XCTAssertTrue(counter.waitForExistence(timeout: 5))
+        XCTAssertEqual(counter.label, "0")
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertEqual(counter.label, "0")
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "timetable-controlled-refresh-before-completion"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        print("[RefreshFeedback] timetable: \(app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch.label)")
+        app.buttons["complete-controlled-refresh"].tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 5), .completed)
+    }
+
     private func assertScoreRefreshFeedback(omitTopBar: Bool = false, experiment: String? = nil) {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", "scores", "--preview-refresh", "--preview-long-list", "--preview-slow-refresh", "--preview-controlled-refresh"]

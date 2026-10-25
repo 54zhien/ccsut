@@ -15,7 +15,7 @@ on:
       test_scope:
         description: 'Interaction checks to run (focused checks preserve full-suite failure evidence)'
         type: choice
-        options: [all, refresh-and-search, refresh-navigation, refresh-feedback, refresh-structure, refresh-state, refresh-reference]
+        options: [all, refresh-and-search, refresh-navigation, refresh-feedback, refresh-structure, refresh-state, refresh-reference, refresh-schedule-reference]
         default: all
       test_environment:
         description: 'Stable simulator or iOS 27.2 (logs the compatible device actually used)'
@@ -85,7 +85,7 @@ jobs:
         if: failure()
         run: xcrun simctl list devices > "$RUNNER_TEMP/ui-screenshots/simulator-state.txt"
       - name: Verify initial and selected week positioning
-        if: ${{ inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-navigation' && inputs.test_scope != 'refresh-feedback' && inputs.test_scope != 'refresh-structure' && inputs.test_scope != 'refresh-state' && inputs.test_scope != 'refresh-reference' }}
+        if: ${{ inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-navigation' && inputs.test_scope != 'refresh-feedback' && inputs.test_scope != 'refresh-structure' && inputs.test_scope != 'refresh-state' && inputs.test_scope != 'refresh-reference' && inputs.test_scope != 'refresh-schedule-reference' }}
         run: |
           set -o pipefail
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
@@ -165,6 +165,13 @@ jobs:
               -only-testing:CCSUTUITests/PageInteractionUITests/testMinimalNativeScrollRefreshFeedback
               -only-testing:CCSUTUITests/PageInteractionUITests/testMinimalWrappedScrollRefreshFeedback
               -only-testing:CCSUTUITests/PageInteractionUITests/testMinimalListRefreshFeedback
+            )
+          fi
+          if [ "$TEST_SCOPE" = 'refresh-schedule-reference' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTimetableControlledRefreshAnimationReference
+              -only-testing:CCSUTUITests/PageInteractionUITests/testScoreRefreshControlRemainsActiveDuringSlowLoad
+              -only-testing:CCSUTUITests/PageInteractionUITests/testScoreRefreshWithChromeOutsideReader
             )
           fi
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
