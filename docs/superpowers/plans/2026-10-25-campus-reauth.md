@@ -27,7 +27,7 @@ Repair the existing recovery path rather than adding prewarming: a forced retry 
 - [x] Make force-renewal and read-redirect changes; preserve cancellation/account isolation and terminal failures.
 - [x] Verify e-card model RED on macOS, then add bounded background read recovery and verify GREEN.
 - [x] Verify GREEN and run all locally supported Foundation/JS suites.
-- [ ] Complete independent code review and macOS simulator build; report build and device acceptance separately.
+- [x] Complete independent code review and macOS simulator build; report build and device acceptance separately.
 
 ## Review focus
 
@@ -49,4 +49,8 @@ Repair the existing recovery path rather than adding prewarming: a forced retry 
 - Intermediate source `a476353`: native regression/simulator workflow [40175665692](https://github.com/54zhien/ccsut/actions/runs/40175665692) and Release [40175666553](https://github.com/54zhien/ccsut/actions/runs/40175666553) pass; package metadata/CRC verified, SHA-256 `9aae4e058bb3e5587bad0c4dc8fd349f690cf84091fe87bc6ad6c0cd6cd48deb`. The later JavaScript fallback repair supersedes this candidate.
 - Initial fallback fixture attempt `3ce18dc`, [40176121308](https://github.com/54zhien/ccsut/actions/runs/40176121308), fails to compile because WebKit's Swift overlay is non-open and cannot be overridden. This is a fixture failure, not bug RED. Replace that fake with a real WebKit local-HTML fixture at `6ef0f55`; no school page request is sent.
 - Real WebKit fallback RED at `6ef0f55`: [40176408644](https://github.com/54zhien/ccsut/actions/runs/40176408644) compiles, proves the local fixture's authentication origin and initial CAS click, then fails the interaction Boolean/one-time report and portal-action bookkeeping checks. The fix explicitly receives JavaScript callback results instead of discarding them as Void. No timing-only or compiler failure is counted as bug RED.
+- Final application source `f22c8295146b00f016e8c6f58c1392f0abebfd83`: full native regression and simulator build [40176558520](https://github.com/54zhien/ccsut/actions/runs/40176558520) pass, including real WebKit local-HTML interaction/action results and repeated e-card expiry with one/multiple campuses. Release [40176559584](https://github.com/54zhien/ccsut/actions/runs/40176559584) passes; the previous ambiguous JavaScript-overload warnings are absent. No product code changes follow this verified source; this completion entry is documentation only.
+- Final IPA metadata/ZIP CRC/arm64 validation passes; SHA-256 `6800d42b917d3b0e9c319853ac0c100b4ee699b178f943dfa7516ccfaacfdc53`. Earlier packages remain separate and are not the final delivery.
+- Final independent review found no material product issue. Minor test-strength note: a duplicate portal didFinish could theoretically be suppressed while the first callback remains in flight; observed real-WebKit RED catches the original lost-result behavior. Existing revision/generation/navigation checks remain intact.
+- Reviewable change: draft [PR #12](https://github.com/54zhien/ccsut/pull/12), based only on `codex/campus-optional-location`; neither it nor the existing campus PR is merged.
 - No real payment, application, upload or authenticated student-data request was performed. The user's original idle-session response has not been captured; device idle/resume acceptance remains open. Do not infer a server timeout or guaranteed TGC renewal lifetime from these tests.
