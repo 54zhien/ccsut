@@ -142,6 +142,7 @@ jobs:
           if [ "$TEST_SCOPE" = 'refresh-feedback' ]; then
             TEST_SELECTION=(
               -only-testing:CCSUTUITests/PageInteractionUITests/testScoreRefreshControlRemainsActiveDuringSlowLoad
+              -only-testing:CCSUTUITests/PageInteractionUITests/testScoreRefreshControlWithoutTopBar
             )
           fi
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \

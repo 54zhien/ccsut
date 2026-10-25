@@ -460,8 +460,18 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testScoreRefreshControlRemainsActiveDuringSlowLoad() {
+        assertScoreRefreshFeedback(omitTopBar: false)
+    }
+
+    func testScoreRefreshControlWithoutTopBar() {
+        assertScoreRefreshFeedback(omitTopBar: true)
+    }
+
+    private func assertScoreRefreshFeedback(omitTopBar: Bool) {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", "scores", "--preview-refresh", "--preview-long-list", "--preview-slow-refresh"]
+        if omitTopBar { app.launchArguments.append("--preview-omit-top-bar") }
+        let mode = omitTopBar ? "without-top-bar" : "with-top-bar"
         app.launch()
         defer { app.terminate() }
         let counter = app.descendants(matching: .any).matching(identifier: "academic-publication-count").firstMatch
@@ -469,16 +479,16 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '1'"), evaluatedWith: counter)], timeout: 8), .completed)
         let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
         XCTAssertTrue(observation.waitForExistence(timeout: 3))
-        print("[RefreshFeedback] before-pull: \(observation.label)")
+        print("[RefreshFeedback] \(mode) before-pull: \(observation.label)")
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
         start.press(forDuration: 0.1, thenDragTo: end)
-        capture(app, "score-slow-refresh-after-release")
-        print("[RefreshFeedback] after-release: \(observation.label)")
+        capture(app, "score-slow-refresh-\(mode)-after-release")
+        print("[RefreshFeedback] \(mode) after-release: \(observation.label)")
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == '2'"), evaluatedWith: counter)], timeout: 8), .completed)
         let report = observation.label
-        print("[RefreshFeedback] after-publication: \(report)")
-        capture(app, "score-slow-refresh-after-publication")
+        print("[RefreshFeedback] \(mode) after-publication: \(report)")
+        capture(app, "score-slow-refresh-\(mode)-after-publication")
         XCTAssertTrue(report.contains("entered=1; completed=1"), "The refresh callback must finish exactly once: \(report)")
         XCTAssertTrue(report.contains("refreshingSeen=true"), "The native refresh control must become active: \(report)")
         XCTAssertTrue(report.contains("prematurelyStopped=false"), "The native refresh control must remain active until the awaited load finishes: \(report)")

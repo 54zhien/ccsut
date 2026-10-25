@@ -249,11 +249,22 @@ extension View {
 private struct NagiTopBar<Bar: View>: ViewModifier {
     let bar: Bar
 
+    @ViewBuilder
     func body(content: Content) -> some View {
+        #if DEBUG
+        if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-omit-top-bar") {
+            content.toolbar(.hidden, for: .navigationBar)
+        } else {
+            content
+                .toolbar(.hidden, for: .navigationBar)
+                .safeAreaBar(edge: .top, spacing: 0) { bar }
+        }
+        #else
         content
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaBar(edge: .top, spacing: 0) {
                 bar
             }
+        #endif
     }
 }
