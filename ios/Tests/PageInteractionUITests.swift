@@ -6,6 +6,13 @@ final class PageInteractionUITests: XCTestCase {
     func testCompleteSelectedIncludesClosedBatch() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected"]
+        #if CCSUT_TEST_LEGACY_TOP_BLUR
+        let useLegacy = true
+        #else
+        let useLegacy = legacyBlur
+        #endif
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
         app.launch()
         XCTAssertTrue(app.staticTexts["示例线上已选课"].waitForExistence(timeout:8))
         app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch.tap()
@@ -20,6 +27,13 @@ final class PageInteractionUITests: XCTestCase {
     func testSelectedHistoryIsReadOnlyWithEmptyCatalog() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected","--preview-empty-catalog"]
+        #if CCSUT_TEST_LEGACY_TOP_BLUR
+        let useLegacy = true
+        #else
+        let useLegacy = legacyBlur
+        #endif
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
         app.launch()
         let selected = app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch
         XCTAssertTrue(selected.waitForExistence(timeout:8)); selected.tap()
@@ -36,6 +50,13 @@ final class PageInteractionUITests: XCTestCase {
     func testSelectedReadFailureDoesNotPretendToBeComplete() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected","--preview-selected-failure"]
+        #if CCSUT_TEST_LEGACY_TOP_BLUR
+        let useLegacy = true
+        #else
+        let useLegacy = legacyBlur
+        #endif
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
         app.launch()
         XCTAssertTrue(app.staticTexts["示例线上已选课"].waitForExistence(timeout:8))
         app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch.tap()
@@ -48,6 +69,13 @@ final class PageInteractionUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui","--preview-page","electives","--preview-complete-selected",
                                "-UIPreferredContentSizeCategoryName","UICTContentSizeCategoryAccessibilityXXXL"]
+        #if CCSUT_TEST_LEGACY_TOP_BLUR
+        let useLegacy = true
+        #else
+        let useLegacy = legacyBlur
+        #endif
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
         app.launch()
         let selected = app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch
         XCTAssertTrue(selected.waitForExistence(timeout:8)); selected.tap()
@@ -141,7 +169,14 @@ final class PageInteractionUITests: XCTestCase {
         for page in ["campus-form-leave", "campus-form-departure"] {
             let app = XCUIApplication()
             app.launchArguments = ["--preview-ui", "--preview-page", page, "--preview-form-loading"]
-            app.launch()
+            #if CCSUT_TEST_LEGACY_TOP_BLUR
+        let useLegacy = true
+        #else
+        let useLegacy = legacyBlur
+        #endif
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
+        app.launch()
             let message = app.staticTexts["campus-form-loading-message"]
             let indicator = app.activityIndicators["campus-form-loading-indicator"]
             let close = app.buttons[page == "campus-form-leave" ? "关闭申请请假" : "关闭离校登记"]
@@ -160,6 +195,13 @@ final class PageInteractionUITests: XCTestCase {
     func testCampusLeaveDatesUseChinese() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", "campus-form-leave", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        #if CCSUT_TEST_LEGACY_TOP_BLUR
+        let useLegacy = true
+        #else
+        let useLegacy = legacyBlur
+        #endif
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
         app.launch()
         let dates = app.datePickers
         XCTAssertTrue(dates.firstMatch.waitForExistence(timeout: 8))
@@ -171,6 +213,13 @@ final class PageInteractionUITests: XCTestCase {
     func testCampusApproversWaitForTypeSelection() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", "campus-form-leave", "--preview-form-choices"]
+        #if CCSUT_TEST_LEGACY_TOP_BLUR
+        let useLegacy = true
+        #else
+        let useLegacy = legacyBlur
+        #endif
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
         app.launch()
         XCTAssertTrue(app.staticTexts["campus-approver-prerequisite"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["campus-approver-retry"].exists)
@@ -289,7 +338,14 @@ final class PageInteractionUITests: XCTestCase {
         for page in ["campus-form-leave", "campus-form-departure", "campus-electricity"] {
             let app = XCUIApplication()
             app.launchArguments = ["--preview-ui", "--preview-page", page, "--preview-reduce-motion"]
-            app.launch()
+            #if CCSUT_TEST_LEGACY_TOP_BLUR
+        let useLegacy = true
+        #else
+        let useLegacy = legacyBlur
+        #endif
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
+        app.launch()
             let probe = app.staticTexts["campus-reduce-motion"]
             XCTAssertTrue(probe.waitForExistence(timeout: 8))
             XCTAssertEqual(probe.label, "reduce-motion-on", "Verify the real simulator preference reaches SwiftUI")
@@ -318,7 +374,7 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     private func launch(_ page: String, longList: Bool = false, transition: Bool = false, withoutUpcoming: Bool = false,
-                        refresh: Bool = false, empty: Bool = false, largeText: Bool = false) -> XCUIApplication {
+                        refresh: Bool = false, empty: Bool = false, legacyBlur: Bool = false, largeText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", page]
         if longList { app.launchArguments.append("--preview-long-list") }
@@ -327,6 +383,13 @@ final class PageInteractionUITests: XCTestCase {
         if refresh { app.launchArguments.append("--preview-refresh") }
         if empty { app.launchArguments.append("--preview-empty") }
         if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        #if CCSUT_TEST_LEGACY_TOP_BLUR
+        let useLegacy = true
+        #else
+        let useLegacy = legacyBlur
+        #endif
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
         app.launch()
         return app
     }
@@ -344,6 +407,40 @@ final class PageInteractionUITests: XCTestCase {
             print("[PageRefreshDiagnostic] \(stage): \(probe.label)")
         } else {
             print("[PageRefreshDiagnostic] \(stage): missing accessibility probe")
+        }
+    }
+
+    func testTopBlurPreservesLegacyPageAndControlFrames() {
+        for page in ["schedule", "academic", "scores", "exams", "electives"] {
+            var referenceControl = CGRect.zero
+            var referenceScroll = CGRect.zero
+            for legacy in [true, false] {
+                let app = launch(page, legacyBlur: legacy)
+                let control = app.buttons[page == "schedule" || page == "academic" ? "账号" : "返回教务"]
+                XCTAssertTrue(control.waitForExistence(timeout: 5))
+                XCTAssertTrue(control.isHittable, "The blur must not block the top control")
+                let scroll = app.scrollViews.firstMatch
+                XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+                capture(app, "top-blur-\(page)-\(legacy ? "legacy" : "material")")
+                if legacy {
+                    referenceControl = control.frame
+                    referenceScroll = scroll.frame
+                } else {
+                    for (actual, expected) in [(control.frame, referenceControl), (scroll.frame, referenceScroll)] {
+                        XCTAssertEqual(actual.minX, expected.minX, accuracy: 1)
+                        XCTAssertEqual(actual.minY, expected.minY, accuracy: 1)
+                        XCTAssertEqual(actual.width, expected.width, accuracy: 1)
+                        XCTAssertEqual(actual.height, expected.height, accuracy: 1)
+                    }
+                    control.tap()
+                    if page == "schedule" || page == "academic" {
+                        XCTAssertTrue(app.buttons["退出登录"].waitForExistence(timeout: 5))
+                    } else {
+                        XCTAssertTrue(app.buttons["账号"].waitForExistence(timeout: 5))
+                    }
+                }
+                app.terminate()
+            }
         }
     }
 
@@ -563,6 +660,13 @@ final class PageInteractionUITests: XCTestCase {
     func testTimetableControlledRefreshAnimationReference() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", "interactions", "--preview-refresh", "--preview-slow-refresh", "--preview-controlled-refresh"]
+        #if CCSUT_TEST_LEGACY_TOP_BLUR
+        let useLegacy = true
+        #else
+        let useLegacy = legacyBlur
+        #endif
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
         app.launch()
         defer { app.terminate() }
         let counter = app.staticTexts["refresh-count"]
@@ -593,7 +697,14 @@ final class PageInteractionUITests: XCTestCase {
         for page in pages {
             let app = XCUIApplication()
             app.launchArguments = ["--preview-ui", "--preview-page", page, "--preview-refresh", "--preview-slow-refresh", "--preview-controlled-refresh"]
-            app.launch()
+            #if CCSUT_TEST_LEGACY_TOP_BLUR
+        let useLegacy = true
+        #else
+        let useLegacy = legacyBlur
+        #endif
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
+        app.launch()
             let anchor: XCUIElement
             switch page {
             case "exams": anchor = app.staticTexts.matching(identifier: "机械设计基础").firstMatch
@@ -631,6 +742,13 @@ final class PageInteractionUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-ui", "--preview-page", "scores", "--preview-refresh", "--preview-long-list", "--preview-slow-refresh", "--preview-controlled-refresh"]
         let mode = "with-top-bar"
+        #if CCSUT_TEST_LEGACY_TOP_BLUR
+        let useLegacy = true
+        #else
+        let useLegacy = legacyBlur
+        #endif
+        if useLegacy { app.launchArguments.append("--legacy-top-blur") }
+        print("TOP_BLUR_TEST_MODE \(useLegacy ? "legacy" : "material") page=\(page)")
         app.launch()
         defer { app.terminate() }
         let counter = app.descendants(matching: .any).matching(identifier: "academic-publication-count").firstMatch

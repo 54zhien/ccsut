@@ -231,8 +231,8 @@ private struct AcademicDetailChrome: ViewModifier {
 }
 
 extension View {
-    /// Nagi Library/Home/Settings use a native bar with a soft scroll edge.
-    /// Keep the bar mounted; only the header's labels and controls fade out.
+    /// Keep the native bar mounted; only its background implementation changes.
+    /// The header's labels, controls and their animations remain independent.
     fileprivate func nagiTopBar<Bar: View>(@ViewBuilder content: () -> Bar) -> some View {
         modifier(NagiTopBar(bar: content()))
     }
@@ -250,10 +250,24 @@ private struct NagiTopBar<Bar: View>: ViewModifier {
     let bar: Bar
 
     func body(content: Content) -> some View {
-        content
-            .toolbar(.hidden, for: .navigationBar)
-            .safeAreaBar(edge: .top, spacing: 0) {
-                bar
-            }
+        if TopBarBlur.usesLegacy {
+            // Original implementation: retain this chain verbatim for rollback.
+            content
+                .toolbar(.hidden, for: .navigationBar)
+                .safeAreaBar(edge: .top, spacing: 0) {
+                    bar
+                }
+        } else {
+            content
+                .toolbar(.hidden, for: .navigationBar)
+                .scrollEdgeEffectHidden(true, for: .top)
+                .safeAreaBar(edge: .top, spacing: 0) {
+                    bar.background {
+                        TopBarMaterialBackground()
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
+        }
     }
 }

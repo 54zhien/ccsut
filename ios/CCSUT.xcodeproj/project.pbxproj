@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A00000000000000000000051 /* TopBarMaterialBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000051; };
+		A00000000000000000000050 /* TopBarBlurProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000050; };
 		000000000000000000ED2002 /* EnrolledCourseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000ED1002; };
 		000000000000000000ED2001 /* EnrolledCourses.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000ED1001; };
 		000000000000000000EC2008 /* EcardPaymentPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000EC1008; };
@@ -76,6 +78,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B00000000000000000000051 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopBarMaterialBackground.swift; sourceTree = "<group>"; };
+		B00000000000000000000050 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopBarBlurProfile.swift; sourceTree = "<group>"; };
 		000000000000000000ED1002 /* EnrolledCourseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrolledCourseView.swift; sourceTree = "<group>"; };
 		000000000000000000ED1001 /* EnrolledCourses.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrolledCourses.swift; sourceTree = "<group>"; };
 		000000000000000000EC1008 /* EcardPaymentPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcardPaymentPersistence.swift; sourceTree = "<group>"; };
@@ -200,6 +204,8 @@
 				B00000000000000000000011 /* Assets.xcassets */,
 				B0000000000000000000001E /* AppIcon.icon */,
 				B0000000000000000000001F /* AcademicNavigation.swift */,
+				B00000000000000000000051 /* TopBarMaterialBackground.swift */,
+				B00000000000000000000050 /* TopBarBlurProfile.swift */,
 				B00000000000000000000020 /* APIResponse.swift */,
 				B00000000000000000000021 /* AcademicCalendar.swift */,
 				B00000000000000000000022 /* AcademicAPI.swift */,
@@ -317,6 +323,8 @@
 				000000000000000000EC2008 /* EcardPaymentPersistence.swift in Sources */,
 				000000000000000000EC2004 /* EcardPaymentView.swift in Sources */,
 				A0000000000000000000001F /* AcademicNavigation.swift in Sources */,
+				A00000000000000000000051 /* TopBarMaterialBackground.swift in Sources */,
+				A00000000000000000000050 /* TopBarBlurProfile.swift in Sources */,
 				A00000000000000000000020 /* APIResponse.swift in Sources */,
 				A00000000000000000000021 /* AcademicCalendar.swift in Sources */,
 				A00000000000000000000022 /* AcademicAPI.swift in Sources */,

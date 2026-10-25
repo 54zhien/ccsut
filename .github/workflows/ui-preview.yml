@@ -17,6 +17,14 @@ on:
         type: choice
         options: [all, refresh-and-search, refresh-animation, refresh-campus, refresh-proof]
         default: all
+      blur_diagnostics:
+        description: 'Run the three failed checks in legacy mode and render both blur versions'
+        type: boolean
+        default: false
+      skip_previews:
+        description: 'Skip screenshots when only completing the legacy-mode control experiment'
+        type: boolean
+        default: false
 
 jobs:
   preview:
@@ -26,6 +34,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test timetable presentation
         run: |
+          xcrun swiftc -target "$(uname -m)-apple-macos14.0" -parse-as-library ios/CCSUT/TopBarBlurProfile.swift ios/Tests/TopBarBlurTests.swift -o "$RUNNER_TEMP/top-blur-tests"
+          "$RUNNER_TEMP/top-blur-tests"
           xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
           "$RUNNER_TEMP/schedule-tests"
           xcrun swiftc -parse-as-library ios/CCSUT/InterfacePreview.swift ios/Tests/ReleasePreviewTests.swift -o "$RUNNER_TEMP/release-preview-tests"
@@ -44,7 +54,7 @@ jobs:
         if: failure()
         run: xcrun simctl list devices > "$RUNNER_TEMP/ui-screenshots/simulator-state.txt"
       - name: Verify initial and selected week positioning
-        if: ${{ inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' }}
+        if: ${{ !inputs.blur_diagnostics && inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' }}
         run: |
           set -o pipefail
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
@@ -71,9 +81,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - name: Verify native page interactions
-        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' }}
+        if: ${{ !inputs.blur_diagnostics && !cancelled() && steps.simulator.conclusion == 'success' }}
         env:
-          TEST_SCOPE: ${{ inputs.test_scope }}
+          TEST_SCOPE: ${{ !inputs.blur_diagnostics && inputs.test_scope }}
         run: |
           set -o pipefail
           xcrun simctl io "$CCSUT_PREVIEW_DEVICE" recordVideo --codec=h264 "$RUNNER_TEMP/ui-screenshots/native-interactions.mp4" &
@@ -135,8 +145,21 @@ jobs:
             ${{ runner.temp }}/ui-test-attachments/manifest.json
           if-no-files-found: ignore
           retention-days: 14
+      - name: Compare failed checks with legacy blur
+        if: ${{ inputs.blur_diagnostics && steps.simulator.conclusion == 'success' }}
+        run: |
+          set -o pipefail
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/legacy-blur-tests.xcresult" \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicHomeWithoutReminderHasStableSpacedEntries \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicPagesPullToRefreshIncludingEmptyStates \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testPullingTimetableRefreshesWholePageOnce \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG CCSUT_TEST_LEGACY_TOP_BLUR" \
+            2>&1 | tee "$RUNNER_TEMP/legacy-blur-test.log"
       - name: Render preview screens
-        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' && inputs.render_catalog != false }}
+        if: ${{ !inputs.skip_previews && !cancelled() && steps.simulator.conclusion == 'success' && inputs.render_catalog != false }}
         run: bash ios/Tests/render-preview.sh
       - uses: actions/upload-artifact@v4
         if: always()
@@ -151,5 +174,7 @@ jobs:
             ${{ runner.temp }}/ui-test.log
             ${{ runner.temp }}/ui-tests.xcresult/
             ${{ runner.temp }}/ui-test-attachments/
+            ${{ runner.temp }}/legacy-blur-test.log
+            ${{ runner.temp }}/legacy-blur-tests.xcresult/
           if-no-files-found: error
           retention-days: 14
