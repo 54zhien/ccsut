@@ -9,21 +9,31 @@ private actor PaymentReadFixture {
     enum Failure { case http401, business401, http500 }
     let failure: Failure
     let alwaysReject: Bool
+    let singleCampus: Bool
+    let rejectSelectionReads: Bool
     var expired = true
+    private var rejectedTokens: Set<String> = []
     var requests: [URLRequest] = []
 
-    init(_ failure: Failure = .http401, alwaysReject: Bool = false) {
+    init(_ failure: Failure = .http401, alwaysReject: Bool = false,
+         singleCampus: Bool = false, rejectSelectionReads: Bool = false) {
         self.failure = failure
         self.alwaysReject = alwaysReject
+        self.singleCampus = singleCampus
+        self.rejectSelectionReads = rejectSelectionReads
     }
 
     func setExpired(_ value: Bool) { expired = value }
+    func reject(_ token: String) { rejectedTokens.insert(token) }
 
     func reply(_ request: URLRequest, token: String) -> (Data, URLResponse) {
         requests.append(request)
         let path = request.url!.path
         let isRead = path.hasSuffix("singleFeeitem") || path.hasSuffix("getThirdData")
-        let rejected = !isRead || (expired && (alwaysReject || token.hasSuffix("stale")))
+        let selection = path.hasSuffix("getThirdData") &&
+            String(data: request.httpBody ?? Data(), encoding: .utf8)?.contains("level=0") != true
+        let rejected = !isRead || (rejectSelectionReads && selection) ||
+            (expired && (alwaysReject || token.hasSuffix("stale") || rejectedTokens.contains(token)))
         let status: Int
         let body: String
         if rejected {
@@ -37,7 +47,9 @@ private actor PaymentReadFixture {
             body = #"{"code":200,"feeitem":{"feeitemid":"408","name":"示例电费","flag":"0000400100","maxmoney":"100"}}"#
         } else {
             status = 200
-            body = #"{"code":200,"map":{"data":[{"name":"示例北校区","value":"north"},{"name":"示例南校区","value":"south"}]}}"#
+            body = singleCampus
+                ? #"{"code":200,"map":{"data":[{"name":"示例北校区","value":"north"}]}}"#
+                : #"{"code":200,"map":{"data":[{"name":"示例北校区","value":"north"},{"name":"示例南校区","value":"south"}]}}"#
         }
         return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: [:])!)
     }
@@ -119,10 +131,14 @@ private actor PaymentReadFixture {
         let later = PaymentReadFixture()
         await later.setExpired(false)
         await seed(token("stale"))
+        let firstRenewedToken = token("renewed-1"), secondRenewedToken = token("renewed-2")
         var laterRenewals = 0
         let laterModel = EcardPaymentModel(clientFactory: { value, _, _ in
             EcardClient(token: value, transport: { await later.reply($0, token: value) })
-        }, bridgeFactory: { laterRenewals += 1; return bridge(token("renewed")) })
+        }, bridgeFactory: {
+            laterRenewals += 1
+            return bridge(laterRenewals == 1 ? firstRenewedToken : secondRenewedToken)
+        })
         laterModel.start(account: "fixture-payment-recovery")
         await settle(laterModel)
         await later.setExpired(true)
@@ -130,7 +146,25 @@ private actor PaymentReadFixture {
         await settle(laterModel)
         check(laterRenewals == 1 && laterModel.fee != nil && laterModel.errorText == nil && laterModel.room == nil,
               "ecard selection reads also recover expiry and discard stale payment context")
+        await later.reject(firstRenewedToken)
+        laterModel.selectCampus("north")
+        await settle(laterModel)
+        check(laterRenewals == 2 && laterModel.fee != nil && laterModel.errorText == nil,
+              "a later expiry can renew again after the previous read recovery succeeded")
         laterModel.stopQueries()
+
+        let cascade = PaymentReadFixture(singleCampus: true, rejectSelectionReads: true)
+        await cascade.setExpired(false)
+        await seed(token("stale"))
+        var cascadeRenewals = 0
+        let cascadeModel = EcardPaymentModel(clientFactory: { value, _, _ in
+            EcardClient(token: value, transport: { await cascade.reply($0, token: value) })
+        }, bridgeFactory: { cascadeRenewals += 1; return bridge(token("renewed")) })
+        cascadeModel.start(account: "fixture-payment-recovery")
+        await settle(cascadeModel)
+        check(cascadeRenewals == 1 && cascadeModel.errorText != nil && !cascadeModel.isStarting && cascadeModel.loadingText == nil,
+              "single-campus automatic selection cannot reset an unsuccessful recovery into a loop")
+        cascadeModel.stopQueries()
 
         let write = PaymentReadFixture()
         await write.setExpired(false)
