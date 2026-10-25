@@ -542,7 +542,7 @@ final class PageInteractionUITests: XCTestCase {
             app.launch()
             let anchor: XCUIElement
             switch page {
-            case "exams": anchor = app.staticTexts["机械设计基础"].firstMatch
+            case "exams": anchor = app.staticTexts.matching(identifier: "机械设计基础").firstMatch
             case "electives": anchor = app.textFields["课程名 / 教师"]
             case "academic": anchor = app.buttons["academic-scores"]
             case "campus-leave": anchor = app.buttons["申请请假"]
