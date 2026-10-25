@@ -56,6 +56,10 @@ final class EcardPaymentModel {
     @ObservationIgnored private var loginTask: Task<Void, Never>?
     @ObservationIgnored private var loginPromptTask: Task<Void, Never>?
     @ObservationIgnored private var pendingLogin: LoginRequest?
+    @ObservationIgnored private var boundGeneration: UInt64?
+    @ObservationIgnored private var submissionID: UUID?
+    @ObservationIgnored private var checkingID: UUID?
+    private var recoveryError: String?
     typealias CachedCredential = (token: String, nativeCookies: Bool)
     @ObservationIgnored private let pendingStore: EcardPendingReceiptStore
     @ObservationIgnored private let currentGeneration: @MainActor () -> UInt64
@@ -95,29 +99,38 @@ final class EcardPaymentModel {
     }
     var canPay: Bool {
         client != nil && detail != nil && room != nil && amount != nil && !amountText.isEmpty && amountHint == nil &&
-        loadingText == nil && !isStarting && !isSubmitting && receipt == nil
+        loadingText == nil && !isStarting && !isSubmitting && !isChecking && receipt == nil &&
+        recoveryError == nil && boundGeneration == currentGeneration()
     }
     var quickAmounts: [Decimal] { fee?.quickAmounts.filter { $0 > 0 && $0 <= (fee?.maxAmount ?? 0) } ?? [] }
 
     func start(account: String?, force: Bool = false) {
-        guard !isStarting, !isSubmitting else { return }
         guard let account, !account.isEmpty else {
             errorText = "暂未获取到学号，请稍后重新加载"
             return
         }
-        if self.account == account, fee != nil, !force {
+        let generation = currentGeneration()
+        let sameSession = self.account == account && boundGeneration == generation
+        guard !isSubmitting || !sameSession else { return }
+        guard !isStarting || !sameSession || force else { return }
+        if sameSession, fee != nil, !force {
             if let campus, buildings.isEmpty { selectCampus(campus) }
             else if let room, detail == nil { selectRoom(room) }
             return
         }
         stopQueries()
+        submissionID = nil; isSubmitting = false
+        checkingID = nil; isChecking = false
         EcardTokenBridge.cancelPreparation()
         self.account = account
-        receipt = pendingReceipt(for: account)
+        boundGeneration = generation
+        recoveryError = nil; receipt = nil
+        do { receipt = try pendingStore.load(account: account) }
+        catch { recoveryError = error.localizedDescription }
         campus = nil; building = nil; room = nil; detail = nil
         campuses = []; buildings = []; rooms = []; fee = nil
         client = nil
-        amountText = ""; errorText = nil; isStarting = true
+        amountText = ""; errorText = recoveryError; isStarting = true
         if let credential = cachedCredential(account) {
             acceptToken(credential.token, nativeCookies: credential.nativeCookies)
         } else {
@@ -132,13 +145,13 @@ final class EcardPaymentModel {
         let requestID = request.id
         pendingLogin = request
         request.bridge.onNeedsInteraction = { [weak self] in
-            guard let self, current == self.revision, self.currentGeneration() == generation,
+            guard let self, self.startupIsCurrent(current, generation: generation),
                   self.pendingLogin?.id == requestID else { return }
             self.openLogin()
         }
         loginPromptTask = Task {
             do { try await Task.sleep(for: .seconds(8)) } catch { return }
-            guard current == revision, currentGeneration() == generation, pendingLogin?.id == request.id else { return }
+            guard startupIsCurrent(current, generation: generation), pendingLogin?.id == request.id else { return }
             canOpenLogin = true
         }
         loginTask = Task {
@@ -152,11 +165,11 @@ final class EcardPaymentModel {
             }
             do {
                 let token = try await fetchLoginToken(request.bridge, account)
-                guard current == revision, currentGeneration() == generation, !Task.isCancelled else { return }
+                guard startupIsCurrent(current, generation: generation) else { return }
                 acceptToken(token, store: request.bridge.webView.configuration.websiteDataStore,
                             nativeCookies: request.bridge.usesNativeCookies)
             } catch {
-                if current == revision, currentGeneration() == generation, !Task.isCancelled { loginFailed(error) }
+                if startupIsCurrent(current, generation: generation) { loginFailed(error) }
             }
         }
     }
@@ -179,10 +192,10 @@ final class EcardPaymentModel {
                 for attempt in 0..<4 {
                     if !nativeCookies {
                         let cookies = try await store.httpCookieStore.cookieSnapshot()
-                        guard current == revision, currentGeneration() == generation, !Task.isCancelled else { return }
+                        guard startupIsCurrent(current, generation: generation) else { return }
                         CookieJar.upsert(cookies, generation: generation)
                     }
-                    guard current == revision, currentGeneration() == generation, !Task.isCancelled else { return }
+                    guard startupIsCurrent(current, generation: generation) else { return }
                     let client = clientFactory(token, generation, nativeCookies ? nil : store)
                     self.client = client
                     loginRequest = nil
@@ -199,18 +212,32 @@ final class EcardPaymentModel {
                     }
                 }
                 guard let (loadedFee, loadedCampuses) = loaded else { throw EcardError.noToken }
-                guard current == revision, currentGeneration() == generation, !Task.isCancelled else { return }
+                guard startupIsCurrent(current, generation: generation) else { return }
                 fee = loadedFee; campuses = loadedCampuses
                 isStarting = false
                 if loadedCampuses.count == 1 { selectCampus(loadedCampuses[0].value) }
                 else if loadedCampuses.isEmpty { errorText = "暂无可选校区，请稍后重新加载" }
             } catch {
-                if current == revision, currentGeneration() == generation, !Task.isCancelled {
+                if startupIsCurrent(current, generation: generation) {
                     handleLoadError(error)
                     loginRequest = nil
                 }
             }
         }
+    }
+
+    /// Only the current startup may end its waiting state. A superseded task
+    /// must leave the replacement task alone, including its error/progress.
+    private func startupIsCurrent(_ current: Int, generation: UInt64) -> Bool {
+        guard current == revision else { return false }
+        guard currentGeneration() == generation, !Task.isCancelled else {
+            stopQueries()
+            client = nil; fee = nil; campuses = []; buildings = []; rooms = []
+            campus = nil; building = nil; room = nil; detail = nil; receipt = nil
+            errorText = recoveryError ?? EcardError.canceled.localizedDescription
+            return false
+        }
+        return true
     }
 
     private static func authenticatedClient(token: String, generation: UInt64, store: WKWebsiteDataStore?) -> EcardClient {
@@ -321,7 +348,7 @@ final class EcardPaymentModel {
         queryTask?.cancel()
         revision &+= 1
         let current = revision
-        loadingText = label; errorText = nil
+        loadingText = label; errorText = recoveryError
         queryTask = Task {
             defer { if current == revision { loadingText = nil } }
             do {
@@ -340,47 +367,86 @@ final class EcardPaymentModel {
             roomValue: room, context: detail.context)
     }
     func submit(_ confirmed: Confirmation) async {
-        guard !isSubmitting, confirmation?.id == confirmed.id, room == confirmed.roomValue, let client else { return }
-        isSubmitting = true; errorText = nil
-        defer { isSubmitting = false; confirmation = nil }
+        guard !isSubmitting, !isChecking, !isStarting, recoveryError == nil, receipt == nil,
+              confirmation?.id == confirmed.id, room == confirmed.roomValue, let client, let account,
+              boundGeneration == currentGeneration() else { return }
+        // A second model may have recorded an order since this confirmation.
         do {
-            let outcome = try await client.rechargeElectricity(amount: confirmed.amount, context: confirmed.context)
+            if let saved = try pendingStore.load(account: account) {
+                receipt = saved; errorText = EcardReceiptRecoveryError.unresolvedOrder.localizedDescription
+                confirmation = nil; return
+            }
+        } catch {
+            recoveryError = error.localizedDescription; errorText = recoveryError
+            confirmation = nil; return
+        }
+        let operation = UUID(), current = revision, generation = currentGeneration()
+        submissionID = operation
+        isSubmitting = true; errorText = nil
+        defer {
+            if submissionID == operation { isSubmitting = false; confirmation = nil; submissionID = nil }
+        }
+        do {
+            let outcome = try await client.rechargeElectricity(amount: confirmed.amount, context: confirmed.context,
+                beforePayment: { [self] orderID in
+                    guard submissionID == operation, revision == current, self.account == account,
+                          currentGeneration() == generation, !Task.isCancelled else { throw EcardError.canceled }
+                    guard try pendingStore.load(account: account) == nil else { throw EcardReceiptRecoveryError.unresolvedOrder }
+                    let pending = Receipt(status: .pending, room: confirmed.room,
+                                          amount: confirmed.amount.ecardAmountText, orderID: orderID)
+                    try pendingStore.save(pending, account: account)
+                    receipt = pending
+                })
+            // Journal updates stay bound to the captured account/order even if
+            // the visible model has since moved to a replacement session.
+            if outcome.isCompleted { try pendingStore.clear(account: account, orderID: outcome.orderID) }
+            guard submissionID == operation, revision == current, self.account == account,
+                  currentGeneration() == generation else { return }
             receipt = Receipt(status: outcome.isCompleted ? .completed : .pending,
                 room: confirmed.room, amount: confirmed.amount.ecardAmountText, orderID: outcome.orderID)
-        } catch EcardError.paymentUnconfirmed(let orderID) {
-            receipt = Receipt(status: .pending, room: confirmed.room, amount: confirmed.amount.ecardAmountText, orderID: orderID)
         } catch {
-            handleLoadError(error)
-            errorText = nil // The failed receipt presents this error itself.
-            receipt = Receipt(status: .failed, room: confirmed.room, amount: confirmed.amount.ecardAmountText,
-                              orderID: nil, message: error.localizedDescription)
+            guard submissionID == operation, revision == current, self.account == account,
+                  currentGeneration() == generation else { return }
+            do {
+                if let saved = try pendingStore.load(account: account) {
+                    receipt = saved; errorText = error.localizedDescription
+                } else {
+                    handleLoadError(error)
+                    receipt = Receipt(status: .failed, room: confirmed.room, amount: confirmed.amount.ecardAmountText,
+                                      orderID: nil, message: error.localizedDescription)
+                }
+            } catch {
+                recoveryError = error.localizedDescription; errorText = recoveryError
+            }
         }
-        persistPending()
     }
     func checkOrder() async {
-        guard !isChecking, let receipt, let orderID = receipt.orderID else { return }
+        guard !isChecking, !isSubmitting, !isStarting, let receipt, receipt.status == .pending,
+              let orderID = receipt.orderID, let account else { return }
+        guard boundGeneration == currentGeneration() else { start(account: account, force: true); return }
         guard let client else { start(account: account, force: true); return }
+        let operation = UUID(), current = revision, generation = currentGeneration()
+        checkingID = operation
         isChecking = true; errorText = nil
-        defer { isChecking = false }
+        defer { if checkingID == operation { isChecking = false; checkingID = nil } }
         do {
-            if try await client.orderStatus(orderID: orderID) == 1 {
+            let status = try await client.orderStatus(orderID: orderID)
+            guard checkingID == operation, revision == current, self.account == account,
+                  currentGeneration() == generation, self.receipt?.orderID == orderID else { return }
+            if status == 1 {
+                try pendingStore.clear(account: account, orderID: orderID)
                 self.receipt?.status = .completed
-                persistPending()
             } else { errorText = "订单暂未确认完成，请稍后再次查询，勿重复缴费" }
-        } catch { handleLoadError(error) }
+        } catch {
+            if checkingID == operation, revision == current, self.account == account, currentGeneration() == generation {
+                handleLoadError(error)
+            }
+        }
     }
     func returnToForm() {
         guard receipt?.status != .pending else { return }
-        receipt = nil; amountText = ""; errorText = nil
+        receipt = nil; amountText = ""; errorText = recoveryError
         guard client != nil else { start(account: account, force: true); return }
         if let room { selectRoom(room) }
-    }
-    private func pendingReceipt(for account: String) -> Receipt? {
-        try? pendingStore.load(account: account)
-    }
-    private func persistPending() {
-        guard let account else { return }
-        if let receipt, receipt.status == .pending { try? pendingStore.save(receipt, account: account) }
-        else if let orderID = receipt?.orderID { try? pendingStore.clear(account: account, orderID: orderID) }
     }
 }

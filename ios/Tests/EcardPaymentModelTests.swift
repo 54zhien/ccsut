@@ -27,13 +27,16 @@ private actor ModelServer {
     let paymentBody: String
     private(set) var debits = 0
     private(set) var creations = 0
+    private var failFirstCheck: Bool
     init(initialization: Gate? = nil, payment: Gate? = nil, reconciliation: Gate? = nil,
-         status: Int = 0, paymentBody: String = #"{"code":200,"success":true}"#) {
+         status: Int = 0, paymentBody: String = #"{"code":200,"success":true}"#, failFirstCheck: Bool = false) {
         self.initialization = initialization; self.payment = payment; self.reconciliation = reconciliation
         self.status = status; self.paymentBody = paymentBody
+        self.failFirstCheck = failFirstCheck
     }
     func counts() -> (creations: Int, debits: Int) { (creations, debits) }
     func respond(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        try Task.checkCancellation()
         guard let url = request.url, url.host == "ecard.ccsut.cn" else { throw URLError(.badURL) }
         let form = URLComponents(string: "?" + String(decoding: request.httpBody ?? Data(), as: UTF8.self))?.queryItems ?? []
         let body: String
@@ -49,9 +52,10 @@ private actor ModelServer {
                 body = #"{"code":200,"success":true,"data":{"orderid":"fixture-order","payList":[{"id":"69","code":"CARDTSM","nopassword":"0"}]}}"#
             } else {
                 guard form.first(where: { $0.name == "orderid" })?.value == "fixture-order" else { throw URLError(.badURL) }
-                debits += 1; await payment?.wait(); body = paymentBody
+                debits += 1; await payment?.wait(); try Task.checkCancellation(); body = paymentBody
             }
         case "/charge/pay/getpayinfo":
+            if failFirstCheck { failFirstCheck = false; throw EcardError.authenticationRequired }
             await reconciliation?.wait()
             body = "{\"code\":200,\"order\":{\"status\":\(status)}}"
         default: throw URLError(.badURL)
@@ -169,6 +173,26 @@ private actor ModelServer {
             model.stopQueries()
         }
         // Both startup awaits must settle on generation invalidation.
+        do {
+            let legacy = defaults(), journal = store("migration-interrupted", defaults: legacy)
+            try journal.save(receipt("original-order"), account: "fixture-A")
+            // Simulate termination after writing the migrated file but before
+            // removing the legacy defaults copy.
+            legacy.set(try JSONEncoder().encode(receipt("original-order")), forKey: "ecard.pending.fixture-A")
+            try journal.clear(account: "fixture-A", orderID: "original-order")
+            check(try journal.load(account: "fixture-A") == nil, "completed migrated order cannot resurrect from leftover defaults")
+        }
+        do {
+            let journal = store("corrupt-file")
+            try journal.save(receipt("original-order"), account: "fixture-A")
+            let folder = root.appendingPathComponent("corrupt-file")
+            let file = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil).first!
+            try Data("invalid-json".utf8).write(to: file)
+            let model = make(ModelServer(), journal, Epoch()); await ready(model)
+            check(confirm(model) == nil && !model.canPay && model.errorText != nil, "unreadable durable journal blocks a new payment")
+            check(try Data(contentsOf: file) == Data("invalid-json".utf8), "unreadable durable journal is not overwritten")
+            model.stopQueries()
+        }
         for backgroundLogin in [false, true] {
             let gate = Gate(), epoch = Epoch(), journal = store("epoch-\(backgroundLogin)")
             let server = ModelServer(initialization: backgroundLogin ? nil : gate)
@@ -211,6 +235,65 @@ private actor ModelServer {
             check(model.receipt?.orderID == "order-B" && model.receipt?.status == .pending,
                   "late old-account status cannot complete new-account receipt")
             check(try journal.load(account: "fixture-B")?.orderID == "order-B", "late old-account status cannot erase new-account journal")
+            model.stopQueries()
+        }
+        do {
+            let journal = store("check-auth"), epoch = Epoch()
+            try journal.save(receipt("order-A"), account: "fixture-A")
+            let server = ModelServer(status: 1, failFirstCheck: true)
+            let model = make(server, journal, epoch); await ready(model)
+            await model.checkOrder()
+            check(model.receipt?.status == .pending && model.receipt?.orderID == "order-A", "expired check authentication retains the pending receipt")
+            await model.checkOrder() // Rebuild the authentication/client boundary.
+            _ = await waitUntil { !model.isStarting }
+            await model.checkOrder()
+            let recovered = try journal.load(account: "fixture-A")
+            check(model.receipt?.status == .completed && recovered == nil,
+                  "authenticated original-order check completes and clears recovery state")
+            let counts = await server.counts()
+            check(counts.creations == 0 && counts.debits == 0, "check recovery never creates or pays another order")
+            model.stopQueries()
+        }
+        do {
+            let gate = Gate(), journal = store("close-login"), epoch = Epoch()
+            try journal.save(receipt("order-A"), account: "fixture-A")
+            let model = make(ModelServer(), journal, epoch, login: gate)
+            model.start(account: "fixture-A")
+            _ = await waitUntil { await gate.entered }
+            model.openLogin(); model.loginRequest = nil; model.loginDismissed()
+            await gate.release()
+            try? await Task.sleep(for: .milliseconds(20))
+            check(!model.isStarting && model.fee == nil && model.errorText != nil, "closed login cannot restart loading from a late token")
+            let recovered = try journal.load(account: "fixture-A")
+            check(model.receipt?.orderID == "order-A" && recovered?.orderID == "order-A",
+                  "closing recovery login preserves the original pending order")
+            model.stopQueries()
+        }
+        do {
+            let gate = Gate(), journal = store("late-payment"), epoch = Epoch()
+            let server = ModelServer(payment: gate, status: 1)
+            let model = make(server, journal, epoch); await ready(model)
+            guard let confirmation = confirm(model) else { fatalError("fixture must be payable") }
+            let paying = Task { await model.submit(confirmation) }
+            _ = await waitUntil { await gate.entered }
+            try journal.save(receipt("order-B"), account: "fixture-B")
+            epoch.value += 1; model.start(account: "fixture-B")
+            _ = await waitUntil { !model.isStarting }
+            await gate.release(); await paying.value
+            check(model.receipt?.orderID == "order-B" && model.receipt?.status == .pending && !model.isSubmitting,
+                  "late payment completion cannot replace a new account's pending receipt")
+            check(try journal.load(account: "fixture-B")?.orderID == "order-B", "late payment completion clears only its captured account/order")
+            model.stopQueries()
+        }
+        do {
+            let gate = Gate(), journal = store("canceled-payment"), epoch = Epoch()
+            let model = make(ModelServer(payment: gate), journal, epoch); await ready(model)
+            guard let confirmation = confirm(model) else { fatalError("fixture must be payable") }
+            let paying = Task { await model.submit(confirmation) }
+            _ = await waitUntil { await gate.entered }
+            paying.cancel(); await gate.release(); await paying.value
+            check(model.receipt?.status == .pending && model.receipt?.orderID == "fixture-order", "cancellation after dispatch retains pending original order")
+            check(try journal.load(account: "fixture-A")?.orderID == "fixture-order", "cancellation after dispatch keeps durable recovery state")
             model.stopQueries()
         }
         print("Payment model failures: \(failures)")

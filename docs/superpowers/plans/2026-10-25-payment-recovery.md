@@ -43,3 +43,6 @@ Files: `.github/workflows/session-tests.yml`, this evidence record.
 - API RED: 5 behavioral failures (business 500, success=false, and reconciliation), not compile errors. API GREEN after conservative original-order reconciliation: 7 assertions.
 - Model RED after dependency-only seams: 16 behavioral failures. Includes both startup invalidations, restart before response, failed storage, legacy migration/corruption, conflicting order replacement, and cross-account late check erasing the wrong receipt.
 - The initial store deliberately retains the old defaults-backed behavior for this RED checkpoint; atomic persistence is the next task.
+- Native RED confirmed at 05d44b7: https://github.com/54zhien/ccsut/actions/runs/40164094086. Actual WebKit runner reproduced the same 16 model failures; no rerun or failure removal.
+- Atomic journal and scoped startup/payment/check repairs turned the original model suite GREEN locally. Added cancellation, late-payment completion, auth recovery, closed login, and corrupt-file cases.
+- Boundary RED: interrupted legacy migration could resurrect a completed order (one failure); retire the legacy shadow after validating the durable file.
