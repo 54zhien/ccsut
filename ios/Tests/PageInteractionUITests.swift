@@ -476,7 +476,15 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testOtherPagesRetainTimetableRefreshAnimation() {
-        for page in ["exams", "electives", "academic", "campus-leave", "campus-travel"] {
+        assertPagesRetainTimetableRefreshAnimation(["exams", "electives", "academic", "campus-leave", "campus-travel"])
+    }
+
+    func testCampusPagesRetainTimetableRefreshAnimation() {
+        assertPagesRetainTimetableRefreshAnimation(["campus-leave", "campus-travel"])
+    }
+
+    private func assertPagesRetainTimetableRefreshAnimation(_ pages: [String]) {
+        for page in pages {
             let app = XCUIApplication()
             app.launchArguments = ["--preview-ui", "--preview-page", page, "--preview-refresh", "--preview-slow-refresh", "--preview-controlled-refresh"]
             app.launch()
@@ -489,12 +497,17 @@ final class PageInteractionUITests: XCTestCase {
             default: anchor = app.segmentedControls.firstMatch
             }
             XCTAssertTrue(anchor.waitForExistence(timeout: 8), page)
+            if page == "campus-leave" {
+                XCTAssertTrue(app.staticTexts["示例请假记录"].waitForExistence(timeout: 8))
+            } else if page == "campus-travel" {
+                XCTAssertTrue(app.staticTexts["示例区县"].waitForExistence(timeout: 8))
+            }
             let restingY = anchor.frame.minY
             let observation = app.descendants(matching: .any).matching(identifier: "refresh-feedback-observation").firstMatch
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.40))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
             start.press(forDuration: 0.1, thenDragTo: end)
-            XCTAssertTrue(observation.label.contains("entered=1; completed=0"), page)
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label CONTAINS 'entered=1; completed=0'"), evaluatedWith: observation)], timeout: 5), .completed, page)
             XCTAssertGreaterThan(anchor.frame.minY - restingY, 40, "\(page): retain the native refresh region until completion")
             let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = "\(page)-held-refresh"

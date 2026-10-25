@@ -4,14 +4,22 @@ import Foundation
 /// UI tests release the second score load explicitly, so screenshots cannot race completion.
 @MainActor final class PreviewRefreshCompletionGate {
     static let shared = PreviewRefreshCompletionGate()
-    private var pending: CheckedContinuation<Void, Never>?
+    private var pending: [UUID: CheckedContinuation<Void, Never>] = [:]
     func waitForRelease() async {
-        await withCheckedContinuation { pending = $0 }
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled { continuation.resume() }
+                else { pending[id] = continuation }
+            }
+        } onCancel: {
+            Task { @MainActor in self.pending.removeValue(forKey: id)?.resume() }
+        }
     }
     func release() {
-        let continuation = pending
-        pending = nil
-        continuation?.resume()
+        let continuations = Array(pending.values)
+        pending.removeAll()
+        for continuation in continuations { continuation.resume() }
     }
 }
 

@@ -238,6 +238,11 @@ private struct PageRefreshable: ViewModifier {
 private struct PageRefreshDiagnostics: ViewModifier {
     func body(content: Content) -> some View {
         content
+            .onDisappear {
+                if RefreshFeedbackObservation.enabled && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
+                    PreviewRefreshCompletionGate.shared.release()
+                }
+            }
             .background {
                 if RefreshFeedbackObservation.enabled {
                     RefreshFeedbackNativeProbe().frame(width: 1, height: 1).allowsHitTesting(false).accessibilityHidden(true)

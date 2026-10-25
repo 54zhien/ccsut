@@ -16,6 +16,8 @@ final class CampusRecordsModel {
     private var revision: UInt64 = 0
     @ObservationIgnored private var leaveTask: Task<CampusLeavePage, Error>?
     @ObservationIgnored private var travelTasks: [CampusTravelKind: Task<[CampusTravelRecord], Error>] = [:]
+    @ObservationIgnored private var leaveCompletion: ReadCompletion?
+    @ObservationIgnored private var travelCompletions: [CampusTravelKind: ReadCompletion] = [:]
 
     init(api: any CampusReading, currentGeneration: @escaping @Sendable () -> UInt64) {
         self.api = api
@@ -24,7 +26,11 @@ final class CampusRecordsModel {
     }
 
     func loadLeave(reset: Bool) async {
-        guard verifyAccount(), !isLoadingLeave, reset || leave.hasMore else { return }
+        guard verifyAccount() else { return }
+        if let leaveCompletion { await leaveCompletion.wait(); return }
+        guard reset || leave.hasMore else { return }
+        let completion = ReadCompletion()
+        leaveCompletion = completion
         let requestRevision = revision
         let page = reset ? 1 : leave.page + 1
         let api = api
@@ -33,7 +39,8 @@ final class CampusRecordsModel {
         let task = Task { try await api.leaveRecords(page: page, size: 20) }
         leaveTask = task
         defer {
-            if revision == requestRevision { isLoadingLeave = false; leaveTask = nil }
+            if revision == requestRevision { isLoadingLeave = false; leaveTask = nil; leaveCompletion = nil }
+            completion.finish()
         }
         do {
             let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
@@ -47,7 +54,10 @@ final class CampusRecordsModel {
     }
 
     func loadTravel(kind: CampusTravelKind) async {
-        guard verifyAccount(), !loadingTravel.contains(kind) else { return }
+        guard verifyAccount() else { return }
+        if let completion = travelCompletions[kind] { await completion.wait(); return }
+        let completion = ReadCompletion()
+        travelCompletions[kind] = completion
         let requestRevision = revision
         let api = api
         loadingTravel.insert(kind)
@@ -55,7 +65,8 @@ final class CampusRecordsModel {
         let task = Task { try await api.travelRecords(kind: kind) }
         travelTasks[kind] = task
         defer {
-            if revision == requestRevision { loadingTravel.remove(kind); travelTasks[kind] = nil }
+            if revision == requestRevision { loadingTravel.remove(kind); travelTasks[kind] = nil; travelCompletions[kind] = nil }
+            completion.finish()
         }
         do {
             let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
@@ -75,6 +86,10 @@ final class CampusRecordsModel {
         travelTasks.removeAll()
         isLoadingLeave = false
         loadingTravel.removeAll()
+        leaveCompletion?.finish()
+        leaveCompletion = nil
+        for completion in travelCompletions.values { completion.finish() }
+        travelCompletions.removeAll()
     }
 
     @discardableResult private func verifyAccount() -> Bool {
@@ -87,5 +102,24 @@ final class CampusRecordsModel {
             return false
         }
         return true
+    }
+}
+
+/// Join the complete read (including publication) without issuing a second request.
+@MainActor private final class ReadCompletion {
+    private var finished = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !finished else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func finish() {
+        guard !finished else { return }
+        finished = true
+        let continuations = waiters
+        waiters.removeAll()
+        for continuation in continuations { continuation.resume() }
     }
 }
