@@ -49,7 +49,7 @@ struct ElectiveView: View {
         PageScrollSurface(refresh: { await load(force: true) }) { viewport, _ in
             VStack(spacing: 0) {
                 if isLoading && classes.isEmpty && enrolledModel.context == nil {
-                    ProgressView("??????")
+                    ProgressView("拉取教学班…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     list
