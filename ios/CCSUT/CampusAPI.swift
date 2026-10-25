@@ -155,7 +155,12 @@ actor CampusClient: CampusReading {
         try checkState()
         guard !account.isEmpty else { throw CampusError.authentication }
         if !force, let cached = identities[subsystem] { return cached }
-        var result = try await validate(callback: callback)
+        // A business 401 has already rejected this session's bearer. The proxy
+        // can still return that same token from validate_full, so bypassing only
+        // our dictionary is insufficient: renew CAS before validating again.
+        var result: Identity?
+        if force { identities[subsystem] = nil }
+        else { result = try await validate(callback: callback) }
         if result == nil {
             let redirect = request("/backstage/cas-proxy/app/redirect", query: [
                 URLQueryItem(name: "serverName", value: "https://ehall.ccsut.cn")
@@ -222,11 +227,18 @@ actor CampusClient: CampusReading {
             if response.statusCode == 401 { throw Failure.unauthorized }
             if response.statusCode == 403 { throw CampusError.forbidden }
             if [301, 302, 303, 307, 308].contains(response.statusCode) {
-                // A business POST is never replayed into an authentication route.
-                guard authentication, request.httpMethod == "GET" || request.httpMethod == nil,
-                      let location = response.value(forHTTPHeaderField: "Location"),
+                guard let location = response.value(forHTTPHeaderField: "Location"),
                       let next = URL(string: location, relativeTo: url)?.absoluteURL,
                       let trusted = Self.trustedURL(next) else { throw CampusError.authentication }
+                if !authentication {
+                    // Signal the read's bounded recovery loop, without following
+                    // this redirect or forwarding its POST/body/bearer to CAS.
+                    let casLogin = trusted.host == "auth.ccsut.cn" && trusted.path == "/backstage/cas/login"
+                    let campusLogin = trusted.host == "ehall.ccsut.cn" && trusted.path == "/backstage/cas-proxy/app/redirect"
+                    guard casLogin || campusLogin else { throw CampusError.authentication }
+                    throw Failure.unauthorized
+                }
+                guard request.httpMethod == "GET" || request.httpMethod == nil else { throw CampusError.authentication }
                 request.url = trusted
                 continue
             }

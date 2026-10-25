@@ -62,6 +62,8 @@ final class EcardPaymentModel {
     @ObservationIgnored private var loginTask: Task<Void, Never>?
     @ObservationIgnored private var loginPromptTask: Task<Void, Never>?
     @ObservationIgnored private var pendingLogin: LoginRequest?
+    @ObservationIgnored private var canRecoverReadSession = true
+    @ObservationIgnored private let makeBridge: @MainActor () -> EcardTokenBridge
     @ObservationIgnored private var dismissedLoginID: UUID?
     @ObservationIgnored private var boundGeneration: UInt64?
     @ObservationIgnored private var submissionID: UUID?
@@ -79,6 +81,7 @@ final class EcardPaymentModel {
          currentGeneration: @escaping @MainActor () -> UInt64 = { CookieJar.generation },
          cachedCredential: (@MainActor (String) -> CachedCredential?)? = nil,
          clientFactory: (@MainActor (String, UInt64, WKWebsiteDataStore?) -> EcardClient)? = nil,
+         bridgeFactory: (@MainActor () -> EcardTokenBridge)? = nil,
          fetchLoginToken: (@MainActor (EcardTokenBridge, String) async throws -> String)? = nil) {
         self.pendingStore = pendingStore ?? EcardPendingReceiptStore()
         self.currentGeneration = currentGeneration
@@ -89,6 +92,7 @@ final class EcardPaymentModel {
         }
         self.clientFactory = clientFactory ?? Self.authenticatedClient
         self.fetchLoginToken = fetchLoginToken ?? { try await $0.fetchToken(forAccount: $1) }
+        self.makeBridge = bridgeFactory ?? { EcardTokenBridge(dataStore: WebStore.dataStore) }
     }
 
     var amount: Decimal? {
@@ -126,6 +130,7 @@ final class EcardPaymentModel {
             else if let room, detail == nil { selectRoom(room) }
             return
         }
+        canRecoverReadSession = true
         stopQueries()
         submissionID = nil; isSubmitting = false
         checkingID = nil; isChecking = false
@@ -169,7 +174,7 @@ final class EcardPaymentModel {
     private func beginBackgroundLogin(account: String) {
         let current = revision
         let generation = currentGeneration()
-        let request = LoginRequest(bridge: EcardTokenBridge(dataStore: WebStore.dataStore), account: account)
+        let request = LoginRequest(bridge: makeBridge(), account: account)
         let requestID = request.id
         pendingLogin = request
         request.bridge.onNeedsInteraction = { [weak self] in
@@ -244,10 +249,13 @@ final class EcardPaymentModel {
                 fee = loadedFee; campuses = loadedCampuses
                 isStarting = false
                 if loadedCampuses.count == 1 { selectCampus(loadedCampuses[0].value) }
-                else if loadedCampuses.isEmpty { errorText = "暂无可选校区，请稍后重新加载" }
+                else {
+                    canRecoverReadSession = true
+                    if loadedCampuses.isEmpty { errorText = "暂无可选校区，请稍后重新加载" }
+                }
             } catch {
                 if startupIsCurrent(current, generation: generation) {
-                    handleLoadError(error)
+                    handleLoadError(error, recoverReadSession: true)
                     loginRequest = nil
                 }
             }
@@ -307,16 +315,31 @@ final class EcardPaymentModel {
         })
     }
 
-    private func handleLoadError(_ error: Error) {
+    private func handleLoadError(_ error: Error, recoverReadSession: Bool = false) {
         errorText = error.localizedDescription
+        var authenticationRejected = false
         if let error = error as? EcardError {
             switch error {
             case .authenticationRequired, .sessionSynchronization, .noToken, .business(401, _):
+                switch error {
+                case .authenticationRequired, .business(401, _): authenticationRejected = true
+                default: break
+                }
                 EcardTokenBridge.clearCachedToken()
                 client = nil
                 fee = nil
             default: break
             }
+        }
+        // Only retry loading data. A failed payment may already have reached
+        // the server, so submit/checkOrder keep their existing result handling.
+        if recoverReadSession, authenticationRejected, canRecoverReadSession,
+           !isSubmitting, let account {
+            isStarting = false
+            start(account: account, force: true)
+            // start() resets the budget for an explicit reload; this automatic
+            // reload consumes it before its new tasks can run on MainActor.
+            canRecoverReadSession = false
         }
     }
 
@@ -380,14 +403,21 @@ final class EcardPaymentModel {
         queryTask?.cancel()
         revision &+= 1
         let current = revision
+        let generation = currentGeneration()
         loadingText = label; errorText = recoveryError
         queryTask = Task {
             defer { if current == revision { loadingText = nil } }
             do {
                 guard let client else { return }
                 try await action(client)
+                guard current == revision, currentGeneration() == generation, !Task.isCancelled else { return }
+                // A one-campus startup includes its automatic building read.
+                // Rearm only after that whole chain succeeds, not between them.
+                canRecoverReadSession = true
             } catch {
-                if current == revision, !Task.isCancelled { handleLoadError(error) }
+                if current == revision, currentGeneration() == generation, !Task.isCancelled {
+                    handleLoadError(error, recoverReadSession: true)
+                }
             }
         }
     }

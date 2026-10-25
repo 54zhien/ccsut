@@ -8,23 +8,27 @@ final class FixtureCredentials: CampusSessionCredentials, @unchecked Sendable {
     private var revision: UInt64 = 1
     private var receivedCookies = 0
     private var switchOnHeader = false
+    private var sessionValue = "fixture-session"
     var generation: UInt64 { lock.lock(); defer { lock.unlock() }; return revision }
     func replaceAccount() { lock.lock(); defer { lock.unlock() }; revision += 1 }
     func armAccountSwitch() { lock.lock(); defer { lock.unlock() }; switchOnHeader = true }
     func header(for url: URL) -> String? {
         lock.lock(); defer { lock.unlock() }
         if switchOnHeader { switchOnHeader = false; revision += 1 }
-        return url.host == "auth.ccsut.cn" ? "TGC=fixture-tgc" : "ehall=fixture-session"
+        return url.host == "auth.ccsut.cn" ? "TGC=fixture-tgc" : "ehall=\(sessionValue)"
     }
     func header(for url: URL, expectedGeneration: UInt64) throws -> String? {
         lock.lock(); defer { lock.unlock() }
         if switchOnHeader { switchOnHeader = false; revision += 1 }
         guard expectedGeneration == revision else { throw CancellationError() }
-        return url.host == "auth.ccsut.cn" ? "TGC=fixture-tgc" : "ehall=fixture-session"
+        return url.host == "auth.ccsut.cn" ? "TGC=fixture-tgc" : "ehall=\(sessionValue)"
     }
     func accept(_ cookies: [HTTPCookie], generation: UInt64) {
         lock.lock(); defer { lock.unlock() }
-        if generation == revision { receivedCookies += cookies.count }
+        if generation == revision {
+            receivedCookies += cookies.count
+            if let session = cookies.last(where: { $0.name == "ehall" }) { sessionValue = session.value }
+        }
     }
     var accepted: Int { lock.lock(); defer { lock.unlock() }; return receivedCookies }
 }
@@ -90,6 +94,121 @@ struct CampusAPITests {
         check(rotatedRequests.last?.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-new-token",
               "401 retry replaces the stale bearer token with revalidated credentials")
 
+        // CAS proxy validation and the business token have independent lifetimes:
+        // validate_full may still return a token which the business service rejects.
+        let expiredCredentials = FixtureCredentials()
+        let expired = FixtureCampusTransport { req, _ in
+            let url = req.url!
+            if url.path.hasSuffix("validate_full") {
+                let renewed = req.value(forHTTPHeaderField: "Cookie") == "ehall=renewed-session"
+                return (200, [:], renewed ? identity.replacingOccurrences(of: "fixture-access-token", with: "renewed-token") : identity)
+            }
+            if url.host == "auth.ccsut.cn" {
+                return (302, ["Location": "https://ehall.ccsut.cn/backstage/cas-proxy/app/redirect?ticket=fixture-ticket"], "")
+            }
+            if url.path.hasSuffix("redirect") {
+                if url.query?.contains("ticket=") == true {
+                    return (200, ["Set-Cookie": "ehall=renewed-session; Secure; Path=/"], "official landing")
+                }
+                return (302, ["Location": "https://auth.ccsut.cn/backstage/cas/login?service=fixture"], "")
+            }
+            return req.value(forHTTPHeaderField: "Authorization") == "Bearer renewed-token" ? (200, [:], emptyPage) : (401, [:], "")
+        }
+        do {
+            let page = try await CampusClient(account: "fixture-account", credentials: expiredCredentials, transport: expired).leaveRecords()
+            let sent = await expired.requests
+            check(page.page == 1 && sent.last?.value(forHTTPHeaderField: "Authorization") == "Bearer renewed-token",
+                  "business 401 renews CAS even when validation still accepts the rejected token")
+            check(sent.filter { $0.url?.host == "auth.ccsut.cn" }.count == 1 &&
+                  sent.filter { $0.httpMethod == "POST" }.count == 2 &&
+                  sent.filter { $0.url?.host == "auth.ccsut.cn" }.allSatisfy { $0.httpBody == nil && $0.value(forHTTPHeaderField: "Authorization") == nil },
+                  "expired read follows CAS once without forwarding its business POST or bearer")
+        } catch {
+            check(false, "business 401 renews CAS even when validation still accepts the rejected token")
+        }
+
+        for loginLocation in ["https://auth.ccsut.cn/backstage/cas/login?service=fixture",
+                              "/backstage/cas-proxy/app/redirect?serverName=https%3A%2F%2Fehall.ccsut.cn"] {
+            let loginRedirect = FixtureCampusTransport { req, index in
+                if req.url!.path.hasSuffix("validate_full") { return (200, [:], identity) }
+                if req.url!.path.hasSuffix("redirect") { return (200, [:], "official landing") }
+                return index == 2 ? (302, ["Location": loginLocation], "") : (200, [:], emptyPage)
+            }
+            do {
+                _ = try await CampusClient(account: "fixture-account", credentials: FixtureCredentials(), transport: loginRedirect).leaveRecords()
+                let sent = await loginRedirect.requests
+                check(sent.filter { $0.httpMethod == "POST" }.count == 2 && sent.count == 5 &&
+                      sent.allSatisfy { $0.url?.host == "ehall.ccsut.cn" },
+                      "official read-login redirect renews separately and retries only the original read")
+            } catch { check(false, "official read-login redirect renews separately and retries only the original read") }
+        }
+
+        for destination in ["https://outside.invalid/collect", "https://ehall.ccsut.cn/unrelated"] {
+            let unsafeRedirect = FixtureCampusTransport { req, _ in
+                req.url!.path.hasSuffix("validate_full") ? (200, [:], identity) : (302, ["Location": destination], "")
+            }
+            do {
+                _ = try await CampusClient(account: "fixture-account", credentials: FixtureCredentials(), transport: unsafeRedirect).leaveRecords()
+                check(false, "unrecognized read redirect is not an authentication retry")
+            } catch {
+                check(await unsafeRedirect.requests.count == 2, "unrecognized read redirect is not an authentication retry")
+            }
+        }
+
+        let repeatedLogin = FixtureCampusTransport { req, _ in
+            if req.url!.path.hasSuffix("validate_full") { return (200, [:], identity) }
+            if req.url!.path.hasSuffix("redirect") { return (200, [:], "official landing") }
+            return (302, ["Location": "https://auth.ccsut.cn/backstage/cas/login"], "")
+        }
+        do {
+            _ = try await CampusClient(account: "fixture-account", credentials: FixtureCredentials(), transport: repeatedLogin).leaveRecords()
+            check(false, "repeated login redirect stops after one recovery")
+        } catch {
+            let sent = await repeatedLogin.requests
+            check(error as? CampusError == .authentication && sent.count == 5,
+                  "repeated login redirect stops after one recovery")
+        }
+
+        for wrongAccountAfterRenewal in [false, true] {
+            let incompleteRenewal = FixtureCampusTransport { req, index in
+                if req.url!.path.hasSuffix("validate_full") {
+                    if index == 1 { return (200, [:], identity) }
+                    return (200, [:], wrongAccountAfterRenewal
+                        ? identity.replacingOccurrences(of: "fixture-account", with: "different-account")
+                        : #"{"errcode":2001,"msg":"not authenticated"}"#)
+                }
+                if req.url!.path.hasSuffix("redirect") { return (200, [:], "interactive login page") }
+                return (401, [:], "")
+            }
+            do {
+                _ = try await CampusClient(account: "fixture-account", credentials: FixtureCredentials(), transport: incompleteRenewal).leaveRecords()
+                check(false, "failed renewal cannot resume a business read")
+            } catch {
+                let sent = await incompleteRenewal.requests
+                check(error as? CampusError == (wrongAccountAfterRenewal ? .identityMismatch : .authentication) &&
+                      sent.filter { $0.httpMethod == "POST" }.count == 1 && sent.count == 4,
+                      "interactive or mismatched renewal stops before replaying the read")
+            }
+        }
+
+        let renewingCredentials = FixtureCredentials()
+        let replacedDuringRenewal = FixtureCampusTransport { req, _ in
+            if req.url!.path.hasSuffix("validate_full") { return (200, [:], identity) }
+            if req.url!.path.hasSuffix("redirect") {
+                renewingCredentials.replaceAccount()
+                return (200, ["Set-Cookie": "ehall=late-session; Secure; Path=/"], "official landing")
+            }
+            return (401, [:], "")
+        }
+        do {
+            _ = try await CampusClient(account: "fixture-account", credentials: renewingCredentials, transport: replacedDuringRenewal).leaveRecords()
+            check(false, "account replacement during CAS cancels recovery")
+        } catch {
+            let sent = await replacedDuringRenewal.requests
+            check(error is CancellationError && sent.count == 3 && renewingCredentials.accepted == 0,
+                  "account replacement during CAS discards late cookies and stops the read")
+        }
+
         for invalidToken in ["", "fixture\r\nInjected: value"] {
             let malformed = FixtureCampusTransport { _, _ in
                 let data: [String: Any] = ["errcode": 2000, "account": "fixture-account", "userId": "fixture-user-id",
@@ -111,17 +230,19 @@ struct CampusAPITests {
             return index == 2 ? (401, [:], "") : (200, [:], emptyPage)
         }
         _ = try await CampusClient(account: "fixture-account", credentials: credentials, transport: retried).leaveRecords(page: 1, size: 20)
-        check(await retried.requests.count == 4, "401 revalidates and retries once")
+        check(await retried.requests.count == 5, "401 renews CAS, revalidates and retries once")
 
         let always401 = FixtureCampusTransport { req, _ in
-            req.url!.path.hasSuffix("validate_full") ? (200, [:], identity) : (401, [:], "")
+            if req.url!.path.hasSuffix("validate_full") { return (200, [:], identity) }
+            if req.url!.path.hasSuffix("redirect") { return (200, [:], "official landing") }
+            return (401, [:], "")
         }
         do {
             _ = try await CampusClient(account: "fixture-account", credentials: credentials, transport: always401).leaveRecords(page: 1, size: 20)
             check(false, "repeated401 fails")
         } catch {
             let count = await always401.requests.count
-            check(error as? CampusError == .authentication && count == 4, "second401 ends without infinite retry")
+            check(error as? CampusError == .authentication && count == 5, "second401 ends without infinite retry")
         }
 
         for (status, expected) in [(403, CampusError.forbidden), (500, CampusError.http(500))] {
