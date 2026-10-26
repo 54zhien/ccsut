@@ -33,6 +33,9 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
         }
         override func viewWillDisappear(_ animated: Bool) {
             super.viewWillDisappear(animated)
+            #if DEBUG
+            AcademicTabTransitionDiagnostics.trace("willDisappear nav=\(navigationController != nil) coordinator=\(navigationController?.transitionCoordinator != nil) toRoot=\(navigationController?.transitionCoordinator?.viewController(forKey: .to) === navigationController?.viewControllers.first)")
+            #endif
             guard let nav = navigationController,
                   let coordinator = nav.transitionCoordinator,
                   coordinator.viewController(forKey: .to) === nav.viewControllers.first else { return }
@@ -52,6 +55,9 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
         /// https://developer.apple.com/documentation/uikit/uiview/performwithoutanimation(_:)
         private func transitionTabBar(hidden: Bool, animated: Bool, navigation: UINavigationController) {
             let coordinator = navigation.transitionCoordinator
+            #if DEBUG
+            AcademicTabTransitionDiagnostics.trace("request hidden=\(hidden) nativeHidden=\(navigation.tabBarController?.isTabBarHidden.description ?? "nil") sameCoordinator=\(tabTransitionCoordinator != nil && tabTransitionCoordinator === coordinator)")
+            #endif
             // Cancelling an interactive pop calls viewWillAppear again on the
             // detail. Let the original coordinator restore its captured state.
             if let active = tabTransitionCoordinator, let coordinator,
@@ -71,7 +77,7 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
             let previousHidden = tabs.isTabBarHidden
             #if DEBUG
             if InterfacePreview.enabled {
-                print("TAB_APPEARANCE hidden=\(hidden) currentAlpha=\(bar.alpha) visibleAlpha=\(originalAlpha) currentY=\(bar.transform.ty) visibleY=\(originalTransform.ty)")
+                AcademicTabTransitionDiagnostics.trace("appearance hidden=\(hidden) currentAlpha=\(bar.alpha) visibleAlpha=\(originalAlpha) currentY=\(bar.transform.ty) visibleY=\(originalTransform.ty)")
             }
             AcademicTabTransitionDiagnostics.record(childAnimated: animated,
                                                     coordinatorAnimated: coordinator?.isAnimated, queued: nil)
@@ -92,6 +98,9 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
             // Native visibility must not overwrite the staged starting transform.
             UIView.performWithoutAnimation(prepare)
             let finish: (Bool) -> Void = { [weak self, weak tabs] cancelled in
+                #if DEBUG
+                AcademicTabTransitionDiagnostics.trace("finish hidden=\(hidden) cancelled=\(cancelled) selfAlive=\(self != nil) idMatch=\(self?.tabTransitionID == id) tabsAlive=\(tabs != nil)")
+                #endif
                 guard let self, self.tabTransitionID == id, let tabs else { return }
                 self.tabTransitionCoordinator = nil
                 tabs.setTabBarHidden(cancelled ? previousHidden : hidden, animated: false)
@@ -99,6 +108,12 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
                     tabs.tabBar.transform = originalTransform
                     tabs.tabBar.alpha = originalAlpha
                 }
+                #if DEBUG
+                AcademicTabTransitionDiagnostics.traceBar(tabs, event: "restored")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak tabs] in
+                    if let tabs { AcademicTabTransitionDiagnostics.traceBar(tabs, event: "settled") }
+                }
+                #endif
             }
             if let coordinator {
                 tabTransitionCoordinator = coordinator
@@ -172,6 +187,32 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
 
 #if DEBUG
 @MainActor private enum AcademicTabTransitionDiagnostics {
+    static func traceBar(_ tabs: UITabBarController, event: String) {
+        let bar = tabs.tabBar
+        let rect = bar.convert(bar.bounds, to: bar.window)
+        var ancestors: [String] = []
+        var parent = bar.superview
+        while let view = parent {
+            ancestors.append("\(type(of: view)):hidden=\(view.isHidden),alpha=\(view.alpha)")
+            parent = view.superview
+        }
+        trace("\(event) nativeHidden=\(tabs.isTabBarHidden) hidden=\(bar.isHidden) alpha=\(bar.alpha) ty=\(bar.transform.ty) center=\(bar.center) bounds=\(bar.bounds) windowRect=\(rect) ancestors=\(ancestors)")
+    }
+    static func trace(_ message: String) {
+        guard InterfacePreview.enabled else { return }
+        let line = "TAB_TRANSITION \(message)\n"
+        print(line, terminator: "")
+        guard let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
+              let data = line.data(using: .utf8) else { return }
+        let file = directory.appendingPathComponent("tab-transition.log")
+        if !FileManager.default.fileExists(atPath: file.path) {
+            try? data.write(to: file)
+        } else if let handle = try? FileHandle(forWritingTo: file) {
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        }
+    }
     static var entry = "entry childAnimated=unset coordinatorAnimated=unset queued=unset"
     private static var entryID = 0
     private static var previousTabSample: (frame: CGRect, opacity: Float)?

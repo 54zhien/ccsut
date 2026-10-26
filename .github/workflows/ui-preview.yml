@@ -204,7 +204,6 @@ jobs:
           fi
           if [ "$NAVIGATION_CHECKS_ONLY" = 'true' ]; then
             TEST_SELECTION=(
-              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
               -only-testing:CCSUTUITests/PageInteractionUITests/testDetailTabsHideAndReturnWithHome
             )
           fi
@@ -216,6 +215,11 @@ jobs:
       - name: Export interaction screenshots
         if: always()
         run: |
+          APP_DATA=$(xcrun simctl get_app_container "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut data 2>/dev/null || true)
+          if [ -f "$APP_DATA/Library/Caches/tab-transition.log" ]; then
+            cp "$APP_DATA/Library/Caches/tab-transition.log" "$RUNNER_TEMP/tab-transition.log"
+            cat "$RUNNER_TEMP/tab-transition.log"
+          fi
           if [ -d "$RUNNER_TEMP/ui-tests.xcresult" ]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-tests.xcresult" --output-path "$RUNNER_TEMP/ui-test-attachments"
           fi
@@ -226,6 +230,7 @@ jobs:
           name: CCSUT-ui-interactions
           path: |
             ${{ runner.temp }}/ui-test.log
+            ${{ runner.temp }}/tab-transition.log
             ${{ runner.temp }}/ui-test-attachments/*.png
             ${{ runner.temp }}/ui-test-attachments/*.txt
             ${{ runner.temp }}/ui-test-attachments/manifest.json
