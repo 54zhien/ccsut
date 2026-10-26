@@ -83,11 +83,10 @@ struct EnrolledCourseDetail: View {
                 }
             }
             .navigationTitle("课程详情").navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    SheetSymbolButton(symbol: "xmark", label: "关闭课程详情") { dismiss() }
-                }
-                .sharedBackgroundVisibility(.hidden)
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                SheetHeader(title: "课程详情") { dismiss() }
+                    .background(Color(.systemGroupedBackground))
             }
         }
     }

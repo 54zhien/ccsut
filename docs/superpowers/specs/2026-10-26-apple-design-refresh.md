@@ -8,7 +8,7 @@
 - 保留三个标签：课表、教务、校园。首页入口仅保留标题，不重新加入用户删掉的说明文字。教务和校园以明确分组、统一行结构呈现入口；按最新要求移除教务首页的“接下来的考试”和对应的单独数据请求。
 - 课表默认展示今日课程，在右上角账号旁点击“今日课程 / 所有课表”切换。今日课程使用独立的中性时间轴，按当前有效教学周和北京时间筛选；周次未知不误报没有课程。所有课表保留原有浮动周次胶囊、完整网格、冲突课程选择和横向大字滚动，撤掉新增的胶囊上方周次大标题。浏览其他周不改变今日课程。
 - 详情页采用共同的内容边距、章节标题、信息行和中性关闭/筛选控件。成绩概览以绩点为主，考试的日期、时间、地点清楚区分，选课保留关闭通道和历史只读状态。
-- 电费页按用户最新要求完整重构为拟态电表：浅色金属/深色石墨机身、细小固定螺钉、嵌入式楼栋与寝室铭牌选择、凹入式 LCD 七段数码余额和机械计数器式金额区。原生菜单与三个滚轮继续工作；数码显示保留接口原字符串及精度，异常格式回退文字。保留 10 元最低值、服务端限额、付款确认及待确认订单保护。不添加虚构的在线状态、编号或用电量。
+- 电费页按用户最终澄清做成整台老式机械电表：整页连续机身、玻璃罩、搪瓷面板、机械计数窗、楼栋/寝室铭牌与旋钮、底部嵌入式缴费压键。页面内控件用真实 Button 语义配合拟真物件外观；三个金额指轮仍使用 MeterAmount 的可选数字和上下限规则，并提供可访问调节操作。返回按钮按用户例外要求保留原样。余额保留接口原字符串及精度，异常格式回退文字；不虚构用电量、转速或在线状态。付款确认、服务端限额和待确认订单保护不变。浅色搪瓷/金属与深色石墨分别适应系统外观。
 - 首次加载/空态使用真实可视区域布局。请假/离返校标题和分段选择固定在顶部；主状态位于屏幕中心附近，增添按钮保留右下方主题色玻璃及公开圆角几何。
 - 底栏在导航协调器中渐隐并下移 20pt；返回反向播放，侧滑取消复原，减少动态效果关闭位移。20pt 是此次交互设计决定，不声称是 Apple 固定参数。
 - 网页认证使用相同尺寸的圆形原生按钮；刷新不再通过 resizable 字形改变系统按钮度量。
@@ -33,6 +33,10 @@
 - https://developer.apple.com/documentation/swiftui/buttonbordershape
 - https://developer.apple.com/documentation/swiftui/toolbarcontent/sharedbackgroundvisibility(_:)
 - https://developer.apple.com/documentation/swiftui/controlsize/large
+- https://developer.apple.com/documentation/swiftui/buttonstyle
+- https://developer.apple.com/documentation/swiftui/draggesture
+- https://developer.apple.com/documentation/swiftui/view/accessibilityadjustableaction(_:)
+- https://developer.apple.com/documentation/swiftui/view/safeareainset(edge:alignment:spacing:content:)-4s51l
 
 ## 验证边界
 

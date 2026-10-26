@@ -36,7 +36,7 @@ Files: Session.swift, Models.swift, API.swift, relevant identity tests; PageInte
 Consumes: existing data models and navigation IDs. Produces: presentation only; preserves IDs/actions.
 
 ## Task 3: Meter and navigation controls
-- [x] Rebuild EcardPaymentView as a physical meter housing with integrated native room menus, LCD balance and amount wheels; preserve 10–400 limits and server limits.
+- [ ] Rebuild the whole EcardPaymentView as an old electromechanical meter face, with physical nameplate selectors, thumbwheels and an embedded payment key; keep the existing back control and preserve 10–400 limits and server limits.
 - [x] Make WebLoginSheet refresh and dismiss controls share symbol metrics and circle dimensions.
 - [x] Change AcademicNavigation displacement to 20pt while retaining transition coordination and cancellation.
 Verification: meter regression, native selection UI, tab restore/cancel/Reduce Motion tests.

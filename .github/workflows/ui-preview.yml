@@ -15,7 +15,7 @@ on:
       test_scope:
         description: 'Interaction checks to run (focused checks preserve full-suite failure evidence)'
         type: choice
-        options: [all, design-final, design-followup, design-layout, design-adaptive, design-sheets, design-motion, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
+        options: [all, meter-final, design-final, design-followup, design-layout, design-adaptive, design-sheets, design-motion, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
         default: all
       appearance_source_ref:
         description: 'Optional source revision for the focused appearance comparison'
@@ -96,8 +96,41 @@ jobs:
       - name: Preserve simulator boot state
         if: failure()
         run: xcrun simctl list devices > "$RUNNER_TEMP/ui-screenshots/simulator-state.txt"
+      - name: Render physical meter before interaction checks
+        if: ${{ inputs.test_scope == 'meter-final' && steps.simulator.conclusion == 'success' }}
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/meter-screenshots"
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/source-revision.txt"
+          for PAGE in campus-electricity campus-electricity-large campus-electricity-confirmation campus-electricity-result campus-electricity-pending campus-electricity-recovery-corrupt course account elective-detail enrolled-detail; do
+            LAUNCH_ARGS=(--preview-ui --preview-page "$PAGE")
+            if [ "$PAGE" = 'campus-electricity-large' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page campus-electricity -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
+            fi
+            xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
+            xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut "${LAUNCH_ARGS[@]}"
+            sleep 3
+            xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$OUT/$PAGE-light.png"
+            xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance dark
+            sleep 3
+            xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$OUT/$PAGE-dark-live.png"
+            xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut "${LAUNCH_ARGS[@]}"
+            sleep 3
+            xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$OUT/$PAGE-dark.png"
+          done
+          xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
+          xcrun simctl terminate "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut
+      - name: Publish physical meter appearance
+        if: ${{ always() && inputs.test_scope == 'meter-final' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCSUT-meter-appearance
+          path: ${{ runner.temp }}/meter-screenshots/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Verify initial and selected week positioning
-        if: ${{ !inputs.blur_diagnostics && inputs.test_scope != 'design-followup' && inputs.test_scope != 'design-adaptive' && inputs.test_scope != 'design-sheets' && inputs.test_scope != 'design-motion' && inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' && inputs.test_scope != 'appearance-screens' }}
+        if: ${{ !inputs.blur_diagnostics && inputs.test_scope != 'meter-final' && inputs.test_scope != 'design-followup' && inputs.test_scope != 'design-adaptive' && inputs.test_scope != 'design-sheets' && inputs.test_scope != 'design-motion' && inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' && inputs.test_scope != 'appearance-screens' }}
         run: |
           set -o pipefail
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
@@ -141,6 +174,19 @@ jobs:
           fi
           if [ "$TEST_SCOPE" = 'design-adaptive' ]; then
             TEST_SELECTION=(-only-testing:CCSUTUITests/PageInteractionUITests/testCampusAdaptiveLayout)
+          fi
+          if [ "$TEST_SCOPE" = 'meter-final' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
+              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterAdaptiveControls
+              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterReturnsToCampus
+              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterConfirmationRemainsExplicit
+              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterSameSelectionKeepsRoomAndBalance
+              -only-testing:CCSUTUITests/PageInteractionUITests/testPaymentRecoveryEntry
+              -only-testing:CCSUTUITests/PageInteractionUITests/testPaymentRecoveryLargeText
+              -only-testing:CCSUTUITests/PageInteractionUITests/testDetailSheetsKeepContentAndCloseReachable
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTodayCoursesSwitchesToAllTimetables
+            )
           fi
           if [ "$TEST_SCOPE" = 'design-followup' ]; then
             TEST_SELECTION=(
@@ -261,7 +307,7 @@ jobs:
             "${TEST_SELECTION[@]}" \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
       - name: Verify actual reduced motion preference
-        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' && (inputs.test_scope == 'design-layout' || inputs.test_scope == 'design-motion' || inputs.test_scope == 'all' || github.event_name == 'push') }}
+        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' && (inputs.test_scope == 'meter-final' || inputs.test_scope == 'design-layout' || inputs.test_scope == 'design-motion' || inputs.test_scope == 'all' || github.event_name == 'push') }}
         run: |
           set -o pipefail
           xcrun simctl spawn "$CCSUT_PREVIEW_DEVICE" defaults write com.apple.Accessibility ReduceMotionEnabled -bool YES

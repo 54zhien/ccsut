@@ -1,4 +1,4 @@
-﻿# Runtime and data-flow audit
+# Runtime and data-flow audit
 
 **Audit snapshot:** d50b437 (codex/apple-design-refresh), read-only source review on 2026-10-26. At handoff, the root worktree is at 490eff9 and UI work is ongoing. Findings and checks below apply only to the audited d50b437 snapshot; subsequent source changes have not been audited here.
 

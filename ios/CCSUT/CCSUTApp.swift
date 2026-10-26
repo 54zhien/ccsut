@@ -327,11 +327,10 @@ struct ProfileView: View {
                 .padding(.bottom, 12)
             }
             .navigationTitle("账号").navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    SheetSymbolButton(symbol: "xmark", label: "关闭账号") { dismiss() }
-                }
-                .sharedBackgroundVisibility(.hidden)
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                SheetHeader(title: "账号") { dismiss() }
+                    .background(Color(.systemGroupedBackground))
             }
         }
         .alert("退出登录", isPresented: $showLogoutAlert) {
