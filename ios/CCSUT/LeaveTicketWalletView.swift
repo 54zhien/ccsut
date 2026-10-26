@@ -133,9 +133,10 @@ struct LeaveTicketWalletView: View {
                 form = true
             } label: {
                 Label("添加请假条", systemImage: "plus")
-                    .font(.headline).padding(.horizontal, 24).frame(minHeight: 52)
+                    .font(.headline).foregroundStyle(.primary)
+                    .padding(.horizontal, 24).frame(minHeight: 52)
             }
-            .buttonStyle(.glassProminent).tint(Color(red: 0.39, green: 0.23, blue: 0.14))
+            .buttonStyle(.glass)
             .disabled(printing != nil)
             .accessibilityIdentifier("campus-record-add")
             .padding(.bottom, 12)
