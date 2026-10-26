@@ -46,3 +46,11 @@ User requested more refined shadows and stitching. Implementation commit: 150caf
 - Existing business regressions passed: run 40313022375.
 - Inspected native closed/open/light/dark screenshots: seams remain readable, paper edges remain visible, and shadows do not obscure the ticket content.
 - Physical-device visual and haptic acceptance remains separate. Branch not merged.
+
+
+## Debossed lettering and glass control follow-up (2026-10-26)
+
+- User requested recessed wallet lettering, removal of the introductory tagline, and a Liquid Glass add button.
+- Applied an inner shaded dark leather face and lower rim highlight to title/count; removed only the requested tagline; replaced the brown glassProminent button with native glass style.
+- Application commit 0623ec7: native build, 4/4 wallet UI tests, dark/reduced-motion checks passed in run 40322914378; business regressions passed in run 40322914552.
+- Inspected final light/dark screenshots: recessed title/count visible, tagline absent, native glass add control present. Branch remains unmerged.
