@@ -51,3 +51,14 @@ sessions cannot be made persistent retroactively: a new login with the updated
 app is required. Overnight physical-device acceptance remains pending. Keychain
 cookie storage, native bootstrap/CAS renewal and the previous campus SPA redirect
 fix remain unchanged.
+
+## Package delivery
+
+- Product commit: `521ee8318f832ec7564356f06eaa481dc48242d7`.
+- Compile & Package workflow `40253120988`: success on that exact commit.
+- Unsigned IPA artifact: `12621536293` (`CCSUT-ipa`).
+- IPA size: 5,821,371 bytes. ZIP CRC and arm64 Mach-O checks passed;
+  bundle `com.imzhien.ccsut`, display name 长工院, iOS minimum 26.0.
+- SHA-256: `7231f87f00bcfc65507ef44b59b17ced47ce78804c6937d94696f3218932e7ca`.
+- Build did not run tests; only the targeted local submission regression above
+  was executed. Physical-device overnight acceptance remains open.
