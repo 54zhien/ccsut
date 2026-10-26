@@ -198,11 +198,11 @@ private struct LeatherLeaveWallet: View {
                 .overlay(alignment: .bottomLeading) {
                     VStack(alignment: .leading, spacing: 7) {
                         Text("请假条").font(.title2.weight(.semibold))
+                            .modifier(LeatherDebossedText())
                         Text(count == 0 ? "等待第一张收藏" : (hasMore ? "已收纳 \(count) 张 · 还有更多" : "已收纳 \(count) 张"))
                             .font(.caption)
+                            .modifier(LeatherDebossedText())
                     }
-                    .foregroundStyle(Color(red: 0.98, green: 0.88, blue: 0.72))
-                    .shadow(color: .black.opacity(0.28), radius: 0.4, y: 1)
                     .padding(26)
                 }
                 .padding(.top, 65)
@@ -226,6 +226,18 @@ private struct LeatherLeaveWallet: View {
         .shadow(color: .black.opacity(0.18), radius: 3, x: 0, y: 3)
         .shadow(color: .black.opacity(0.17), radius: 20, x: 0, y: 16)
         .accessibilityHidden(true)
+    }
+}
+
+/// A dark recessed face, upper inner shade and a fine lit lower rim mimic
+/// blind debossing in the same hide rather than raised, printed lettering.
+private struct LeatherDebossedText: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(Color(red: 0.23, green: 0.105, blue: 0.045)
+                .shadow(.inner(color: .black.opacity(0.75), radius: 0.65, x: 0, y: 0.7)))
+            .shadow(color: Color(red: 0.86, green: 0.60, blue: 0.38).opacity(0.55),
+                    radius: 0.3, x: 0, y: 0.8)
     }
 }
 
