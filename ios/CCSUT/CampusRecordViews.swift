@@ -59,6 +59,7 @@ struct CampusRecordsView: View {
 }
 
 private struct CampusRecordContent: View {
+    @Environment(\.deviceCornerRadius) private var deviceCornerRadius
     let model: CampusRecordsModel
     let mode: CampusRecordsView.Mode
     let account: String
@@ -66,49 +67,47 @@ private struct CampusRecordContent: View {
     let reconnect: () -> Void
     @State private var officialPage: CampusWebDestination?
     @State private var nativeForm: CampusFormKind?
+    @State private var addControlSize: CGSize = .zero
     private struct ReadTask: Hashable { let model: ObjectIdentifier; let kind: CampusTravelKind }
 
     var body: some View {
-        PageScrollSurface(refresh: {
-            if mode == .leave { await model.loadLeave(reset: true) }
-            else { await model.loadTravel(kind: selected) }
-        }, refreshHaptics: true) { _, _ in
-            LazyVStack(alignment: .leading, spacing: 16) {
-                if mode == .travel {
-                    Picker("记录类型", selection: $selected) {
-                        ForEach(CampusTravelKind.allCases, id: \.self) { Text($0.title).tag($0) }
+        GeometryReader { viewport in
+            PageScrollSurface(refresh: {
+                if mode == .leave { await model.loadLeave(reset: true) }
+                else { await model.loadTravel(kind: selected) }
+            }, refreshHaptics: true) { _, _ in
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    if mode == .travel {
+                        Picker("记录类型", selection: $selected) {
+                            ForEach(CampusTravelKind.allCases, id: \.self) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityIdentifier("campus-travel-kind")
                     }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("campus-travel-kind")
+                    Text(mode == .leave ? "申请记录" : selected.title).font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary).padding(.horizontal, 4).padding(.top, 8).accessibilityAddTraits(.isHeader)
+                    if mode == .leave { leaveContent } else { travelContent }
                 }
-                Text(mode == .leave ? "申请记录" : selected.title).font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary).padding(.horizontal, 4).padding(.top, 8).accessibilityAddTraits(.isHeader)
-                if mode == .leave { leaveContent } else { travelContent }
+                .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 28)
+                .frame(maxWidth: 720).frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 28)
-            .frame(maxWidth: 720).frame(maxWidth: .infinity)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack {
-                Spacer(minLength: 0)
-                Button(action: addRecord) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 56, height: 56)
-                        .background(Color.accentColor, in: Circle())
-                        .contentShape(Circle())
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack {
+                    Spacer(minLength: 0)
+                    SheetSymbolButton(symbol: "plus", label: addRecordTitle, action: addRecord)
+                        .onGeometryChange(for: CGSize.self) { $0.size } action: { addControlSize = $0 }
+                        .accessibilityHint(addRecordHint)
+                        .accessibilityIdentifier("campus-record-add")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(addRecordTitle)
-                .accessibilityHint(addRecordHint)
-                .accessibilityIdentifier("campus-record-add")
+                // Convert the screen-edge inset into this horizontally safe viewport.
+                // The measured native circle and the physical corner share a center.
+                .padding(.trailing, SheetLayout.controlInset(deviceCornerRadius, diameter: addControlSize.width) - viewport.safeAreaInsets.trailing)
+                .padding(.bottom, SheetLayout.controlInset(deviceCornerRadius, diameter: addControlSize.height))
+                .padding(.top, 12)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .frame(maxWidth: 720)
-            .frame(maxWidth: .infinity)
         }
+        // Anchor to the physical bottom; retain SwiftUI's keyboard avoidance.
+        .ignoresSafeArea(.container, edges: .bottom)
         // A real account/session replacement must start reads even when the selected kind
         // did not change; SwiftUI may retain this content view's identity across model swaps.
         .task(id: ReadTask(model: ObjectIdentifier(model), kind: selected)) {

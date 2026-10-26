@@ -121,9 +121,30 @@ private actor ModelServer {
             check(await waitUntil { !model.isStarting }, "initialization settles without school traffic")
         }
         func confirm(_ model: EcardPaymentModel) -> EcardPaymentModel.Confirmation? {
-            model.room = "fixture-room"; model.amountText = "1"
+            model.room = "fixture-room"; model.amountText = "10"
             model.detail = MeterDetail(context: MeterContext(), show: ["房间信息": "fixture room"], dataType: nil)
             model.prepareConfirmation(); return model.confirmation
+        }
+
+        do {
+            let server = ModelServer(), journal = store("ten-yuan-minimum"), epoch = Epoch()
+            let model = make(server, journal, epoch)
+            await ready(model)
+            _ = confirm(model)
+            model.confirmation = nil
+            for invalid in ["0", "1", "9", "9.99"] {
+                model.amountText = invalid
+                model.prepareConfirmation()
+                check(!model.canPay && model.confirmation == nil && model.amountHint != nil,
+                      "sub-ten amount \(invalid) cannot reach payment confirmation")
+                model.confirmation = nil
+            }
+            model.amountText = "10"
+            model.prepareConfirmation()
+            check(model.canPay && model.confirmation?.amount == 10, "ten yuan is a valid minimum confirmation")
+            let counts = await server.counts()
+            check(counts.creations == 0 && counts.debits == 0, "minimum validation never creates an order or sends payment")
+            model.stopQueries()
         }
 
         do {

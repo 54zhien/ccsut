@@ -5,19 +5,59 @@ import Foundation
 
 @MainActor private enum CookieJar { static var generation: UInt64 = 1 }
 
+@MainActor private final class SessionFixture {
+    var refreshCount = 0
+    func refresh() async { refreshCount += 1 }
+}
+
+@MainActor private final class APIClient {
+    static let shared = APIClient()
+    var initResult: Result<ElectiveInit, Error> = .success(fixtureInit)
+    var pageResult: Result<TeachingClassPage, Error> = .success(fixturePage)
+    var initCalls = 0
+    func reset() {
+        initResult = .success(Self.fixtureInit)
+        pageResult = .success(Self.fixturePage)
+        initCalls = 0
+    }
+    func electiveInit() async throws -> ElectiveInit {
+        initCalls += 1
+        return try initResult.get()
+    }
+    func teachingClasses(batch: (String, String)?) async throws -> TeachingClassPage {
+        try pageResult.get()
+    }
+    static var fixtureInit: ElectiveInit {
+        try! JSONDecoder().decode(ElectiveInit.self, from: Data(
+            #"{"xkxnxq":"2026-2027-1","pcencs":{"live":"encrypted"}}"#.utf8))
+    }
+    static var fixturePage: TeachingClassPage {
+        try! JSONDecoder().decode(TeachingClassPage.self, from: Data(
+            #"{"initData":[{"id":"catalog-course","kcmc":"Catalog course","sfkxk":"1","yxrl":"1/10"}]}"#.utf8))
+    }
+}
+
 @MainActor private final class ElectiveLoadHarness {
     let enrolledModel: EnrolledCoursesModel
     var electiveState = ElectiveState<TeachingClass>()
     var activeLoadRequests = 0
     var isLoading = false
     let loadGate = PageLoadGate()
-    var fetchCount = 0
+    var fetchCount: Int { APIClient.shared.initCalls }
+    var initData: ElectiveInit?
+    var pending: String?
+    var detail: TeachingClass?
+    var errorText: String?
+    let session = SessionFixture()
     init(_ model: EnrolledCoursesModel) { enrolledModel = model }
     func handleCookieGenerationChange(expected: UInt64) -> Bool { expected != CookieJar.generation }
-    func hasVerifiedSnapshot(for generation: UInt64) -> Bool { generation == CookieJar.generation }
-    func fetch(force: Bool, refreshAuthentication: Bool, expectedGeneration: UInt64?) async { fetchCount += 1 }
+    func hasVerifiedSnapshot(for generation: UInt64) -> Bool {
+        electiveState.isSnapshotVerified && electiveState.snapshotGeneration == generation
+    }
 
     // PRODUCTION_ELECTIVE_LOAD
+    // PRODUCTION_ELECTIVE_FETCH
+    // PRODUCTION_ELECTIVE_RECORDS
 }
 
 private actor ReadLatch {
@@ -37,7 +77,7 @@ private actor ReadLatch {
 }
 
 @main private struct ElectiveLoadTests {
-    @MainActor static func main() async {
+    @MainActor static func main() async throws {
         var failures = 0
         func check(_ value: Bool, _ name: String) {
             print("\(value ? "PASS" : "FAIL") \(name)")
@@ -68,6 +108,64 @@ private actor ReadLatch {
         await harness.load(force: true)
         check(reads == 2 && harness.fetchCount == 2 && model.isVerified && model.currentSummary?.count == 0,
               "a later refresh owns a new read and publishes verified results")
+
+        let current = "2026-2027-1", past = "2025-2026-2"
+        func selectedModel() -> EnrolledCoursesModel {
+            EnrolledCoursesModel(generation: { CookieJar.generation }, contextLoader: { _ in
+                EnrolledCoursesContext(terms: [current, past], defaultTerm: current)
+            }, coursesLoader: { term, _ in
+                [try JSONDecoder().decode(EnrolledCourse.self, from: JSONSerialization.data(withJSONObject:
+                    ["id":"selected-\(term)","xnxq":term,"kcmc":"Closed-channel elective",
+                     "xkfs":"选课","xf":"1","xdfs":"1"]))]
+            })
+        }
+        for failsAtInit in [true, false] {
+            APIClient.shared.reset()
+            let closedModel = selectedModel()
+            let closed = ElectiveLoadHarness(closedModel)
+            await closed.load()
+            if failsAtInit {
+                APIClient.shared.initResult = .failure(APIError.business(-1, "没有可选的教学班"))
+            } else {
+                APIClient.shared.pageResult = .failure(APIError.business(-1, "没有可选的教学班"))
+            }
+            await closed.load(force: true)
+            check(closed.errorText == nil && closed.electiveState.isChannelClosed
+                  && closed.electiveState.snapshot == nil
+                  && !closed.electiveState.isSnapshotVerified,
+                  "known channel closure at \(failsAtInit ? "initialization" : "catalog") clears stale catalog without a retry error")
+            check(closedModel.snapshot?.map(\.id) == ["selected-2026-2027-1"]
+                  && closedModel.isVerified && closedModel.currentSummary?.count == 1,
+                  "closed catalog still publishes independently verified selected results")
+            await closedModel.load(term: past)
+            check(closedModel.snapshot?.map(\.id) == ["selected-2025-2026-2"] && closedModel.isVerified,
+                  "closed catalog does not prevent historical selected-term reads")
+            APIClient.shared.reset()
+            await closed.load(force: true)
+            check(closed.errorText == nil && !closed.electiveState.isChannelClosed
+                  && closed.electiveState.isSnapshotVerified && closed.electiveState.snapshot?.courses.count == 1,
+                  "a later successful catalog read replaces closure with a verified actionable snapshot")
+        }
+
+        for error: Error in [APIError.business(-2, "没有可选的教学班"),
+                             APIError.business(-1, "没有可选的教学班，请稍后重试"),
+                             APIError.http(503), URLError(.notConnectedToInternet)] {
+            APIClient.shared.reset()
+            let failed = ElectiveLoadHarness(selectedModel())
+            await failed.load()
+            APIClient.shared.pageResult = .failure(error)
+            await failed.load(force: true)
+            check(failed.errorText != nil && !failed.electiveState.isChannelClosed
+                  && failed.electiveState.snapshot?.courses.count == 1
+                  && !failed.electiveState.isSnapshotVerified,
+                  "unverified closure/business/transport failure preserves retry feedback and disables stale catalog actions: \(error)")
+        }
+        APIClient.shared.reset()
+        let expired = ElectiveLoadHarness(selectedModel())
+        APIClient.shared.initResult = .failure(APIError.notLoggedIn)
+        await expired.load()
+        check(expired.errorText != nil && expired.session.refreshCount == 1,
+              "authentication failure retains its renewal and retry feedback")
         print("\(failures) failure(s)")
         exit(failures == 0 ? 0 : 1)
     }

@@ -111,15 +111,13 @@ struct ScoreView: View {
                 }
             }
         } label: {
-            Image(systemName: selectedTerm == nil
-                  ? "line.3.horizontal.decrease.circle"
-                  : "line.3.horizontal.decrease.circle.fill")
-                .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(selectedTerm == nil ? Color.secondary : Color.accentColor)
-                .frame(width: 44, height: 44)
-                .background(selectedTerm == nil ? Color.clear : Color.accentColor.opacity(0.1), in: .circle)
-                .contentShape(.circle)
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 28, height: 28)
         }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
         .accessibilityLabel("学期筛选")
         .accessibilityValue(selectedTerm.map(SchedulePresentation.termTitle) ?? "全部学期")
         .accessibilityHint("选择学期后筛选并跳转到对应内容")

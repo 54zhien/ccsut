@@ -100,10 +100,11 @@ struct EcardPaymentView: View {
         .onChange(of: model.recoveryIssue) { _, issue in
             if issue == nil { showingRecoveryHelp = false }
         }
-        .onChange(of: amountMaximum) { _, limit in
-            if !model.amountText.isEmpty {
-                model.amountText = String(MeterAmount.clamp(amountValue, maximum: limit))
-            }
+        .onChange(of: amountMaximum, initial: true) { _, _ in
+            normalizeDisplayedAmount()
+        }
+        .onChange(of: model.receipt?.orderID) { _, orderID in
+            if orderID == nil { normalizeDisplayedAmount() }
         }
         .task {
             #if DEBUG
@@ -279,28 +280,45 @@ struct EcardPaymentView: View {
 
     private var amountSelection: some View {
         CampusSection("缴费金额") {
+            VStack(spacing: 10) {
                 HStack(spacing: 6) {
-                    Text("¥").font(.system(size: 22, weight: .semibold)).foregroundStyle(.white.opacity(0.7))
+                    Image(systemName: "bolt.fill").font(.caption2)
+                    Text("充值金额").font(.caption.weight(.medium))
+                    Spacer(minLength: 0)
+                    Text("人民币 · 元").font(.caption2)
+                }
+                .foregroundStyle(.white.opacity(0.58))
+                .padding(.horizontal, 4)
+                HStack(spacing: 6) {
+                    Text("¥").font(.title3.weight(.medium)).foregroundStyle(.white.opacity(0.7))
                         .padding(.trailing, 4).accessibilityHidden(true)
                     amountDrum(place: 100, label: "百位")
                     amountDrum(place: 10, label: "十位")
                     amountDrum(place: 1, label: "个位")
-                    Text("元").font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.7))
-                        .padding(.leading, 4).accessibilityHidden(true)
                 }
-                .padding(12)
-                .background(Color(white: 0.10), in: .rect(cornerRadius: 24))
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(.black.opacity(0.55), in: .rect(cornerRadius: 16))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
                         .allowsHitTesting(false)
                 }
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("缴费金额，\(amountValue)元，上下滑动数字调整")
-                Text("上下滑动调整 · 最高 \(amountMaximum) 元")
-                    .font(.footnote).foregroundStyle(.secondary)
-                if let hint = model.amountHint {
-                    Text(hint).font(.footnote).foregroundStyle(.red)
-                }
+            }
+            .padding(14)
+            .background {
+                RoundedRectangle(cornerRadius: 24)
+                    .fill(LinearGradient(colors: [Color(white: 0.19), Color(white: 0.09)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 24)
+                            .strokeBorder(LinearGradient(colors: [.white.opacity(0.3), .white.opacity(0.04)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+                    }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("缴费金额，\(amountValue)元，上下滑动数字调整")
+            Text(amountMaximum > 0 ? "上下滑动调整 · \(MeterAmount.minimum)–\(amountMaximum) 元" : "正在获取可充值金额范围")
+                .font(.footnote).foregroundStyle(.secondary)
+            if let hint = model.amountHint {
+                Text(hint).font(.footnote).foregroundStyle(.red)
+            }
         }
     }
     private var amountMaximum: Int {
@@ -310,7 +328,11 @@ struct EcardPaymentView: View {
         MeterAmount.clamp(model.amount.map { NSDecimalNumber(decimal: $0).intValue } ?? 0, maximum: amountMaximum)
     }
     private var canPayDisplayedAmount: Bool {
-        model.canPay && amountValue > 0 && model.amount == Decimal(amountValue)
+        model.canPay && amountValue >= MeterAmount.minimum && model.amount == Decimal(amountValue)
+    }
+    private func normalizeDisplayedAmount() {
+        guard amountMaximum >= MeterAmount.minimum, model.receipt == nil, !model.isSubmitting else { return }
+        model.amountText = String(MeterAmount.clamp(amountValue, maximum: amountMaximum))
     }
     private func amountDrum(place: Int, label: String) -> some View {
         Picker(label, selection: Binding(
@@ -321,17 +343,17 @@ struct EcardPaymentView: View {
             }
         )) {
             ForEach(MeterAmount.digits(amount: amountValue, place: place, maximum: amountMaximum), id: \.self) { digit in
-                Text(String(digit)).font(.system(size: textSize.isAccessibilitySize ? 38 : 32, weight: .semibold, design: .monospaced))
+                Text(String(digit)).font(.system(size: textSize.isAccessibilitySize ? 40 : 34, weight: .medium, design: .monospaced))
                     .tag(digit)
             }
         }
         .pickerStyle(.wheel).labelsHidden()
         .frame(minWidth: 44, maxWidth: .infinity).frame(height: textSize.isAccessibilitySize ? 160 : 132)
         .clipped().environment(\.colorScheme, .dark)
-        .background(.white.opacity(0.04), in: .rect(cornerRadius: 12))
+        .background(LinearGradient(colors: [.black.opacity(0.65), Color(white: 0.13), .black.opacity(0.65)], startPoint: .top, endPoint: .bottom), in: .rect(cornerRadius: 10))
         .overlay {
             LinearGradient(colors: [.black.opacity(0.65), .clear, .black.opacity(0.65)], startPoint: .top, endPoint: .bottom)
-                .clipShape(.rect(cornerRadius: 12)).allowsHitTesting(false)
+                .clipShape(.rect(cornerRadius: 10)).allowsHitTesting(false)
         }
         .disabled(amountMaximum == 0 || model.isSubmitting)
         .accessibilityLabel("金额\(label)")

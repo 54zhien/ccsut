@@ -48,15 +48,8 @@ struct ElectiveView: View {
 
     var body: some View {
         PageScrollSurface(refresh: { await load(force: true) }, refreshHaptics: true) { viewport, _ in
-            VStack(spacing: 0) {
-                if isLoading && classes.isEmpty && enrolledModel.context == nil {
-                    ProgressView("拉取教学班…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    list
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: classes.isEmpty ? viewport.height : 0)
+            list
+                .frame(maxWidth: .infinity, minHeight: viewport.height, alignment: .top)
         }
         .scrollDismissesKeyboard(.immediately)
         .academicDetailChrome(title: "选课")
@@ -108,29 +101,45 @@ struct ElectiveView: View {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .frame(width: 44, height: 44)
                 .accessibilityLabel("清除搜索")
             }
         }
-        .padding(12)
-        .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 18))
+        .padding(.leading, 16)
+        .padding(.trailing, keyword.isEmpty ? 16 : 4)
+        .frame(minHeight: 52)
+        .glassEffect(.regular.interactive(), in: .capsule)
     }
 
     private var list: some View {
         LazyVStack(spacing: 16) {
-            VStack(spacing: 14) {
-                searchField
-                filterBar
-                if selectedFilter == .selected { enrolledHeader }
-                else if let initData { header(initData) }
+            GlassEffectContainer(spacing: 8) {
+                VStack(spacing: 14) {
+                    searchField
+                    filterBar
+                    if selectedFilter == .selected { enrolledHeader }
+                    else if let initData { header(initData) }
+                }
             }
-            .padding(16)
-            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+            .accessibilityIdentifier("elective-controls")
 
             if let errorText {
                 PageStatusNotice(message:errorText) { Task { await load(force:true) } }
             }
             if selectedFilter == .selected {
-                enrolledList
+                if isLoading && enrolledModel.context == nil {
+                    ProgressView("读取完整已选结果…")
+                        .frame(maxWidth: .infinity, minHeight: 160)
+                } else {
+                    enrolledList
+                }
+            } else if isLoading && classes.isEmpty {
+                ProgressView("拉取教学班…")
+                    .frame(maxWidth: .infinity, minHeight: 160)
+            } else if electiveState.isChannelClosed {
+                ContentUnavailableView("选课通道暂未开启", systemImage: "calendar.badge.clock",
+                    description: Text("可前往“已选”查看当前或历史选课记录。"))
+                    .accessibilityIdentifier("elective-channel-closed")
             } else {
                 ForEach(filtered) { item in catalogCard(item) }
                 if classes.isEmpty {
@@ -219,10 +228,8 @@ struct ElectiveView: View {
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "calendar")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
-                            .frame(width: 32, height: 32)
-                            .background(Color.accentColor.opacity(0.1), in: .circle)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("已选课程学期")
                                 .font(.caption)
@@ -230,23 +237,18 @@ struct ElectiveView: View {
                             Text(SchedulePresentation.termTitle(selectedTerm))
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.primary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.85)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 4)
                         Image(systemName: "chevron.down")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 6)
                     .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-                    .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 18))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18)
-                            .strokeBorder(Color.accentColor.opacity(0.2), lineWidth: 1)
-                    }
-                    .contentShape(.rect(cornerRadius: 18))
                 }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.roundedRectangle(radius: 20))
                 .accessibilityIdentifier("enrolled-term-menu")
                 .accessibilityLabel("已选课程学期")
                 .accessibilityValue(SchedulePresentation.termTitle(selectedTerm))
@@ -501,37 +503,38 @@ struct ElectiveView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(Filter.allCases) { f in
-                    let on = f == selectedFilter
-                    Button {
-                        withAnimation(.snappy(duration: 0.18)) { selectedFilter = f }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(f.rawValue)
-                                .font(.caption.weight(.medium))
-                            if f == .selected, selectedCount > 0 {
-                                Text("\(selectedCount)")
-                                    .font(.caption2.weight(.bold).monospacedDigit())
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background((on ? Color("AccentForeground") : Color.accentColor)
-                                        .opacity(0.15), in: .capsule)
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(
-                            on ? AnyShapeStyle(Color.accentColor)
-                               : AnyShapeStyle(Color(.secondarySystemGroupedBackground)),
-                            in: .capsule
-                        )
-                        .foregroundStyle(on ? Color("AccentForeground") : Color.primary)
-                    }
-                    .buttonStyle(.plain)
+                    filterButton(f)
                 }
             }
             .padding(.horizontal, 2)
         }
         .padding(.top, 2)
+    }
+
+    @ViewBuilder private func filterButton(_ filter: Filter) -> some View {
+        let selected = filter == selectedFilter
+        let button = Button {
+            withAnimation(.snappy(duration: 0.18)) { selectedFilter = filter }
+        } label: {
+            HStack(spacing: 6) {
+                Text(filter.rawValue)
+                    .font(.subheadline.weight(.medium))
+                if filter == .selected, selectedCount > 0 {
+                    Text("\(selectedCount)")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 4)
+            .frame(minHeight: 32)
+        }
+        .buttonBorderShape(.capsule)
+        .accessibilityLabel(filter.rawValue)
+        .accessibilityValue(filter == .selected ? "\(selectedCount) 门" : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+
+        if selected { button.buttonStyle(.glassProminent) }
+        else { button.buttonStyle(.glass) }
     }
 
     // MARK: 筛选
@@ -598,6 +601,13 @@ struct ElectiveView: View {
                 try? await Task.sleep(for: InterfacePreview.refreshFixtureDelay)
             }
             guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
+            if ProcessInfo.processInfo.arguments.contains("--preview-closed-catalog") {
+                electiveState.publishClosedChannel(generation: generation)
+                initData = nil
+                errorText = nil
+                previewPublicationCount += 1
+                return
+            }
             if InterfacePreview.catalogReadFailureOnce && !previewCatalogFailureInjected {
                 previewCatalogFailureInjected = true
                 errorText = "教学班读取失败，请重试核实操作条件"
@@ -677,6 +687,15 @@ struct ElectiveView: View {
                 electiveState.refreshFailed()
                 return
             }
+            if case .business(let code, let message) = e,
+               ElectiveCatalogResponse.isChannelClosed(code: code, message: message) {
+                electiveState.publishClosedChannel(generation: generation)
+                self.initData = nil
+                pending = nil
+                detail = nil
+                errorText = nil
+                return
+            }
             if case .notLoggedIn = e {
                 if refreshAuthentication {
                     await session.refresh()
@@ -725,6 +744,8 @@ struct PendingAction: Identifiable {
 }
 
 struct ClassCard: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let item: TeachingClass
     var onAction: (() -> Void)? = nil
     var isWorking: Bool = false
@@ -732,37 +753,23 @@ struct ClassCard: View {
     var actionBlockReason: String? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(alignment: .top, spacing: 10) {
-                Text(item.kcmc ?? "—")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.primary)
+        VStack(alignment: .leading, spacing: 14) {
+            if dynamicTypeSize.isAccessibilitySize {
+                courseTitle
+                creditBadge
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    courseTitle
+                    Spacer(minLength: 4)
+                    creditBadge
+                }
+            }
+
+            if let teacher = item.teacher, !teacher.isEmpty {
+                Label(teacher, systemImage: "person")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-
-                Spacer(minLength: 4)
-                Text("\(item.xf ?? "—") 学分")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(Color.accentColor.opacity(0.1), in: .capsule)
-            }
-
-            if (item.teacher?.isEmpty == false) || item.isSelected {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if let teacher = item.teacher, !teacher.isEmpty {
-                    Label(teacher, systemImage: "person.fill")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                }
-                Spacer(minLength: 8)
-                if item.isSelected {
-                    Label("已选", systemImage: "checkmark.circle.fill")
-                            .font(.caption.weight(.medium))
-                        .foregroundStyle(.green)
-                }
-            }
             }
 
             if let place = item.sksjdd, !place.isEmpty {
@@ -770,53 +777,28 @@ struct ClassCard: View {
                     Text(place)
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
-                    Image(systemName: "clock.fill")
+                    Image(systemName: "clock")
                 }
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
             }
 
             Divider()
 
-            HStack(spacing: 10) {
+            if dynamicTypeSize.isAccessibilitySize {
                 CapacityBar(item: item)
-
-                if item.isFull && !item.isSelected {
-                    Text("已满")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.orange)
-                } else if item.canSelect && !item.isSelected {
-                    Text("可选")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.green)
+                HStack(spacing: 12) {
+                    courseStatus
+                    Spacer(minLength: 8)
+                    actionButton
                 }
-
-                Spacer(minLength: 4)
-
-                if let onAction {
-                    Button(action: onAction) {
-                        HStack(spacing: 4) {
-                            if isWorking {
-                                ProgressView().controlSize(.mini)
-                            }
-                            Text(item.isSelected ? "退课" : "选课")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(
-                            item.isSelected ? Color.red.opacity(0.12) : Color.accentColor.opacity(0.14),
-                            in: .capsule
-                        )
-                        .foregroundStyle(item.isSelected ? Color.red : Color.accentColor)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isWorking || !canPerformAction)
-                    .opacity(canPerformAction || isWorking ? 1 : 0.45)
-                    .accessibilityHint(Text(actionBlockReason ?? (item.isSelected ? "点按后确认退课" : "点按后确认选课")))
+            } else {
+                HStack(spacing: 12) {
+                    CapacityBar(item: item)
+                    courseStatus
+                    actionButton
                 }
             }
-            .padding(.top, 1)
 
             if let actionBlockReason {
                 Label(actionBlockReason, systemImage: "info.circle")
@@ -825,9 +807,63 @@ struct ClassCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(16)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
+    }
+
+    private var courseTitle: some View {
+        Text(item.kcmc ?? "—")
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var creditBadge: some View {
+        Text("\(item.xf ?? "—") 学分")
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(.secondary)
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(.tertiarySystemFill), in: .capsule)
+    }
+
+    @ViewBuilder private var courseStatus: some View {
+        Group {
+            if item.isSelected {
+                Label("已选", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            } else if item.isFull {
+                Text("已满").foregroundStyle(.orange)
+            } else if item.canSelect {
+                Text("可选").foregroundStyle(.green)
+            }
+        }
+        .font(.caption.weight(.medium))
+        .fixedSize()
+    }
+
+    @ViewBuilder private var actionButton: some View {
+        if let onAction {
+            Button(action: onAction) {
+                HStack(spacing: 6) {
+                    if isWorking {
+                        ProgressView().controlSize(.mini)
+                    }
+                    Text(item.isSelected ? "退课" : "选课")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .fixedSize()
+                .padding(.horizontal, 4)
+                .frame(minHeight: 32)
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.capsule)
+            .tint(item.isSelected ? Color.red : Color.accentColor)
+            .disabled(isWorking || !canPerformAction)
+            .accessibilityHint(Text(actionBlockReason ?? (item.isSelected ? "点按后确认退课" : "点按后确认选课")))
+        }
     }
 }
 
@@ -844,7 +880,7 @@ struct CapacityBar: View {
             .frame(height: 8)
 
             Text(capacitySummary)
-                .font(.caption2.monospacedDigit())
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -873,7 +909,7 @@ struct CapacityBar: View {
                         .frame(width: availableWidth * ratio)
                 }
                 if gap > 0 {
-                    Rectangle().fill(Color.white).frame(width: gap)
+                    Color.clear.frame(width: gap)
                 }
                 if ratio < 1 {
                     Capsule()

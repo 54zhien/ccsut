@@ -46,6 +46,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.appearance_source_ref || github.ref }}
+      - name: Verify scoped amount and elective boundaries
+        if: ${{ inputs.test_scope == 'appearance-screens' && inputs.detail_checks }}
+        run: |
+          set -euo pipefail
+          xcrun swiftc -parse-as-library ios/CCSUT/MeterAmount.swift ios/Tests/MeterAmountTests.swift -o "$RUNNER_TEMP/meter-tests"
+          "$RUNNER_TEMP/meter-tests"
+          python3 ios/Tests/run-elective-load-tests.py
+          SOURCES=(ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift
+            ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift
+            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift
+            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift
+            ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift
+            ios/CCSUT/EcardPaymentPersistence.swift ios/CCSUT/EcardPaymentModel.swift)
+          xcrun swiftc -parse-as-library "${SOURCES[@]}" ios/Tests/EcardPaymentModelTests.swift -o "$RUNNER_TEMP/payment-model-tests"
+          "$RUNNER_TEMP/payment-model-tests"
       - name: Test timetable presentation
         if: ${{ inputs.test_scope != 'appearance-screens' }}
         run: |
@@ -152,6 +167,12 @@ jobs:
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection \
             -only-testing:CCSUTUITests/PageInteractionUITests/testSemesterMenusReachHistoricalContent \
             -only-testing:CCSUTUITests/PageInteractionUITests/testDetailTabsHideAndReturnWithHome \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeLeaveForm \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeDepartureForm \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeFormLargeText \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusFormKeyboardKeepsEditorVisible \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testClosedElectiveChannelPreservesControlsAndEnrolledResults \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
       - name: Export interaction screenshots
         if: always()
@@ -203,6 +224,15 @@ jobs:
             fi
             if [ "$PAGE" = 'campus-electricity-large' ]; then
               LAUNCH_ARGS=(--preview-ui --preview-page campus-electricity -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
+            fi
+            if [ "$PAGE" = 'electives-closed' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page electives --preview-closed-catalog --preview-complete-selected)
+            fi
+            if [ "$PAGE" = 'electives-selected-closed' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page electives --preview-closed-catalog --preview-complete-selected --preview-selected-tab)
+            fi
+            if [ "$PAGE" = 'electives-closed-large' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page electives --preview-closed-catalog --preview-complete-selected -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
             fi
             xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
             xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut "${LAUNCH_ARGS[@]}"

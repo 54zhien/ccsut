@@ -1,8 +1,8 @@
 """Exercise ElectiveView's actual load orchestration without a SwiftUI runtime.
 
-The production load method and PageLoadGate are extracted on every run. Only the
-catalog network boundary and account generation are replaced; enrolled results
-use the real model. Keep this runner when changing either production method.
+The production load/fetch methods and PageLoadGate are extracted on every run.
+Only the catalog network boundary and account generation are replaced; enrolled
+results use the real model. Keep this runner when changing the production methods.
 """
 import pathlib
 import subprocess
@@ -39,6 +39,12 @@ with tempfile.TemporaryDirectory(prefix="ccsut-elective-load-tests-") as directo
     harness = (root / "ios/Tests/ElectiveLoadTests.swift").read_text(encoding="utf-8-sig")
     harness = harness.replace("// PRODUCTION_PAGE_LOAD_GATE", "@MainActor\n" + gate)
     harness = harness.replace("// PRODUCTION_ELECTIVE_LOAD", load)
+    for marker, placeholder in [
+        ("private func fetch(force:", "// PRODUCTION_ELECTIVE_FETCH"),
+        ("private func records(for", "// PRODUCTION_ELECTIVE_RECORDS"),
+    ]:
+        method = declaration(root / "ios/CCSUT/ElectiveView.swift", marker)
+        harness = harness.replace(placeholder, method.replace("private func", "func", 1))
     generated = scratch / "ElectiveLoadTests.swift"
     generated.write_text(harness, encoding="utf-8")
     sources = [root / "ios/CCSUT" / name for name in

@@ -17,7 +17,13 @@ import Foundation
         check(MeterAmount.replacing(amount: 400, place: 100, digit: 3, maximum: 400) == 300, "moving below 400 restores lower digit choices")
         check(MeterAmount.digits(amount: 270, place: 1, maximum: 275) == Array(0...5), "configured cap restricts last digit")
         check(MeterAmount.clamp(399, maximum: 150) == 150, "configuration change clamps existing selection")
-        check(MeterAmount.clamp(0, maximum: 400) == 0, "zero remains visible; existing model prohibits zero payment")
-        print("PASS: 13 meter amount boundary checks")
+        check(MeterAmount.clamp(0, maximum: 400) == 10, "configured picker starts at the ten-yuan minimum")
+        check(MeterAmount.clamp(9, maximum: 400) == 10, "amounts below ten clamp to ten")
+        check(MeterAmount.maximum(perPayment: 9.99, perDay: 400) == 0, "cap below ten disables recharge")
+        check(MeterAmount.clamp(10, maximum: 9) == 0, "unavailable range never invents an allowed amount")
+        check(MeterAmount.digits(amount: 10, place: 10, maximum: 400) == Array(1...9), "zero tens cannot produce a sub-minimum amount")
+        check(MeterAmount.digits(amount: 10, place: 1, maximum: 15) == Array(0...5), "narrow valid range retains exactly ten through fifteen")
+        check(MeterAmount.replacing(amount: 10, place: 10, digit: 0, maximum: 400) == 10, "programmatic invalid digit cannot bypass the minimum")
+        print("PASS: 19 meter amount boundary checks")
     }
 }

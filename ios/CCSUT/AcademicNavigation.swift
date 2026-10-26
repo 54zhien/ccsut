@@ -17,11 +17,66 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
             let wasEnabled: Bool
         }
         private var saved: [SavedGesture] = []
+        private var tabTransitionID = UUID()
+        private var tabTransitionCoordinator: (any UIViewControllerTransitionCoordinator)?
 
         override func loadView() {
             view = UIView()
             view.backgroundColor = .clear
             view.isUserInteractionEnabled = false
+        }
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            guard let nav = navigationController, nav.viewControllers.count > 1 else { return }
+            transitionTabBar(hidden: true, animated: animated, navigation: nav)
+        }
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            guard let nav = navigationController,
+                  let coordinator = nav.transitionCoordinator,
+                  coordinator.viewController(forKey: .to) === nav.viewControllers.first else { return }
+            transitionTabBar(hidden: false, animated: animated, navigation: nav)
+        }
+
+        /// UIKit owns the actual tab bar's slide and safe-area transition; the
+        /// accompanying opacity follows the same navigation coordinator. Never
+        /// replace the system tab bar or reach into its private subviews.
+        private func transitionTabBar(hidden: Bool, animated: Bool, navigation: UINavigationController) {
+            // Cancelling an interactive pop calls viewWillAppear again on the
+            // detail. Let the original coordinator restore its captured state.
+            if let active = tabTransitionCoordinator, let current = navigation.transitionCoordinator,
+               active === current { return }
+            guard let tabs = navigation.tabBarController, tabs.isTabBarHidden != hidden else { return }
+            let id = UUID()
+            tabTransitionID = id
+            let bar = tabs.tabBar
+            let shouldAnimate = animated && !UIAccessibility.isReduceMotionEnabled
+            let previousHidden = tabs.isTabBarHidden
+            guard shouldAnimate else {
+                tabs.setTabBarHidden(hidden, animated: false)
+                bar.alpha = 1
+                return
+            }
+            // A showing bar starts transparent before UIKit puts it on screen.
+            bar.alpha = hidden ? 1 : 0
+            tabs.setTabBarHidden(hidden, animated: true)
+            let finish: (Bool) -> Void = { [weak self, weak tabs] cancelled in
+                guard let self, self.tabTransitionID == id, let tabs else { return }
+                self.tabTransitionCoordinator = nil
+                tabs.setTabBarHidden(cancelled ? previousHidden : hidden, animated: false)
+                tabs.tabBar.alpha = 1
+            }
+            if let coordinator = navigation.transitionCoordinator {
+                tabTransitionCoordinator = coordinator
+                let queued = coordinator.animateAlongsideTransition(in: bar, animation: { _ in
+                    bar.alpha = hidden ? 0 : 1
+                }, completion: { context in finish(context.isCancelled) })
+                if !queued { bar.alpha = hidden ? 0 : 1 }
+            } else {
+                UIView.animate(withDuration: 0.3, delay: 0, options: [.beginFromCurrentState, .curveEaseInOut]) {
+                    bar.alpha = hidden ? 0 : 1
+                } completion: { _ in finish(false) }
+            }
         }
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)

@@ -85,6 +85,29 @@ final class PageInteractionUITests: XCTestCase {
         capture(app,"complete-selected-closed-batch")
     }
 
+    func testClosedElectiveChannelPreservesControlsAndEnrolledResults() {
+        let app = launch("electives", arguments: ["--preview-closed-catalog", "--preview-complete-selected"])
+        let closed = app.staticTexts["选课通道暂未开启"]
+        XCTAssertTrue(closed.waitForExistence(timeout: 8))
+        let search = app.textFields["课程名 / 教师"]
+        XCTAssertTrue(search.isHittable)
+        let anchoredY = search.frame.minY
+        XCTAssertLessThan(anchoredY, app.frame.height * 0.3, "Closed state controls stay at the top")
+        for title in ["全部", "可选", "有余量"] {
+            app.buttons[title].tap()
+            XCTAssertTrue(closed.exists)
+            XCTAssertEqual(search.frame.minY, anchoredY, accuracy: 2)
+            XCTAssertFalse(app.staticTexts["加载失败，请重试"].exists)
+            XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "接口返回错误")).firstMatch.exists)
+        }
+        capture(app, "electives-closed-channel")
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "已选")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["示例线下已选课"].waitForExistence(timeout: 5))
+        XCTAssertFalse(closed.exists)
+        XCTAssertEqual(search.frame.minY, anchoredY, accuracy: 2)
+        capture(app, "electives-closed-enrolled-results")
+    }
+
     func testSelectedHistoryIsReadOnlyWithEmptyCatalog() {
         let app = launch("electives", arguments:["--preview-complete-selected","--preview-empty-catalog"])
         let selected = app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch
@@ -330,6 +353,12 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertEqual(hundreds.value as? String, "3")
         XCTAssertEqual(tens.value as? String, "9")
         XCTAssertEqual(ones.value as? String, "9")
+        hundreds.adjust(toPickerWheelValue: "0")
+        tens.adjust(toPickerWheelValue: "1")
+        ones.adjust(toPickerWheelValue: "0")
+        XCTAssertEqual(hundreds.value as? String, "0")
+        XCTAssertEqual(tens.value as? String, "1")
+        XCTAssertEqual(ones.value as? String, "0")
         XCTAssertFalse(app.buttons["立即缴费"].isEnabled, "Synthetic previews must never enable a real payment")
         capture(app, "campus-electricity-amount")
     }
@@ -342,10 +371,21 @@ final class PageInteractionUITests: XCTestCase {
         scores.tap()
         let back = app.buttons["返回"]
         XCTAssertTrue(back.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.tabBars.firstMatch.isHittable)
+        let hiddenTabs = NSPredicate { _, _ in !app.tabBars.firstMatch.isHittable }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: hiddenTabs, evaluatedWith: app)], timeout: 5), .completed)
         back.tap()
         XCTAssertTrue(scores.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.tabBars.firstMatch.exists)
+        let visibleTabs = NSPredicate { _, _ in app.tabBars.firstMatch.isHittable }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: visibleTabs, evaluatedWith: app)], timeout: 5), .completed)
+        app.tabBars.buttons["校园"].tap()
+        let leave = app.buttons["campus-leave"]
+        XCTAssertTrue(leave.waitForExistence(timeout: 5))
+        leave.tap()
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: hiddenTabs, evaluatedWith: app)], timeout: 5), .completed)
+        back.tap()
+        XCTAssertTrue(leave.waitForExistence(timeout: 5))
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: visibleTabs, evaluatedWith: app)], timeout: 5), .completed)
     }
 
     func testPaymentRecoveryEntry() {
@@ -647,6 +687,7 @@ final class PageInteractionUITests: XCTestCase {
             XCTAssertGreaterThan(sampleCount, 3, "Must measure actual in-flight interactive frames")
             XCTAssertLessThanOrEqual(drift, 2, "Title must travel with the detail page during a cancelled swipe")
             XCTAssertTrue(back.isHittable)
+            XCTAssertFalse(app.tabBars.firstMatch.isHittable, "Cancelled pop keeps the detail tab bar hidden")
             XCTAssertEqual(back.frame.midX, before.midX, accuracy: 2)
             app.terminate()
         }

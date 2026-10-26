@@ -90,11 +90,19 @@ enum ElectiveMutationRecovery {
     }
 }
 
+enum ElectiveCatalogResponse {
+    /// Only the observed server contract denotes closure; similar business errors remain errors.
+    static func isChannelClosed(code: Int, message: String) -> Bool {
+        code == -1 && message.trimmingCharacters(in: .whitespacesAndNewlines) == "没有可选的教学班"
+    }
+}
+
 struct ElectiveState<Value> {
     private(set) var snapshot: ElectiveSnapshot<Value>?
     private(set) var snapshotGeneration: UInt64?
     private(set) var isSnapshotVerified = false
     private(set) var isActionInProgress = false
+    private(set) var isChannelClosed = false
 
     /// A refresh retains same-account content, but an account switch must drop it.
     @discardableResult
@@ -105,17 +113,27 @@ struct ElectiveState<Value> {
             snapshotGeneration = nil
         }
         isSnapshotVerified = false
+        isChannelClosed = false
         return discardedPreviousAccount
     }
 
     mutating func refreshFailed() {
         isSnapshotVerified = false
+        isChannelClosed = false
+    }
+
+    mutating func publishClosedChannel(generation: UInt64) {
+        snapshot = nil
+        snapshotGeneration = generation
+        isSnapshotVerified = false
+        isChannelClosed = true
     }
 
     mutating func publish(_ snapshot: ElectiveSnapshot<Value>, generation: UInt64) {
         self.snapshot = snapshot
         snapshotGeneration = generation
         isSnapshotVerified = true
+        isChannelClosed = false
     }
 
     /// Returns true when the request crossed a cookie-generation boundary.
@@ -127,6 +145,7 @@ struct ElectiveState<Value> {
             snapshot = nil
             snapshotGeneration = nil
             isSnapshotVerified = false
+            isChannelClosed = false
         }
         return true
     }

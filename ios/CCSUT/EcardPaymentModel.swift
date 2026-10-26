@@ -104,7 +104,7 @@ final class EcardPaymentModel {
     var amountHint: String? {
         guard !amountText.isEmpty else { return nil }
         guard let amount else { return "请输入金额，最多保留两位小数" }
-        guard amount > 0 else { return "缴费金额需大于 0" }
+        guard amount >= 10 else { return "最低充值金额为 10 元" }
         guard let maximum = fee?.maxAmount, maximum > 0 else { return "暂未获取到缴费限额，请重新加载" }
         if amount > maximum { return "单笔最多缴费 \(maximum.ecardAmountText) 元" }
         return nil
@@ -114,7 +114,7 @@ final class EcardPaymentModel {
         loadingText == nil && !isStarting && !isSubmitting && !isChecking && receipt == nil &&
         recoveryError == nil && boundGeneration == currentGeneration()
     }
-    var quickAmounts: [Decimal] { fee?.quickAmounts.filter { $0 > 0 && $0 <= (fee?.maxAmount ?? 0) } ?? [] }
+    var quickAmounts: [Decimal] { fee?.quickAmounts.filter { $0 >= 10 && $0 <= (fee?.maxAmount ?? 0) } ?? [] }
 
     func start(account: String?, force: Bool = false) {
         guard let account, !account.isEmpty else {

@@ -206,7 +206,6 @@ private struct AcademicDetailChrome<Actions: View>: ViewModifier {
                 }
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle(title)
-            .toolbar(.hidden, for: .tabBar)
             .background { AcademicPopSupport() }
             .background {
                 #if DEBUG
