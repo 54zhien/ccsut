@@ -484,7 +484,7 @@ final class SessionStore {
               !CookieJar.shared.isEmpty else { return }
         let generation = CookieJar.generation
         do {
-            try await verifySession()
+            if verifiedIdentity?.generation != generation { try await verifySession() }
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             guard publishVerifiedIdentity(generation: generation), let studentId else { return }
             prepareEcardSession(studentId, WebStore.dataStore)

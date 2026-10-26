@@ -14,6 +14,7 @@ struct StudentIdentity: Equatable, Sendable {
 
     static func portalRedirect(status: Int, responseURL: URL?, location: String?) throws -> StudentIdentity {
         guard [301, 302, 303, 307, 308].contains(status), let responseURL,
+              // URL.path can normalize away the trailing slash; the request itself is fixed.
               trustedOrigin(responseURL), ["/admin/", "/admin"].contains(responseURL.path),
               responseURL.query == nil, responseURL.fragment == nil,
               let location, let target = URL(string: location, relativeTo: responseURL)?.absoluteURL,

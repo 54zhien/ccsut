@@ -414,8 +414,7 @@ struct ScheduleView: View {
             }
             let profile = try await APIClient.shared.authenticatedProfile()
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
-            guard let account = profile.xsxh?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !account.isEmpty else { throw APIError.notLoggedIn }
+            let account = profile.studentNumber
             if let verifiedAccount, verifiedAccount != account { clearAccountData() }
             let cacheKey = "ccsut.teachingWeek.v1"
             var candidate: TeachingWeekSnapshot?

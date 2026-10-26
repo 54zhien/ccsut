@@ -29,7 +29,7 @@ final class SchoolProtocol: URLProtocol {
     nonisolated(unsafe) static var requestCount = 0
     nonisolated(unsafe) static var requestPaths: [String] = []
     nonisolated(unsafe) static var response: (URLRequest) throws -> (Int, URL, [String: String], String) = { request in
-        if request.url?.path == "/admin/" {
+        if ["/admin/", "/admin"].contains(request.url?.path ?? "") {
             return try SchoolProtocol.verifiedPortalResponse(for: request)
         }
         return (200, request.url!, [:], "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\",\"xsxm\":\"Fixture\"}}")
@@ -71,7 +71,7 @@ final class SchoolProtocol: URLProtocol {
         headers: [String: String] = [:]
     ) throws -> (Int, URL, [String: String], String) {
         guard let url = request.url,
-              url.scheme == "https", url.host == "tls.ccsut.cn", url.path == "/admin/",
+              url.scheme == "https", url.host == "tls.ccsut.cn", ["/admin/", "/admin"].contains(url.path),
               url.query == nil, url.fragment == nil,
               studentNumber.range(of: #"^[A-Za-z0-9._-]{1,64}$"#, options: .regularExpression) != nil
         else { throw URLError(.badServerResponse) }
@@ -162,7 +162,7 @@ struct SessionRegressionTests {
         CookieJar.shared = [cookie("jw_uf", "cold-start"), restoredTGC]
         WebStore.dataStore = .nonPersistent()
         SchoolProtocol.response = { request in
-            if request.url?.path == "/admin/" {
+            if ["/admin/", "/admin"].contains(request.url?.path ?? "") {
                 return try SchoolProtocol.verifiedPortalResponse(
                     for: request,
                     studentNumber: "fixture",
@@ -482,7 +482,7 @@ struct SessionRegressionTests {
               "unverified WebKit credentials do not overwrite Keychain")
 
         SchoolProtocol.response = { request in
-            if request.url?.path == "/admin/" {
+            if ["/admin/", "/admin"].contains(request.url?.path ?? "") {
                 return try SchoolProtocol.verifiedPortalResponse(
                     for: request,
                     headers: ["Set-Cookie": "jw_uf=verified; Path=/; Secure; HttpOnly"]
@@ -524,7 +524,7 @@ struct SessionRegressionTests {
                 }
                 return (302, url, ["Location": "/frontend/student", "Set-Cookie": "jw_uf=renewed; Path=/; Secure; HttpOnly"], "")
             }
-            if url.path == "/admin/" { return try SchoolProtocol.verifiedPortalResponse(for: req) }
+            if ["/admin/", "/admin"].contains(url.path) { return try SchoolProtocol.verifiedPortalResponse(for: req) }
             return (200, url, [:], "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}")
         }
         let renewal = sessionStore()
@@ -590,7 +590,7 @@ struct SessionRegressionTests {
                     preservedTicket = url.query == "ticket=fixture%2Bticket%26part%3D2"
                     return (302, url, ["Location":"/frontend/student", "Set-Cookie":"jw_uf=http-renewed; Path=/; Secure"], "")
                 }
-                if url.path == "/admin/" { return try SchoolProtocol.verifiedPortalResponse(for: request) }
+                if ["/admin/", "/admin"].contains(url.path) { return try SchoolProtocol.verifiedPortalResponse(for: request) }
                 return (200, url, [:], "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}")
             }
             let store = sessionStore()
