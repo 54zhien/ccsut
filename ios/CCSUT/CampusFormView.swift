@@ -14,6 +14,7 @@ import ImageIO
     @State private var isImporting = false
     @State private var isLocating = false
     @State private var activeEditor: String?
+    @State private var leaveReceipt: LeaveTicketReceipt?
     @FocusState private var focusedPhone: String?
     @ScaledMetric private var editorHeight: CGFloat = 108
     @ScaledMetric private var shortEditorHeight: CGFloat = 44
@@ -88,6 +89,12 @@ import ImageIO
         .task { await model.load() }
         .task(id: model.candidateKey) { await model.refreshApprovers() }
         .onDisappear { location.cancel(); model.stop() }
+    }
+
+    private func reportLeaveSuccess() {
+        guard model.state == .submitted, let receipt = leaveReceipt else { return }
+        leaveReceipt = nil
+        onLeaveSubmitted?(receipt)
     }
 
     @ViewBuilder private var content: some View {
@@ -261,18 +268,11 @@ import ImageIO
                         .accessibilityIdentifier("campus-form-reload")
                 }
                 if model.state == .unknown {
-                    Button { Task { await model.checkResult() } } label: {
+                    Button { Task { await model.checkResult(); reportLeaveSuccess() } } label: {
                         HStack { if model.isChecking { ProgressView() }; Text("查询提交结果") }.frame(maxWidth: .infinity, minHeight: 44)
                     }.buttonStyle(.glassProminent).campusActionControl().disabled(model.isChecking)
                 } else if model.state == .submitted {
                     Button("完成") {
-                        if model.kind == .leave {
-                            onLeaveSubmitted?(LeaveTicketReceipt(
-                                baseline: model.configuration?.baselineRecordIDs ?? [],
-                                reason: CampusPrivacy.redact(model.draft.reason),
-                                begin: LeaveTicketReceipt.timestamp(model.draft.begin),
-                                end: LeaveTicketReceipt.timestamp(model.draft.end)))
-                        }
                         onSubmitted(); dismiss()
                     }.frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.glassProminent).campusActionControl()
                 } else if model.configuration != nil {
@@ -353,7 +353,18 @@ import ImageIO
                 }.padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
             }
             CampusActionDock {
-                Button { Task { await model.submit(snapshot) } } label: {
+                Button {
+                    if model.kind == .leave {
+                        // The model deliberately erases the draft after submission.
+                        // Capture only the redacted matching fields from the approved snapshot.
+                        leaveReceipt = LeaveTicketReceipt(
+                            baseline: snapshot.configuration.baselineRecordIDs,
+                            reason: CampusPrivacy.redact(snapshot.draft.reason),
+                            begin: LeaveTicketReceipt.timestamp(snapshot.draft.begin),
+                            end: LeaveTicketReceipt.timestamp(snapshot.draft.end))
+                    }
+                    Task { await model.submit(snapshot); reportLeaveSuccess() }
+                } label: {
                     HStack { if model.state == .submitting { ProgressView() }; Text(model.state == .submitting ? "正在提交…" : "确认提交") }
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }.buttonStyle(.glassProminent).campusActionControl().padding(16).disabled(model.state == .submitting)

@@ -169,6 +169,7 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
 /// title/buttons independently of the moving page. UIKit still owns the gesture.
 private struct AcademicDetailChrome: ViewModifier {
     let title: String
+    var backgroundColor: Color = Color(.systemGroupedBackground)
     #if DEBUG
     @State private var transitionDrift: CGFloat = 0
     @State private var transitionSamples = 0
@@ -201,7 +202,7 @@ private struct AcademicDetailChrome: ViewModifier {
                     .padding(.horizontal, 16)
                     .padding(.vertical, NagiPageHeaderMetrics.verticalPadding)
                 }
-            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .background(backgroundColor.ignoresSafeArea())
             .navigationTitle(title)
             .background { AcademicPopSupport() }
             .background {
@@ -237,8 +238,8 @@ extension View {
         modifier(NagiTopBar(bar: content()))
     }
 
-    func academicDetailChrome(title: String) -> some View {
-        modifier(AcademicDetailChrome(title: title))
+    func academicDetailChrome(title: String, backgroundColor: Color = Color(.systemGroupedBackground)) -> some View {
+        modifier(AcademicDetailChrome(title: title, backgroundColor: backgroundColor))
     }
 
     func nagiPageChrome<Actions: View>(title: String, scrollOffset: CGFloat, showsBackButton: Bool = false, @ViewBuilder actions: @escaping () -> Actions) -> some View {

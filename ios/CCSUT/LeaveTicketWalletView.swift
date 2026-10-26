@@ -25,9 +25,12 @@ struct LeaveTicketWalletView: View {
     @State private var printing: CampusLeaveRecord?
     @State private var refreshRevision = 0
     @State private var submittingBaseline: Set<String> = []
+    #if DEBUG
+    @State private var previewPrints = 0
+    #endif
 
     var body: some View {
-        PageScrollSurface(refresh: { await refresh() }) { _, _ in
+        PageScrollSurface(refresh: { await refresh() }, backgroundColor: .clear) { _, _ in
             VStack(spacing: 24) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -52,15 +55,34 @@ struct LeaveTicketWalletView: View {
                 .accessibilityLabel(expanded ? "收起票夹" : "打开票夹")
                 .accessibilityValue(model.leave.hasMore ? "已载入 \(model.leave.items.count) 张" : "\(model.leave.items.count) 张请假条")
                 .accessibilityIdentifier("leave-wallet-toggle")
-
-                if let printing {
-                    LeaveTicketPrinter(record: printing) {
-                        self.printing = nil
+                .background(alignment: .top) {
+                    if let printing {
+                        LeaveTicketPrinter(record: printing) {
+                            withAnimation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.04)) {
+                                self.printing = nil
+                                #if DEBUG
+                                previewPrints += 1
+                                #endif
+                            }
+                        }
+                        .frame(height: 188).offset(y: -85)
+                        .accessibilityLabel("正在收好新请假条")
+                        .accessibilityIdentifier("leave-wallet-printing")
                     }
-                    .frame(height: 188)
-                    .accessibilityLabel("正在收好新请假条")
-                    .accessibilityIdentifier("leave-wallet-printing")
                 }
+                .padding(.top, 70)
+                #if DEBUG
+                if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-wallet-print") {
+                    Button("模拟已确认的申请") {
+                        guard let record = model.leave.items.first else { return }
+                        receipt = LeaveTicketReceipt(baseline: [], reason: record.reason ?? "",
+                                                     begin: record.beginTime ?? "", end: record.endTime ?? "")
+                        refreshRevision += 1
+                    }.accessibilityIdentifier("wallet-fixture-submit")
+                    Text("完成 \(previewPrints)").accessibilityIdentifier("wallet-fixture-completions")
+                    Button("刷新记录") { refreshRevision += 1 }.accessibilityIdentifier("wallet-fixture-refresh")
+                }
+                #endif
                 if receipt != nil {
                     Label("申请已提交，正在同步请假条；可下拉刷新", systemImage: "arrow.triangle.2.circlepath")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -81,7 +103,7 @@ struct LeaveTicketWalletView: View {
                 }
                 if expanded {
                     LazyVStack(spacing: 18) {
-                        ForEach(Array(model.leave.items.enumerated()), id: \.element.id) { index, record in
+                        ForEach(Array(model.leave.items.filter { $0.id != printing?.id }.enumerated()), id: \.element.id) { index, record in
                             LeavePaperTicket(record: record)
                                 .transition(.asymmetric(
                                     insertion: .offset(y: reduceMotion ? 0 : -35).combined(with: .opacity)
@@ -135,6 +157,9 @@ struct LeaveTicketWalletView: View {
         if let id = pending.consume(candidates) {
             receipt = nil
             if !reduceMotion { printing = model.leave.items.first { $0.id == id } }
+            #if DEBUG
+            else { previewPrints += 1 }
+            #endif
         }
     }
 }

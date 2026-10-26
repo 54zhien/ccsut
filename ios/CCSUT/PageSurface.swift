@@ -169,6 +169,7 @@ final class PageLoadGate {
 struct PageScrollSurface<Content: View>: View {
     let refresh: @MainActor () async -> Void
     var onOffsetChange: (CGFloat) -> Void = { _ in }
+    var backgroundColor: Color = Color(.systemGroupedBackground)
     @ViewBuilder var content: (CGSize, ScrollViewProxy) -> Content
 
     var body: some View {
@@ -196,7 +197,7 @@ struct PageScrollSurface<Content: View>: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .background(Color(.systemGroupedBackground))
+        .background(backgroundColor)
     }
 }
 

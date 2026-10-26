@@ -31,7 +31,9 @@ struct CampusRecordsView: View {
             }
         }
         .background { if mode == .leave { LeaveWalletBackground() } else { Color(.systemGroupedBackground) } }
-        .academicDetailChrome(title: mode == .leave ? "请假条票夹" : "节假日离返校")
+        .academicDetailChrome(title: mode == .leave ? "请假条票夹" : "节假日离返校",
+                              backgroundColor: mode == .leave ? .clear : Color(.systemGroupedBackground))
+        .background { if mode == .leave { LeaveWalletBackground() } }
         .task(id: ConnectionTask(connection: Connection(account: session.studentId, generation: CookieJar.generation), revision: reconnectRevision)) {
             let connection = Connection(account: session.studentId, generation: CookieJar.generation)
             // A dismissed form resumes the same account/session. Refresh its existing model

@@ -83,14 +83,10 @@ final class LeavePrinterSurface: UIView {
             guard let self, finished, self.generation == token, self.window != nil else { return }
             self.stopHaptics()
             UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.55)
-            // Lift the same paper out of its clipping window and tuck it into the wallet above.
-            let position = self.convert(self.body.center, from: self.channel)
-            self.addSubview(self.body)
-            self.body.center = position
+            // Continue feeding downward behind the wallet's front leather panel.
+            // Keep the paper in the same clipping coordinate space throughout.
             UIView.animate(withDuration: 0.48, delay: 0.12, options: [.curveEaseInOut, .allowUserInteraction]) {
-                self.body.center = CGPoint(x: self.bounds.midX, y: -70)
-                self.body.transform = CGAffineTransform(rotationAngle: -.pi / 2).scaledBy(x: 0.35, y: 0.35)
-                self.body.alpha = 0
+                self.body.center.y = 210
                 self.machine.alpha = 0
                 self.lip.alpha = 0
             } completion: { [weak self] finished in
