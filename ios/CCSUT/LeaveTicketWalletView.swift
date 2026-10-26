@@ -179,21 +179,22 @@ private struct LeatherLeaveWallet: View {
     var body: some View {
         ZStack(alignment: .top) {
             RoundedRectangle(cornerRadius: 22).fill(leather.gradient)
+                .overlay { LeatherEdge(radius: 22) }
                 .padding(.top, 22)
             ForEach(0..<min(count, 3), id: \.self) { index in
                 RoundedRectangle(cornerRadius: 9)
                     .fill(Color(red: 0.97 - Double(index) * 0.035, green: 0.94 - Double(index) * 0.035, blue: 0.87 - Double(index) * 0.035))
                     .frame(height: 112).padding(.horizontal, CGFloat(24 + index * 6))
+                    .shadow(color: .black.opacity(0.10), radius: 1.5, y: 1)
                     .rotationEffect(.degrees(Double(index - 1) * 2))
                     .offset(y: CGFloat(17 - index * 6))
             }
             RoundedRectangle(cornerRadius: 22)
                 .fill(LinearGradient(colors: [Color(red: 0.55, green: 0.34, blue: 0.22), leather], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .overlay { LeatherGrain().opacity(0.15).clipShape(RoundedRectangle(cornerRadius: 22)) }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 17).inset(by: 9)
-                        .strokeBorder(Color(red: 0.85, green: 0.65, blue: 0.43).opacity(0.65), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                }
+                .overlay { LeatherGrain().opacity(0.24).clipShape(RoundedRectangle(cornerRadius: 22)) }
+                .overlay { LeatherEdge(radius: 22) }
+                .overlay { LeatherStitching(radius: 22) }
+                .shadow(color: .black.opacity(0.20), radius: 2.5, y: 2)
                 .overlay(alignment: .bottomLeading) {
                     VStack(alignment: .leading, spacing: 7) {
                         Text("请假条").font(.title2.weight(.semibold))
@@ -201,29 +202,79 @@ private struct LeatherLeaveWallet: View {
                             .font(.caption)
                     }
                     .foregroundStyle(Color(red: 0.98, green: 0.88, blue: 0.72))
+                    .shadow(color: .black.opacity(0.28), radius: 0.4, y: 1)
                     .padding(26)
                 }
                 .padding(.top, 65)
             RoundedRectangle(cornerRadius: 19)
                 .fill(LinearGradient(colors: [Color(red: 0.58, green: 0.37, blue: 0.25), leather], startPoint: .top, endPoint: .bottom))
-                .overlay { LeatherGrain().opacity(0.12).clipShape(RoundedRectangle(cornerRadius: 19)) }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14).inset(by: 8)
-                        .strokeBorder(.white.opacity(0.24), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                }
+                .overlay { LeatherGrain().opacity(0.20).clipShape(RoundedRectangle(cornerRadius: 19)) }
+                .overlay { LeatherEdge(radius: 19) }
+                .overlay { LeatherStitching(radius: 19) }
                 .overlay(alignment: .bottom) {
-                    Circle().fill(Color(red: 0.76, green: 0.61, blue: 0.39).gradient)
-                        .frame(width: 17, height: 17).shadow(color: .black.opacity(0.3), radius: 2, y: 2).padding(.bottom, 13)
+                    LeatherClasp().frame(width: 18, height: 18).padding(.bottom, 13)
                 }
                 .frame(height: 102)
-                .shadow(color: .black.opacity(0.22), radius: 6, y: 5)
+                .shadow(color: .black.opacity(0.30), radius: 1.5, y: 2)
+                .shadow(color: .black.opacity(0.20), radius: 7, y: 6)
                 .rotation3DEffect(.degrees(expanded ? -155 : 0), axis: (x: 1, y: 0, z: 0), anchor: .top, perspective: 0.3)
                 .offset(y: 23)
         }
         .frame(height: 230)
         .padding(.top, expanded ? 72 : 16)
-        .shadow(color: .black.opacity(0.19), radius: 18, x: 0, y: 14)
+        .compositingGroup()
+        .shadow(color: .black.opacity(0.18), radius: 3, x: 0, y: 3)
+        .shadow(color: .black.opacity(0.17), radius: 20, x: 0, y: 16)
         .accessibilityHidden(true)
+    }
+}
+
+/// Narrow edge paint and an inset highlight give the hide thickness without
+/// changing its silhouette or introducing another animated layer.
+private struct LeatherEdge: View {
+    let radius: CGFloat
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .strokeBorder(Color(red: 0.19, green: 0.10, blue: 0.06).opacity(0.65), lineWidth: 1.5)
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous).inset(by: 1.8)
+                    .strokeBorder(LinearGradient(colors: [.white.opacity(0.23), .white.opacity(0.03), .black.opacity(0.20)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.8)
+            }
+            .allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
+private struct LeatherStitching: View {
+    let radius: CGFloat
+    var body: some View {
+        let seam = RoundedRectangle(cornerRadius: radius, style: .continuous).inset(by: 10)
+        seam.strokeBorder(.black.opacity(0.10), lineWidth: 3)
+            .overlay {
+                // Slightly larger dark dashes suggest the pierced leather below the thread.
+                seam.strokeBorder(.black.opacity(0.32), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, dash: [3.2, 4]))
+                    .offset(y: 0.6)
+            }
+            .overlay {
+                seam.strokeBorder(Color(red: 0.88, green: 0.72, blue: 0.52).opacity(0.82),
+                                  style: StrokeStyle(lineWidth: 1.15, lineCap: .round, dash: [3.2, 4]))
+            }
+            .allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
+private struct LeatherClasp: View {
+    var body: some View {
+        Circle()
+            .fill(LinearGradient(colors: [Color(red: 0.94, green: 0.82, blue: 0.57),
+                                          Color(red: 0.73, green: 0.54, blue: 0.29),
+                                          Color(red: 0.85, green: 0.68, blue: 0.40)],
+                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+            .overlay { Circle().strokeBorder(Color(red: 0.31, green: 0.20, blue: 0.10), lineWidth: 0.7) }
+            .overlay { Circle().inset(by: 1.5).strokeBorder(.white.opacity(0.35), lineWidth: 0.6) }
+            .shadow(color: .black.opacity(0.35), radius: 0.7, y: 1)
+            .shadow(color: .black.opacity(0.25), radius: 2.5, y: 2)
+            .accessibilityHidden(true)
     }
 }
 
@@ -231,9 +282,17 @@ private struct LeatherGrain: View {
     var body: some View {
         Canvas { context, size in
             for index in 0..<900 {
-                let x = CGFloat((index * 73) % 997) / 997 * size.width
-                let y = CGFloat((index * 137) % 991) / 991 * size.height
-                context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1, height: 0.65)), with: .color(.black))
+                // Stable hashed coordinates avoid the diagonal bands of a modular grid.
+                var seed = UInt64(index + 1) &* 0x9E3779B97F4A7C15
+                seed = (seed ^ (seed >> 30)) &* 0xBF58476D1CE4E5B9
+                seed = (seed ^ (seed >> 27)) &* 0x94D049BB133111EB
+                seed ^= seed >> 31
+                let x = CGFloat(seed & 0xFFFF) / 65535 * size.width
+                let y = CGFloat((seed >> 16) & 0xFFFF) / 65535 * size.height
+                let width = 0.45 + CGFloat((seed >> 32) & 0xFF) / 255 * 0.8
+                let pore = CGRect(x: x, y: y, width: width, height: 0.55)
+                context.fill(Path(ellipseIn: pore), with: .color(.black.opacity(0.65)))
+                context.fill(Path(ellipseIn: pore.offsetBy(dx: 0, dy: 0.6)), with: .color(.white.opacity(0.25)))
             }
         }.allowsHitTesting(false).accessibilityHidden(true)
     }
