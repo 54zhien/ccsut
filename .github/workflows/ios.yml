@@ -69,6 +69,10 @@ jobs:
             ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift ios/Tests/StudentIdentityTests.swift \
             -o "$RUNNER_TEMP/identity-tests"
           "$RUNNER_TEMP/identity-tests" 2>&1 | tee "$RUNNER_TEMP/identity-tests.log"
+          xcrun swiftc -parse-as-library \
+            ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift ios/Tests/StudentHomeIdentityTests.swift \
+            -o "$RUNNER_TEMP/home-identity-tests"
+          "$RUNNER_TEMP/home-identity-tests" 2>&1 | tee "$RUNNER_TEMP/home-identity-tests.log"
       - name: Upload focused login evidence
         if: ${{ always() && inputs.login_probe_only }}
         uses: actions/upload-artifact@v4
@@ -77,6 +81,7 @@ jobs:
           path: |
             ${{ runner.temp }}/login-tests.log
             ${{ runner.temp }}/identity-tests.log
+            ${{ runner.temp }}/home-identity-tests.log
             ${{ runner.temp }}/login-state-tests.log
             ${{ runner.temp }}/login-script-tests.log
           if-no-files-found: ignore

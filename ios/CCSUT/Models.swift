@@ -8,9 +8,63 @@
 import Foundation
 
 /// Identity issued by the protected academic entry, independent of elective batches.
-/// Only a redirect from our fixed /admin/ request is evidence; a static page is not.
+/// Accepts the protected student home or its server-issued elective redirect.
 struct StudentIdentity: Equatable, Sendable {
     let studentNumber: String
+
+    /// Current deployment renders the authenticated home directly at /admin/.
+    /// Read its server-rendered student header, never a cookie or a filled input.
+    static func portalPage(status: Int, responseURL: URL?, html: String) throws -> StudentIdentity {
+        guard status == 200, let responseURL, trustedOrigin(responseURL),
+              ["/admin/", "/admin"].contains(responseURL.path),
+              responseURL.query == nil, responseURL.fragment == nil
+        else { throw APIError.notLoggedIn }
+
+        let inputs = htmlMatches(#"<input\b([^>]*)>"#, in: html).map { htmlAttributes($0[1]) }
+        func hidden(_ id: String) throws -> String {
+            let fields = inputs.filter { $0["id"] == id }
+            guard fields.count == 1, fields[0]["type"]?.lowercased() == "hidden",
+                  let value = fields[0]["value"], !value.isEmpty,
+                  value.rangeOfCharacter(from: .controlCharacters) == nil
+            else { throw APIError.notLoggedIn }
+            return value
+        }
+        guard try hidden("roleId") == "xs" else { throw APIError.notLoggedIn }
+        _ = try hidden("xhid")
+        _ = try hidden("encodeId")
+
+        var numbers: [String] = []
+        for container in htmlMatches(#"<div\b([^>]*\bclass\s*=\s*(?:"[^"]*\buserInfo\b[^"]*"|'[^']*\buserInfo\b[^']*')[^>]*)>([\s\S]*?)</div>"#, in: html) {
+            let classes = htmlAttributes(container[1])["class"]?.split(whereSeparator: \.isWhitespace) ?? []
+            guard classes.contains("userInfo") else { continue }
+            for span in htmlMatches(#"<span\b([^>]*)>([^<]*)</span>"#, in: container[2]) {
+                let classes = htmlAttributes(span[1])["class"]?.split(whereSeparator: \.isWhitespace) ?? []
+                if classes.contains("admin_name") { numbers.append(span[2].trimmingCharacters(in: .whitespacesAndNewlines)) }
+            }
+        }
+        guard numbers.count == 1, let number = numbers.first,
+              number.range(of: #"^[A-Za-z0-9._-]{1,64}$"#, options: .regularExpression) == (number.startIndex..<number.endIndex)
+        else { throw APIError.notLoggedIn }
+        return StudentIdentity(studentNumber: number)
+    }
+
+    private static func htmlAttributes(_ text: String) -> [String: String] {
+        var attributes: [String: String] = [:]
+        for match in htmlMatches(#"([A-Za-z_:][A-Za-z0-9_:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#, in: text) {
+            attributes[match[1].lowercased()] = match[2...4].first { !$0.isEmpty } ?? ""
+        }
+        return attributes
+    }
+
+    private static func htmlMatches(_ pattern: String, in text: String) -> [[String]] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return [] }
+        let source = text as NSString
+        return regex.matches(in: text, range: NSRange(location: 0, length: source.length)).map { match in
+            (0..<match.numberOfRanges).map { index in
+                match.range(at: index).location == NSNotFound ? "" : source.substring(with: match.range(at: index))
+            }
+        }
+    }
 
     static func portalRedirect(status: Int, responseURL: URL?, location: String?) throws -> StudentIdentity {
         guard [301, 302, 303, 307, 308].contains(status), let responseURL,

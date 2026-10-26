@@ -187,7 +187,11 @@ extension APIClient {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
-        let (_, http) = try await response(for: request, expectedGeneration: generation, followRedirects: false)
+        let (data, http) = try await response(for: request, expectedGeneration: generation, followRedirects: false)
+        if http.statusCode == 200 {
+            guard let html = String(data: data, encoding: .utf8) else { throw APIError.notLoggedIn }
+            return try StudentIdentity.portalPage(status: http.statusCode, responseURL: http.url, html: html)
+        }
         return try StudentIdentity.portalRedirect(status: http.statusCode, responseURL: http.url,
                                                   location: http.value(forHTTPHeaderField: "Location"))
     }
