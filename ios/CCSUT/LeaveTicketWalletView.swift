@@ -34,7 +34,6 @@ struct LeaveTicketWalletView: View {
             VStack(spacing: 24) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("把每次安排，妥帖收好").font(.title3.weight(.medium))
                         Text(expanded ? "请假条已展开" : "轻触票夹，翻看请假条")
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
