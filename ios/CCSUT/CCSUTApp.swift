@@ -329,9 +329,9 @@ struct ProfileView: View {
             .navigationTitle("账号").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(role: .close) { dismiss() }
-                        .foregroundStyle(.primary).tint(nil).accessibilityLabel("关闭账号")
+                    SheetSymbolButton(symbol: "xmark", label: "关闭账号") { dismiss() }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
         }
         .alert("退出登录", isPresented: $showLogoutAlert) {

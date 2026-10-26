@@ -279,7 +279,6 @@ struct ScheduleView: View {
         .padding(.horizontal, AppLayout.pageInset)
         .padding(.top, 12)
         .frame(maxWidth: 720).frame(maxWidth: .infinity)
-        .accessibilityIdentifier("today-course-list")
     }
 
     @ViewBuilder private func todayCourse(_ slot: ScheduleSlot, index: Int, isLast: Bool) -> some View {

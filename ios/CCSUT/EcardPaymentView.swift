@@ -234,6 +234,7 @@ struct EcardPaymentView: View {
         }
         .disabled(options.isEmpty || model.isSubmitting)
         .accessibilityLabel("选择\(title)")
+        .accessibilityValue(CampusPrivacy.redact(options.first(where: { $0.value == value })?.name ?? placeholder))
     }
 
     private func meterCard(_ detail: MeterDetail?) -> some View {

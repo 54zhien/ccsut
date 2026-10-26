@@ -358,6 +358,10 @@ final class PageInteractionUITests: XCTestCase {
 
     func testCampusElectricityAmountSelection() {
         let app = launch("campus-electricity")
+        let building = app.buttons["选择楼栋"]
+        XCTAssertTrue(building.waitForExistence(timeout: 8))
+        XCTAssertEqual(building.value as? String, "示例宿舍 1 栋")
+        XCTAssertEqual(app.buttons["选择房间"].value as? String, "101 室")
         let hundreds = app.pickerWheels.element(boundBy: 0)
         XCTAssertTrue(hundreds.waitForExistence(timeout: 8))
         if !hundreds.isHittable { app.swipeUp() }

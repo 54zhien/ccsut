@@ -36,10 +36,9 @@ struct ScheduleDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(role: .close) { dismiss() }
-                        .foregroundStyle(.primary).tint(nil)
-                        .accessibilityLabel("关闭课程详情")
+                    SheetSymbolButton(symbol: "xmark", label: "关闭课程详情") { dismiss() }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
         }
     }

@@ -31,6 +31,8 @@
 - https://developer.apple.com/documentation/uikit/uiviewcontrollertransitioncoordinator
 - https://developer.apple.com/documentation/swiftui/picker
 - https://developer.apple.com/documentation/swiftui/buttonbordershape
+- https://developer.apple.com/documentation/swiftui/toolbarcontent/sharedbackgroundvisibility(_:)
+- https://developer.apple.com/documentation/swiftui/controlsize/large
 
 ## 验证边界
 
