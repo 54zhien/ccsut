@@ -420,13 +420,22 @@ final class PageInteractionUITests: XCTestCase {
             control.isHittable && visibleBounds().contains(control.frame)
         }
         for _ in 0..<8 where !fullyVisible() {
-            // Scroll on the housing edge, away from the adjustable thumbwheels.
+            // Stay inside the measured housing rim. A fixed window-edge point
+            // can be outside the scroll view's safe area after rotation.
             let bounds = visibleBounds()
             let moveUp = control.frame.maxY > bounds.maxY ? true : control.frame.minY < bounds.minY ? false : upwards
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: moveUp ? 0.75 : 0.25))
-            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: moveUp ? 0.25 : 0.75))
+            let selector = app.buttons["meter-building-selector"]
+            let reference = selector.exists ? selector.frame : control.frame
+            let x = min(bounds.maxX - 12, max(bounds.minX + 12, reference.minX - 10))
+            let window = app.windows.firstMatch
+            let origin = window.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: x - window.frame.minX,
+                                                   dy: bounds.minY + bounds.height * (moveUp ? 0.75 : 0.25) - window.frame.minY))
+            let end = origin.withOffset(CGVector(dx: x - window.frame.minX,
+                                                 dy: bounds.minY + bounds.height * (moveUp ? 0.25 : 0.75) - window.frame.minY))
             start.press(forDuration: 0.05, thenDragTo: end)
         }
+        if !fullyVisible() { capture(app, "physical-meter-unreachable-control") }
         XCTAssertTrue(fullyVisible(), "The complete control must be visible before tapping: control=\(control.frame), visible=\(visibleBounds())")
     }
 
@@ -450,6 +459,13 @@ final class PageInteractionUITests: XCTestCase {
             revealMeterControl(building, in: app)
             screen("physical-meter-top-\(large ? "large" : "landscape")")
             if large {
+                let previousValue = building.value as? String
+                let previousY = building.frame.minY
+                building.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+                    .press(forDuration: 0.05, thenDragTo: building.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)))
+                XCTAssertFalse(app.buttons["meter-selection-close"].exists, "Vertical movement scrolls instead of opening the selector")
+                XCTAssertEqual(building.value as? String, previousValue)
+                XCTAssertLessThan(building.frame.minY, previousY - 10, "The selector must yield vertical movement to its scroll view")
                 let balance = app.descendants(matching: .any).matching(
                     NSPredicate(format: "label == %@ AND value == %@", "剩余金额", "123456.78 元")).firstMatch
                 revealMeterControl(balance, in: app)
@@ -483,26 +499,37 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(back.isHittable)
         XCTAssertFalse(app.tabBars.firstMatch.isHittable)
         XCTAssertTrue(app.buttons["选择楼栋"].exists)
-        let building = app.buttons["选择楼栋"]
-        let beforeTurn = building.value as? String
-        let turnStart = building.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
-        let turnEnd = building.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
-        turnStart.press(forDuration: 0.05, thenDragTo: turnEnd)
-        XCTAssertTrue(back.exists, "Turning an embedded selector must not invoke content-swipe navigation")
-        XCTAssertTrue(building.exists)
-        XCTAssertEqual(building.value as? String, beforeTurn, "A single-option selector stops at its boundary")
         let pay = app.buttons["立即缴费"]
         XCTAssertTrue(pay.isHittable, "The standard meter opens with its embedded payment key visible")
         XCTAssertGreaterThanOrEqual(pay.frame.height, 44)
         XCTAssertTrue(app.windows.firstMatch.frame.insetBy(dx: 4, dy: 4).contains(pay.frame),
                       "The initial viewport must show the whole payment key before scrolling")
         capture(app, "physical-meter-initial-viewport")
+        let building = app.buttons["选择楼栋"]
+        let beforeTurn = building.value as? String
+        let turnStart = building.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+        let turnEnd = building.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
+        turnStart.press(forDuration: 0.05, thenDragTo: turnEnd)
+        capture(app, "physical-meter-after-selector-turn")
+        XCTAssertTrue(back.exists, "Turning an embedded selector must not invoke content-swipe navigation")
+        XCTAssertTrue(building.exists)
+        XCTAssertFalse(app.buttons["meter-selection-close"].exists, "Turning the selector must not also open its tap action")
+        XCTAssertTrue(building.isHittable)
+        XCTAssertEqual(building.value as? String, beforeTurn, "A single-option selector stops at its boundary")
+        XCTAssertTrue(pay.isHittable, "Turning the selector must leave payment unobstructed")
         revealMeterControl(app.buttons["立即缴费"], in: app)
         XCTAssertTrue(back.isHittable)
         capture(app, "physical-meter-from-campus")
         back.tap()
         XCTAssertTrue(entry.waitForExistence(timeout: 8))
         XCTAssertTrue(app.tabBars.firstMatch.isHittable)
+        entry.tap()
+        XCTAssertTrue(back.waitForExistence(timeout: 8))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.30, dy: 0.84))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.84)))
+        let returned = NSPredicate { _, _ in entry.exists && entry.isHittable && app.tabBars.firstMatch.isHittable }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: returned, evaluatedWith: app)], timeout: 5), .completed,
+                       "Content swipe outside embedded selectors still returns to Campus")
     }
 
     func testPhysicalMeterConfirmationRemainsExplicit() {
@@ -531,7 +558,11 @@ final class PageInteractionUITests: XCTestCase {
             let left = selector.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
             let right = selector.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
             right.press(forDuration: 0.05, thenDragTo: left)
+            if app.buttons["meter-selection-close"].exists { capture(app, "physical-meter-unwanted-selector-sheet") }
+            XCTAssertFalse(app.buttons["meter-selection-close"].exists, "A turn must not also perform a tap")
             left.press(forDuration: 0.05, thenDragTo: right)
+            if app.buttons["meter-selection-close"].exists { capture(app, "physical-meter-unwanted-selector-sheet") }
+            XCTAssertFalse(app.buttons["meter-selection-close"].exists, "A turn must not also perform a tap")
             XCTAssertEqual(selector.value as? String, previousValue)
             selector.tap()
             let current = app.buttons["meter-option-\(field)-0"]

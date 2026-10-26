@@ -15,7 +15,7 @@ on:
       test_scope:
         description: 'Interaction checks to run (focused checks preserve full-suite failure evidence)'
         type: choice
-        options: [all, meter-final, design-final, design-followup, design-layout, design-adaptive, design-sheets, design-motion, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
+        options: [all, meter-final, meter-gestures, design-final, design-followup, design-layout, design-adaptive, design-sheets, design-motion, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
         default: all
       appearance_source_ref:
         description: 'Optional source revision for the focused appearance comparison'
@@ -130,7 +130,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Verify initial and selected week positioning
-        if: ${{ !inputs.blur_diagnostics && inputs.test_scope != 'meter-final' && inputs.test_scope != 'design-followup' && inputs.test_scope != 'design-adaptive' && inputs.test_scope != 'design-sheets' && inputs.test_scope != 'design-motion' && inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' && inputs.test_scope != 'appearance-screens' }}
+        if: ${{ !inputs.blur_diagnostics && inputs.test_scope != 'meter-final' && inputs.test_scope != 'meter-gestures' && inputs.test_scope != 'design-followup' && inputs.test_scope != 'design-adaptive' && inputs.test_scope != 'design-sheets' && inputs.test_scope != 'design-motion' && inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' && inputs.test_scope != 'appearance-screens' }}
         run: |
           set -o pipefail
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
@@ -186,6 +186,16 @@ jobs:
               -only-testing:CCSUTUITests/PageInteractionUITests/testPaymentRecoveryLargeText
               -only-testing:CCSUTUITests/PageInteractionUITests/testDetailSheetsKeepContentAndCloseReachable
               -only-testing:CCSUTUITests/PageInteractionUITests/testTodayCoursesSwitchesToAllTimetables
+            )
+          fi
+          if [ "$TEST_SCOPE" = 'meter-gestures' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
+              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterAdaptiveControls
+              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterReturnsToCampus
+              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterSameSelectionKeepsRoomAndBalance
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicDetailSupportsContentSwipeBack
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
             )
           fi
           if [ "$TEST_SCOPE" = 'design-followup' ]; then
@@ -307,7 +317,7 @@ jobs:
             "${TEST_SELECTION[@]}" \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
       - name: Verify actual reduced motion preference
-        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' && (inputs.test_scope == 'meter-final' || inputs.test_scope == 'design-layout' || inputs.test_scope == 'design-motion' || inputs.test_scope == 'all' || github.event_name == 'push') }}
+        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' && (inputs.test_scope == 'meter-final' || inputs.test_scope == 'meter-gestures' || inputs.test_scope == 'design-layout' || inputs.test_scope == 'design-motion' || inputs.test_scope == 'all' || github.event_name == 'push') }}
         run: |
           set -o pipefail
           xcrun simctl spawn "$CCSUT_PREVIEW_DEVICE" defaults write com.apple.Accessibility ReduceMotionEnabled -bool YES

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import WebKit
 import Combine
 
@@ -462,9 +463,9 @@ struct EcardPaymentView: View {
         }
         .buttonStyle(.plain)
         .background(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.12))
-        .simultaneousGesture(DragGesture(minimumDistance: 18).onEnded { gesture in
-            turnSelector(field, options: options, value: value, horizontal: gesture.translation.width,
-                         vertical: gesture.translation.height)
+        .gesture(MeterSelectorTurnGesture(isEnabled: !options.isEmpty && !model.isSubmitting) { translation in
+            turnSelector(field, options: options, value: value, horizontal: translation.width,
+                         vertical: translation.height)
         })
         .disabled(options.isEmpty || model.isSubmitting)
         .accessibilityLabel("选择\(field.title)")
@@ -1151,6 +1152,42 @@ private struct MeterHangerShape: InsettableShape {
         var copy = self
         copy.insetAmount += amount
         return copy
+    }
+}
+
+/// A horizontal turn cancels the Button's touch, while vertical movement is
+/// rejected before recognition so the surrounding scroll view keeps its pan.
+private struct MeterSelectorTurnGesture: UIGestureRecognizerRepresentable {
+    let isEnabled: Bool
+    let onTurn: (CGSize) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.cancelsTouchesInView = true
+        recognizer.isEnabled = isEnabled
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        recognizer.isEnabled = isEnabled
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        guard recognizer.state == .ended else { return }
+        let translation = recognizer.translation(in: nil)
+        onTurn(CGSize(width: translation.x, height: translation.y))
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+            let velocity = pan.velocity(in: nil)
+            return abs(velocity.x) > abs(velocity.y) * 1.25
+        }
     }
 }
 

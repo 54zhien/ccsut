@@ -64,6 +64,9 @@
 - https://developer.apple.com/documentation/swiftui/view/safeareabar(edge:alignment:spacing:content:)
 - https://developer.apple.com/documentation/swiftui/animation
 - https://developer.apple.com/documentation/swiftui/viewthatfits
+- https://developer.apple.com/documentation/swiftui/uigesturerecognizerrepresentable
+- https://developer.apple.com/documentation/uikit/uigesturerecognizerdelegate/gesturerecognizershouldbegin(_:)
+- https://developer.apple.com/documentation/uikit/uigesturerecognizer/cancelstouchesinview
 
 长金额和最大辅助字号使用 `ViewThatFits(in: .horizontal)` 在机械字轮与保留完整原始金额的紧凑读数之间选择；不截断真实余额，也不将数据改成可编辑内容。
 
