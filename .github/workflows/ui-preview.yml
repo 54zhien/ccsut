@@ -15,7 +15,7 @@ on:
       test_scope:
         description: 'Interaction checks to run (focused checks preserve full-suite failure evidence)'
         type: choice
-        options: [all, design-layout, design-sheets, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
+        options: [all, design-layout, design-sheets, design-motion, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
         default: all
       appearance_source_ref:
         description: 'Optional source revision for the focused appearance comparison'
@@ -97,7 +97,7 @@ jobs:
         if: failure()
         run: xcrun simctl list devices > "$RUNNER_TEMP/ui-screenshots/simulator-state.txt"
       - name: Verify initial and selected week positioning
-        if: ${{ !inputs.blur_diagnostics && inputs.test_scope != 'design-sheets' && inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' && inputs.test_scope != 'appearance-screens' }}
+        if: ${{ !inputs.blur_diagnostics && inputs.test_scope != 'design-sheets' && inputs.test_scope != 'design-motion' && inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' && inputs.test_scope != 'appearance-screens' }}
         run: |
           set -o pipefail
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
@@ -124,7 +124,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - name: Verify native page interactions
-        if: ${{ inputs.test_scope != 'appearance-screens' && !inputs.blur_diagnostics && !cancelled() && steps.simulator.conclusion == 'success' }}
+        if: ${{ inputs.test_scope != 'appearance-screens' && inputs.test_scope != 'design-motion' && !inputs.blur_diagnostics && !cancelled() && steps.simulator.conclusion == 'success' }}
         env:
           TEST_SCOPE: ${{ !inputs.blur_diagnostics && inputs.test_scope }}
         run: |
@@ -132,7 +132,10 @@ jobs:
           xcrun simctl io "$CCSUT_PREVIEW_DEVICE" recordVideo --codec=h264 "$RUNNER_TEMP/ui-screenshots/native-interactions.mp4" &
           VIDEO_PID=$!
           trap 'kill -INT "$VIDEO_PID"; wait "$VIDEO_PID" || true' EXIT
-          TEST_SELECTION=(-skip-testing:CCSUTUITests/PageInteractionUITests/testSemesterAndWeekdaysMoveWithCourses)
+          TEST_SELECTION=(
+            -skip-testing:CCSUTUITests/PageInteractionUITests/testSemesterAndWeekdaysMoveWithCourses
+            -skip-testing:CCSUTUITests/PageInteractionUITests/testCampusReducedMotion
+          )
           if [ "$TEST_SCOPE" = 'design-sheets' ]; then
             TEST_SELECTION=(-only-testing:CCSUTUITests/PageInteractionUITests/testDetailSheetsKeepContentAndCloseReachable)
           fi
@@ -144,7 +147,6 @@ jobs:
               -only-testing:CCSUTUITests/PageInteractionUITests/testLargeTextKeepsAcademicControlsAccessible
               -only-testing:CCSUTUITests/PageInteractionUITests/testScoreBreakdownExpandsAndHomeKeepsOnlyEntryTitles
               -only-testing:CCSUTUITests/PageInteractionUITests/testCampusAdaptiveLayout
-              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusReducedMotion
               -only-testing:CCSUTUITests/PageInteractionUITests/testCampusRecordsSurviveFormDismissal
             )
           fi
@@ -231,6 +233,17 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
             "${TEST_SELECTION[@]}" \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
+      - name: Verify actual reduced motion preference
+        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' && (inputs.test_scope == 'design-layout' || inputs.test_scope == 'design-motion' || inputs.test_scope == 'all' || github.event_name == 'push') }}
+        run: |
+          set -o pipefail
+          xcrun simctl spawn "$CCSUT_PREVIEW_DEVICE" defaults write com.apple.Accessibility ReduceMotionEnabled -bool YES
+          trap 'xcrun simctl spawn "$CCSUT_PREVIEW_DEVICE" defaults write com.apple.Accessibility ReduceMotionEnabled -bool NO' EXIT
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-motion-tests.xcresult" \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusReducedMotion \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-motion-test.log"
       - name: Export interaction screenshots
         if: always()
         run: |
@@ -241,6 +254,9 @@ jobs:
           fi
           if [ -d "$RUNNER_TEMP/ui-tests.xcresult" ]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-tests.xcresult" --output-path "$RUNNER_TEMP/ui-test-attachments"
+          fi
+          if [ -d "$RUNNER_TEMP/ui-motion-tests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-motion-tests.xcresult" --output-path "$RUNNER_TEMP/ui-motion-attachments"
           fi
       - name: Publish interaction evidence
         if: always()
@@ -253,6 +269,9 @@ jobs:
             ${{ runner.temp }}/ui-test-attachments/*.png
             ${{ runner.temp }}/ui-test-attachments/*.txt
             ${{ runner.temp }}/ui-test-attachments/manifest.json
+            ${{ runner.temp }}/ui-motion-test.log
+            ${{ runner.temp }}/ui-motion-attachments/*.png
+            ${{ runner.temp }}/ui-motion-attachments/manifest.json
           if-no-files-found: ignore
           retention-days: 14
       - name: Compare failed checks with legacy blur
