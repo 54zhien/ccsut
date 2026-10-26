@@ -866,10 +866,15 @@ struct CapacityBar: View {
             let ratio = min(max(item.fillRatio, 0), 1)
             let gap: CGFloat = ratio > 0 && ratio < 1 ? 4 : 0
             let availableWidth = max(0, width - gap)
-            HStack(spacing: gap) {
-                Capsule()
-                    .fill(fillColor.gradient)
-                    .frame(width: availableWidth * ratio)
+            HStack(spacing: 0) {
+                if ratio > 0 {
+                    Capsule()
+                        .fill(fillColor.gradient)
+                        .frame(width: availableWidth * ratio)
+                }
+                if gap > 0 {
+                    Rectangle().fill(Color.white).frame(width: gap)
+                }
                 if ratio < 1 {
                     Capsule()
                         .fill(Color(.tertiarySystemFill))
@@ -877,7 +882,6 @@ struct CapacityBar: View {
                 }
             }
             .frame(width: width, alignment: .leading)
-            .background(Color.white, in: .capsule)
         }
     }
 

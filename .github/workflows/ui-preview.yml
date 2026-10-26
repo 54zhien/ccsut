@@ -201,6 +201,9 @@ jobs:
             if [ "$PAGE" = 'electives-selected' ]; then
               LAUNCH_ARGS=(--preview-ui --preview-page electives --preview-complete-selected --preview-selected-tab)
             fi
+            if [ "$PAGE" = 'campus-electricity-large' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page campus-electricity -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
+            fi
             xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
             xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut "${LAUNCH_ARGS[@]}"
             sleep 3

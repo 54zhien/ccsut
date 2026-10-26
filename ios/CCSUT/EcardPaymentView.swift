@@ -239,7 +239,7 @@ struct EcardPaymentView: View {
         }.pickerStyle(.menu).labelsHidden().disabled(options.isEmpty || model.isSubmitting).accessibilityLabel(title)
     }
     private func meterCard(_ detail: MeterDetail) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label("剩余金额", systemImage: "bolt.fill").font(.subheadline).foregroundStyle(.secondary)
                 Spacer()
@@ -251,11 +251,21 @@ struct EcardPaymentView: View {
                 balance(detail).fixedSize(horizontal: true, vertical: false)
                 balance(detail).minimumScaleFactor(0.5)
             }
-            Divider()
-            CampusInfoRow("房间信息", value: detail.roomDescription ?? "—")
-            CampusInfoRow("表类型", value: detail.meterTypeName ?? "—")
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(CampusPrivacy.redact(detail.roomDescription ?? "—"))
+                    Spacer(minLength: 0)
+                    Text(CampusPrivacy.redact(detail.meterTypeName ?? "—"))
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(CampusPrivacy.redact(detail.roomDescription ?? "—"))
+                    Text(CampusPrivacy.redact(detail.meterTypeName ?? "—"))
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(24).frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20).frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
     }
     private func balance(_ detail: MeterDetail) -> some View {

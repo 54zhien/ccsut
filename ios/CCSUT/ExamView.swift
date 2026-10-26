@@ -357,7 +357,7 @@ private struct ExamRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 if let d = exam.startDate {
-                    Text(d, format: .dateTime.month(.defaultDigits).day())
+                    Text(shortDateLabel(d))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(d, format: .dateTime.weekday(.wide))
@@ -429,6 +429,12 @@ private struct ExamRow: View {
             .weekday(.wide)
             .locale(Locale(identifier: "zh_CN"))
         return d.formatted(format)
+    }
+
+    private func shortDateLabel(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        return "\(calendar.component(.month, from: date))月\(calendar.component(.day, from: date))日"
     }
 
     private var visibleTimeText: String {
