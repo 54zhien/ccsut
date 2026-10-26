@@ -640,6 +640,8 @@ struct ElectiveView: View {
             var builder = ElectiveSnapshotBuilder<TeachingClass>()
             var batchError: Error?
             if let batches = initData.pcencs, !batches.isEmpty {
+                var closedBatchError: APIError?
+                var hasSuccessfulBatch = false
                 for (pcid, pcenc) in batches.sorted(by: { $0.key < $1.key }) {
                     guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
                     let normalizedPCID = pcid.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -654,13 +656,22 @@ struct ElectiveView: View {
                         guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
                         guard let items = page.initData else { throw APIError.empty }
                         builder.append(records(for: items), batchID: normalizedPCID)
+                        hasSuccessfulBatch = true
                     } catch {
                         guard !handleCookieGenerationChange(expected: generation) else { return }
                         if error is CancellationError { throw error }
-                        if batchError == nil { batchError = error }
+                        if let apiError = error as? APIError,
+                           case .business(let code, let message) = apiError,
+                           ElectiveCatalogResponse.isChannelClosed(code: code, message: message) {
+                            closedBatchError = apiError
+                        } else if batchError == nil {
+                            batchError = error
+                        }
                     }
                 }
+                // A closed batch must not hide real failures or another batch's valid catalog.
                 if let batchError { throw batchError }
+                if !hasSuccessfulBatch, let closedBatchError { throw closedBatchError }
             } else {
                 let page = try await APIClient.shared.teachingClasses(batch: nil)
                 guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }

@@ -14,10 +14,12 @@ import Foundation
     static let shared = APIClient()
     var initResult: Result<ElectiveInit, Error> = .success(fixtureInit)
     var pageResult: Result<TeachingClassPage, Error> = .success(fixturePage)
+    var pageResultsByBatch: [String: Result<TeachingClassPage, Error>] = [:]
     var initCalls = 0
     func reset() {
         initResult = .success(Self.fixtureInit)
         pageResult = .success(Self.fixturePage)
+        pageResultsByBatch = [:]
         initCalls = 0
     }
     func electiveInit() async throws -> ElectiveInit {
@@ -25,7 +27,8 @@ import Foundation
         return try initResult.get()
     }
     func teachingClasses(batch: (String, String)?) async throws -> TeachingClassPage {
-        try pageResult.get()
+        if let batch, let result = pageResultsByBatch[batch.0] { return try result.get() }
+        return try pageResult.get()
     }
     static var fixtureInit: ElectiveInit {
         try! JSONDecoder().decode(ElectiveInit.self, from: Data(
@@ -34,6 +37,10 @@ import Foundation
     static var fixturePage: TeachingClassPage {
         try! JSONDecoder().decode(TeachingClassPage.self, from: Data(
             #"{"initData":[{"id":"catalog-course","kcmc":"Catalog course","sfkxk":"1","yxrl":"1/10"}]}"#.utf8))
+    }
+    static var multiBatchInit: ElectiveInit {
+        try! JSONDecoder().decode(ElectiveInit.self, from: Data(
+            #"{"xkxnxq":"2026-2027-1","pcencs":{"a":"encrypted-a","b":"encrypted-b"}}"#.utf8))
     }
 }
 
@@ -160,6 +167,65 @@ private actor ReadLatch {
                   && !failed.electiveState.isSnapshotVerified,
                   "unverified closure/business/transport failure preserves retry feedback and disables stale catalog actions: \(error)")
         }
+
+        let closure = APIError.business(-1, "没有可选的教学班")
+        for closedBatch in ["a", "b"] {
+            let openBatch = closedBatch == "a" ? "b" : "a"
+            APIClient.shared.reset()
+            APIClient.shared.initResult = .success(APIClient.multiBatchInit)
+            APIClient.shared.pageResultsByBatch[closedBatch] = .failure(closure)
+            let mixed = ElectiveLoadHarness(selectedModel())
+            await mixed.load()
+            check(mixed.errorText == nil && !mixed.electiveState.isChannelClosed
+                  && mixed.electiveState.isSnapshotVerified
+                  && mixed.electiveState.snapshot?.courseIDs == ["catalog-course"]
+                  && mixed.electiveState.snapshot?.batchIDsByCourse == ["catalog-course": [openBatch]],
+                  "closed batch \(closedBatch) does not discard courses or invent memberships from successful batch \(openBatch)")
+            check(mixed.electiveState.actionDecision(for: "catalog-course", kind: .enroll,
+                                                    generation: CookieJar.generation) == .allowed(batchID: openBatch),
+                  "mixed closure retains the verified course's successful batch for guarded actions")
+
+            APIClient.shared.pageResultsByBatch[openBatch] = .success(try JSONDecoder().decode(
+                TeachingClassPage.self, from: Data(#"{"initData":[]}"#.utf8)))
+            await mixed.load(force: true)
+            check(mixed.errorText == nil && !mixed.electiveState.isChannelClosed
+                  && mixed.electiveState.isSnapshotVerified
+                  && mixed.electiveState.snapshot?.courses.isEmpty == true,
+                  "a successful empty batch \(openBatch) prevents closure of the entire catalog")
+
+            for error: Error in [APIError.notLoggedIn, APIError.business(-1, "没有可选的教学班，请稍后重试"),
+                                 APIError.http(503), URLError(.notConnectedToInternet)] {
+                APIClient.shared.reset()
+                let failed = ElectiveLoadHarness(selectedModel())
+                await failed.load()
+                APIClient.shared.initResult = .success(APIClient.multiBatchInit)
+                APIClient.shared.pageResultsByBatch = [closedBatch: .failure(closure), openBatch: .failure(error)]
+                await failed.load(force: true)
+                let authenticationFailure = (error as? APIError).map {
+                    if case .notLoggedIn = $0 { return true }; return false
+                } ?? false
+                check(!failed.electiveState.isChannelClosed && !failed.electiveState.isSnapshotVerified
+                      && failed.electiveState.snapshot?.courseIDs == ["catalog-course"]
+                      && failed.errorText != nil,
+                      "closed batch \(closedBatch) cannot suppress a real failure or verify stale catalog data: \(error)")
+                check(authenticationFailure
+                      ? failed.session.refreshCount == 1
+                      : failed.session.refreshCount == 0 && failed.errorText == error.localizedDescription,
+                      "mixed closure preserves the actual failure's authentication or retry handling: \(error)")
+            }
+        }
+
+        APIClient.shared.reset()
+        let allClosed = ElectiveLoadHarness(selectedModel())
+        await allClosed.load()
+        APIClient.shared.initResult = .success(APIClient.multiBatchInit)
+        APIClient.shared.pageResultsByBatch = ["a": .failure(closure), "b": .failure(closure)]
+        await allClosed.load(force: true)
+        check(allClosed.errorText == nil && allClosed.electiveState.isChannelClosed
+              && allClosed.electiveState.snapshot == nil && !allClosed.electiveState.isSnapshotVerified
+              && allClosed.enrolledModel.isVerified && allClosed.enrolledModel.currentSummary?.count == 1,
+              "closure of every batch clears the catalog and retains independent selected results")
+
         APIClient.shared.reset()
         let expired = ElectiveLoadHarness(selectedModel())
         APIClient.shared.initResult = .failure(APIError.notLoggedIn)

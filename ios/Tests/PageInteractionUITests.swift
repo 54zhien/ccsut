@@ -981,6 +981,8 @@ final class PageInteractionUITests: XCTestCase {
             let app = launch(page, longList: true)
             let menu = app.buttons[page == "scores" ? "score-term-filter" : "exam-term-filter"]
             XCTAssertTrue(menu.waitForExistence(timeout: 5))
+            XCTAssertGreaterThanOrEqual(menu.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(menu.frame.height, 44)
             menu.tap()
             let target = app.buttons["2025–2026 学年 · 第二学期"]
             XCTAssertTrue(target.waitForExistence(timeout: 3))

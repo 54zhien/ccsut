@@ -103,8 +103,8 @@ struct EcardPaymentView: View {
         .onChange(of: amountMaximum, initial: true) { _, _ in
             normalizeDisplayedAmount()
         }
-        .onChange(of: model.receipt?.orderID) { _, orderID in
-            if orderID == nil { normalizeDisplayedAmount() }
+        .onChange(of: model.receipt != nil) { _, hasReceipt in
+            if !hasReceipt { normalizeDisplayedAmount() }
         }
         .task {
             #if DEBUG
