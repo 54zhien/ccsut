@@ -27,8 +27,14 @@ struct CCSUTApp: App {
                     case "launch": LaunchView()
                     #if DEBUG
                     case "web-login": WebLoginPreviewHost()
-                    case "elective-detail": DetailPreviewHost { CourseDetailSheet(item: InterfacePreview.classes[0]) }
-                    case "enrolled-detail": DetailPreviewHost { EnrolledCourseDetail(record: InterfacePreview.enrolledCourses(term: "2026-2027-1")[1]) }
+                    case "elective-detail":
+                        if let course = InterfacePreview.classes.first {
+                            DetailPreviewHost { CourseDetailSheet(item: course) }
+                        }
+                    case "enrolled-detail":
+                        if let record = InterfacePreview.enrolledCourses(term: "2026-2027-1").first {
+                            DetailPreviewHost { EnrolledCourseDetail(record: record) }
+                        }
                     case "campus-privacy": CampusPrivacyPreview()
                     case "campus-form-leave": CampusFormPreviewHost(kind: .leave)
                     case "campus-form-departure": CampusFormPreviewHost(kind: .departure)
