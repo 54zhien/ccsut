@@ -49,7 +49,7 @@ struct EcardPaymentView: View {
         PageScrollSurface(refresh: { await model.refreshMeter(account: session.studentId) }, refreshHaptics: true) { viewport, _ in
             instrumentPage(minimumHeight: viewport.height)
                 .frame(maxWidth: 720)
-                .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 16)
+                .padding(.horizontal, 8).padding(.top, 4).padding(.bottom, 8)
                 .frame(maxWidth: .infinity, minHeight: viewport.height)
                 .background { screenBackdrop.ignoresSafeArea() }
         }
@@ -61,7 +61,7 @@ struct EcardPaymentView: View {
         .navigationBarBackButtonHidden(true)
         .background { AcademicPopSupport() }
         .overlay(alignment: .topLeading) {
-            NagiBackButton().padding(.leading, 34).padding(.top, 34)
+            NagiBackButton().padding(.leading, 34).padding(.top, 30)
         }
         .sheet(item: $model.loginRequest, onDismiss: model.loginDismissed) { request in
             EcardLoginSheet(request: request)
@@ -122,13 +122,13 @@ struct EcardPaymentView: View {
                 result(receipt)
             } else {
                 engravedPlate
-                meterSeam.padding(.vertical, 12)
+                meterSeam.padding(.vertical, 6)
                 roomSelection
-                meterSeam.padding(.vertical, 12)
+                meterSeam.padding(.vertical, 6)
                 meterDisplay(model.detail)
-                meterSeam.padding(.vertical, 12)
+                meterSeam.padding(.vertical, 6)
                 amountSelection()
-                meterSeam.padding(.vertical, 12)
+                meterSeam.padding(.vertical, 6)
                 paymentTerminal
             }
             if model.recoveryIssue == nil, let message = model.errorText {
@@ -154,7 +154,8 @@ struct EcardPaymentView: View {
             }
         }
         .padding(18)
-        .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .topLeading)
+        // The inner face excludes its 8pt chassis and the page's 4/8pt margins.
+        .frame(maxWidth: .infinity, minHeight: max(0, minimumHeight - 28), alignment: .topLeading)
         .background(enamelSurface, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
         .padding(8)
         .background(chassisSurface(cornerRadius: 36))
@@ -187,7 +188,7 @@ struct EcardPaymentView: View {
                 .allowsHitTesting(false)
         }
         .frame(minHeight: 48)
-        .padding(.bottom, 10)
+        .padding(.bottom, 4)
     }
 
     private var engravedPlate: some View {
@@ -196,23 +197,16 @@ struct EcardPaymentView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(enamelInk.opacity(0.78))
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("电费计量")
-                    .font(.subheadline.weight(.bold))
-                    .tracking(1.2)
-                if let type = model.detail?.meterTypeName {
-                    Text(CampusPrivacy.redact(type))
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(enamelInk.opacity(0.68))
-                }
-            }
-            .foregroundStyle(enamelInk)
+            Text("电费计量")
+                .font(.subheadline.weight(.bold))
+                .tracking(1.2)
+                .foregroundStyle(enamelInk)
             Spacer(minLength: 8)
             Text("余额 · 充值")
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(enamelInk.opacity(0.66))
         }
-        .padding(.horizontal, 13).padding(.vertical, 10)
+        .padding(.horizontal, 13).padding(.vertical, 6)
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(engravedPlateFill)

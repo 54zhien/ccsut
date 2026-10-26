@@ -37,6 +37,7 @@
 - https://developer.apple.com/documentation/swiftui/draggesture
 - https://developer.apple.com/documentation/swiftui/view/accessibilityadjustableaction(_:)
 - https://developer.apple.com/documentation/swiftui/view/safeareainset(edge:alignment:spacing:content:)-4s51l
+- https://developer.apple.com/documentation/swiftui/view/presentationdetents(_:)
 
 ## 验证边界
 

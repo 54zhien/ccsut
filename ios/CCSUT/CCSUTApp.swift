@@ -262,7 +262,7 @@ struct StudentAvatar: View {
 
 struct AccountButton: View {
     @Environment(\.deviceCornerRadius) private var deviceCornerRadius
-    @ScaledMetric(relativeTo: .body) private var profileSheetHeight: CGFloat = 320
+    @ScaledMetric(relativeTo: .body) private var profileSheetHeight: CGFloat = 360
     @State private var isPresented = false
 
     var body: some View {

@@ -451,6 +451,11 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(back.isHittable)
         XCTAssertFalse(app.tabBars.firstMatch.isHittable)
         XCTAssertTrue(app.buttons["选择楼栋"].exists)
+        let pay = app.buttons["立即缴费"]
+        XCTAssertTrue(pay.isHittable, "The standard meter opens with its embedded payment key visible")
+        XCTAssertLessThanOrEqual(pay.frame.maxY, app.windows.firstMatch.frame.maxY,
+                                "The initial viewport must show the whole payment key")
+        capture(app, "physical-meter-initial-viewport")
         revealMeterControl(app.buttons["立即缴费"], in: app)
         XCTAssertTrue(back.isHittable)
         capture(app, "physical-meter-from-campus")
@@ -672,6 +677,12 @@ final class PageInteractionUITests: XCTestCase {
                 XCTAssertTrue(close.isHittable)
                 if page == "account" {
                     XCTAssertTrue(app.staticTexts["预览同学"].isHittable)
+                    if !large {
+                        let account = app.staticTexts["示例账号"]
+                        XCTAssertTrue(account.isHittable)
+                        XCTAssertLessThanOrEqual(account.frame.maxY, app.buttons["退出登录"].frame.minY,
+                                                 "The collapsed account sheet must keep the identity above its footer")
+                    }
                 }
                 capture(app, "detail-sheet-\(page)-\(large ? "large" : "standard")-edge\(edgeIndex)")
                 // Exercise real near-edge touches with a 1pt interior margin
