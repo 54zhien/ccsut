@@ -18,8 +18,9 @@ import ImageIO
     @ScaledMetric private var editorHeight: CGFloat = 108
     @ScaledMetric private var shortEditorHeight: CGFloat = 44
     private let onSubmitted: () -> Void
+    private let onLeaveSubmitted: ((LeaveTicketReceipt) -> Void)?
 
-    init(kind: CampusFormKind, account: String, onSubmitted: @escaping () -> Void = {}) {
+    init(kind: CampusFormKind, account: String, onSubmitted: @escaping () -> Void = {}, onLeaveSubmitted: ((LeaveTicketReceipt) -> Void)? = nil) {
         let api: any CampusFormServing
         let formAccount: String
         #if DEBUG
@@ -32,6 +33,7 @@ import ImageIO
         #endif
         _model = State(initialValue: CampusFormModel(kind: kind, account: formAccount, api: api, currentGeneration: { CookieJar.generation }))
         self.onSubmitted = onSubmitted
+        self.onLeaveSubmitted = onLeaveSubmitted
     }
 
     var body: some View {
@@ -263,7 +265,16 @@ import ImageIO
                         HStack { if model.isChecking { ProgressView() }; Text("查询提交结果") }.frame(maxWidth: .infinity, minHeight: 44)
                     }.buttonStyle(.glassProminent).campusActionControl().disabled(model.isChecking)
                 } else if model.state == .submitted {
-                    Button("完成") { onSubmitted(); dismiss() }.frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.glassProminent).campusActionControl()
+                    Button("完成") {
+                        if model.kind == .leave {
+                            onLeaveSubmitted?(LeaveTicketReceipt(
+                                baseline: model.configuration?.baselineRecordIDs ?? [],
+                                reason: CampusPrivacy.redact(model.draft.reason),
+                                begin: LeaveTicketReceipt.timestamp(model.draft.begin),
+                                end: LeaveTicketReceipt.timestamp(model.draft.end)))
+                        }
+                        onSubmitted(); dismiss()
+                    }.frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.glassProminent).campusActionControl()
                 } else if model.configuration != nil {
                     Button { endEditing(); model.prepareConfirmation() } label: {
                         Text("核对并提交").frame(maxWidth: .infinity, minHeight: 44)

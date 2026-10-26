@@ -1,0 +1,46 @@
+name: Leave wallet verification
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/leave-ticket-wallet]
+    paths: ['ios/**', '.github/workflows/leave-wallet-preview.yml']
+jobs:
+  wallet:
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Receipt policy
+        run: |
+          swiftc -parse-as-library ios/CCSUT/LeaveTicketReceipt.swift ios/Tests/LeaveTicketReceiptTests.swift -o "$RUNNER_TEMP/receipt-tests"
+          "$RUNNER_TEMP/receipt-tests"
+      - name: Build native app
+        run: |
+          set -o pipefail
+          xcodebuild build -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/UIPreview" CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/wallet-build.log"
+      - name: Boot simulator
+        run: bash ios/Tests/render-preview.sh --boot-only
+      - name: Wallet interaction
+        run: |
+          set -o pipefail
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/wallet.xcresult" -only-testing:CCSUTUITests/PageInteractionUITests/testLeaveWalletOpenCloseAndCancel -only-testing:CCSUTUITests/PageInteractionUITests/testLeaveWalletLargeText -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/wallet-tests.log"
+      - name: Capture dark and reduced motion
+        run: |
+          xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance dark
+          xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut --preview-ui --preview-page campus-leave
+          sleep 3
+          xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$RUNNER_TEMP/ui-screenshots/wallet-dark.png"
+          xcrun simctl spawn "$CCSUT_PREVIEW_DEVICE" defaults write com.apple.Accessibility ReduceMotionEnabled -bool YES
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/wallet-reduced.xcresult" -only-testing:CCSUTUITests/PageInteractionUITests/testLeaveWalletOpenCloseAndCancel -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO
+      - name: Export screenshots
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/wallet.xcresult" ]; then xcrun xcresulttool export attachments --path "$RUNNER_TEMP/wallet.xcresult" --output-path "$RUNNER_TEMP/wallet-attachments"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: leave-wallet-evidence
+          path: |
+            ${{ runner.temp }}/wallet-*.log
+            ${{ runner.temp }}/wallet-attachments/
+            ${{ runner.temp }}/ui-screenshots/

@@ -398,6 +398,37 @@ final class PageInteractionUITests: XCTestCase {
         }
     }
 
+    func testLeaveWalletOpenCloseAndCancel() {
+        let app = launch("campus-leave")
+        let toggle = app.buttons["leave-wallet-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        XCTAssertEqual(toggle.label, "打开票夹")
+        capture(app, "wallet-closed")
+        toggle.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["leave-ticket-preview-leave"].waitForExistence(timeout: 5))
+        capture(app, "wallet-open")
+        app.buttons["campus-record-add"].tap()
+        let close = app.buttons["关闭申请请假"]
+        XCTAssertTrue(close.waitForExistence(timeout: 8))
+        close.tap()
+        XCTAssertTrue(toggle.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.otherElements["leave-wallet-printing"].exists)
+        XCTAssertEqual(toggle.label, "收起票夹")
+        toggle.tap()
+        XCTAssertEqual(toggle.label, "打开票夹")
+        capture(app, "wallet-reclosed")
+    }
+
+    func testLeaveWalletLargeText() {
+        let app = launch("campus-leave", largeText: true)
+        let toggle = app.buttons["leave-wallet-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        toggle.tap()
+        app.swipeUp()
+        XCTAssertTrue(app.buttons["campus-record-add"].isHittable)
+        capture(app, "wallet-large-text")
+    }
+
     func testCampusRecordsSurviveFormDismissal() {
         for page in ["campus-leave", "campus-travel"] {
             let app = launch(page)
