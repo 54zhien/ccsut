@@ -33,3 +33,9 @@ TeachingWeekSnapshot includes the account string, and ScheduleView persists the 
 ## Verification limits
 
 All executed checks used existing offline or synthetic fixtures on Windows and passed. No live school login, form submission, attachment upload, payment, native iOS build, simulator UI run, or physical-device run was performed in this audit. The results do not establish live school or device acceptance. This audit changed no product source.
+
+## Follow-up review of the redesign
+
+The initial findings above retain their original snapshot and evidence. A subsequent independent read-only review examined production changes from `d50b437` through `a52392b`: optional name/account-cookie generation isolation, Today versus selected-grid-week ownership, removed reminder requests, payment single-send/persisted recovery, record lifecycle and navigation routes. It found no new validated normal-use regression. The later physical-meter changes through `9ebbe3a` received a narrower review of amount limits, confirmation/recovery, selection retention, long balance rendering and actual control visibility. Those changes do not modify the application-submission recovery contract; the medium finding remains unresolved.
+
+Native compilation, simulator interaction and Release package evidence are recorded separately in [Apple design verification](2026-10-26-apple-design-verification.md). They extend verification of the redesign without changing the original audit's evidence boundaries. Real account identity recovery, school writes, physical-device behavior and VoiceOver still require on-device acceptance.

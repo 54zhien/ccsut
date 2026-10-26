@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A00000000000000000000053 /* VintageAmountDrum.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000053; };
 		A00000000000000000000052 /* MeterAmount.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000052; };
 		A00000000000000000000051 /* TopBarMaterialBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000051; };
 		A00000000000000000000050 /* TopBarBlurProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000050; };
@@ -79,6 +80,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B00000000000000000000053 /* VintageAmountDrum.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VintageAmountDrum.swift; sourceTree = "<group>"; };
 		B00000000000000000000052 /* MeterAmount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterAmount.swift; sourceTree = "<group>"; };
 		B00000000000000000000051 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopBarMaterialBackground.swift; sourceTree = "<group>"; };
 		B00000000000000000000050 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopBarBlurProfile.swift; sourceTree = "<group>"; };
@@ -194,6 +196,7 @@
 				B00000000000000000000010 /* ElectiveView.swift */,
 				B00000000000000000000013 /* WebPanel.swift */,
 				B00000000000000000000052 /* MeterAmount.swift */,
+				B00000000000000000000053 /* VintageAmountDrum.swift */,
 				B00000000000000000000014 /* ScoreView.swift */,
 				B00000000000000000000015 /* WebLoginSheet.swift */,
 				B00000000000000000000016 /* CourseDetailSheet.swift */,
@@ -343,6 +346,7 @@
 				A00000000000000000000010 /* ElectiveView.swift in Sources */,
 				A00000000000000000000012 /* WebPanel.swift in Sources */,
 				A00000000000000000000052 /* MeterAmount.swift in Sources */,
+				A00000000000000000000053 /* VintageAmountDrum.swift in Sources */,
 				A00000000000000000000013 /* ScoreView.swift in Sources */,
 				A00000000000000000000014 /* WebLoginSheet.swift in Sources */,
 				A00000000000000000000015 /* CourseDetailSheet.swift in Sources */,

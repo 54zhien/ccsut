@@ -177,6 +177,9 @@ jobs:
           fi
           if [ "$TEST_SCOPE" = 'meter-final' ]; then
             TEST_SELECTION=(
+                -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterStartupRecoveryControls
+                -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicDetailSupportsContentSwipeBack
+                -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
               -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
               -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterAdaptiveControls
               -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterReturnsToCampus

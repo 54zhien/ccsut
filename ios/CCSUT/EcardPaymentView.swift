@@ -6,6 +6,7 @@ import Combine
 struct EcardPaymentView: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var model = EcardPaymentModel()
     @State private var showingRecoveryHelp = false
     @State private var activeSelection: MeterSelectionField?
@@ -28,6 +29,15 @@ struct EcardPaymentView: View {
             let context = MeterContext()
             let previewBalance = ProcessInfo.processInfo.arguments.contains("--preview-long-balance") ? "123456.78" : "36.80"
             value.detail = MeterDetail(context: context, show: ["房间信息": "示例宿舍 1 栋 · 101 室", "表类型": "电表", "剩余金额": previewBalance], dataType: nil)
+            if ProcessInfo.processInfo.arguments.contains("--preview-multiple-campuses") {
+                value.campuses = [option("示例东校区", "preview-east"), option("示例西校区", "preview-west")]
+                value.campus = nil; value.buildings = []; value.building = nil
+                value.rooms = []; value.room = nil; value.detail = nil
+            }
+            if ProcessInfo.processInfo.arguments.contains("--preview-meter-startup-error") {
+                value.errorText = "暂时无法读取电表，请重新加载"
+                value.fee = nil; value.detail = nil
+            }
             if InterfacePreview.page.hasPrefix("campus-electricity-recovery") {
                 switch InterfacePreview.page {
                 case "campus-electricity-recovery-read": value.recoveryIssue = .readUnavailable
@@ -48,14 +58,25 @@ struct EcardPaymentView: View {
     }
 
     var body: some View {
-        PageScrollSurface(refresh: { await model.refreshMeter(account: session.studentId) }, refreshHaptics: true) { viewport, _ in
+        PageScrollSurface(refresh: { await model.refreshMeter(account: session.studentId) }, refreshHaptics: true, backgroundColor: .clear) { viewport, _ in
             let meterWidth = max(280, min(390, viewport.width - 24))
-            instrumentPage(width: meterWidth)
-                .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 14)
+            let useAdaptiveLayout = dynamicTypeSize.isAccessibilitySize || dynamicTypeSize >= .xxxLarge || meterWidth < 340
+            ZStack(alignment: .top) {
+                meterStageSurface.ignoresSafeArea()
+                Group {
+                    if useAdaptiveLayout {
+                        instrumentPage(width: meterWidth)
+                    } else {
+                        photographicMeter(width: meterWidth)
+                    }
+                }
                 .frame(maxWidth: .infinity)
+                .padding(.horizontal, 8).padding(.top, 4).padding(.bottom, 8)
+            }
+            .frame(maxWidth: .infinity, minHeight: viewport.height, alignment: .top)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(Color(.systemGroupedBackground))
+        .background(meterStageSurface.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .navigationTitle("电费缴费")
         .navigationBarTitleDisplayMode(.inline)
@@ -74,7 +95,7 @@ struct EcardPaymentView: View {
             }
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, minHeight: 52)
-            .background(Color(.systemGroupedBackground))
+            .background(meterStageSurface)
         }
         .background { AcademicPopSupport() }
         .sheet(item: $model.loginRequest, onDismiss: model.loginDismissed) { request in
@@ -118,6 +139,363 @@ struct EcardPaymentView: View {
         .onDisappear { model.stopQueries() }
     }
 
+    private var meterStageSurface: some View {
+        ZStack {
+            LinearGradient(
+                colors: colorScheme == .dark
+                    ? [Color(red: 0.20, green: 0.23, blue: 0.21), Color(red: 0.12, green: 0.14, blue: 0.13)]
+                    : [Color(red: 0.78, green: 0.75, blue: 0.69), Color(red: 0.67, green: 0.64, blue: 0.58)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            RadialGradient(
+                colors: [Color.white.opacity(colorScheme == .dark ? 0.07 : 0.30), .clear],
+                center: UnitPoint(x: 0.18, y: 0.12), startRadius: 8, endRadius: 620
+            )
+        }
+    }
+
+    /// The generated meter is only the molded shell and glass. Every value and
+    /// interactive control above it remains live SwiftUI content.
+    private func photographicMeter(width: CGFloat) -> some View {
+        let scale = width / 1024
+        let height = width * 1.5
+        return ZStack(alignment: .topLeading) {
+            Image("MeterInstrument")
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: width, height: height)
+                .accessibilityHidden(true)
+                .allowsHitTesting(false)
+
+            if let issue = model.recoveryIssue {
+                photographicRecovery(issue, scale: scale)
+            } else if let receipt = model.receipt {
+                photographicReceipt(receipt, scale: scale)
+            } else {
+                photographicForm(scale: scale)
+            }
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.48 : 0.30), radius: width * 0.055, x: 0, y: width * 0.045)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func photographicForm(scale: CGFloat) -> some View {
+        let rawBalance = model.detail?.show["剩余金额"] ?? (model.isStarting ? "读取中" : "—")
+        let statusMessage = model.errorText ?? model.loadingText ?? model.amountHint
+        let needsCampus = model.campus == nil && model.campuses.count > 1
+        return Group {
+            photographicSelectorWindow(field: needsCampus ? .campus : .building,
+                                       options: needsCampus ? model.campuses : model.buildings,
+                                       value: needsCampus ? model.campus : model.building, scale: scale)
+                .frame(width: scale * 320, height: max(44, scale * 125))
+                .position(x: scale * 320, y: scale * 330)
+
+            photographicSelectorWindow(field: .room, options: model.rooms, value: model.room, scale: scale)
+                .frame(width: scale * 320, height: max(44, scale * 125))
+                .position(x: scale * 704, y: scale * 330)
+
+            Text("充值金额 · 元")
+                .font(.system(size: max(10, scale * 31), weight: .semibold))
+                .foregroundStyle(Color(red: 0.13, green: 0.13, blue: 0.12))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(width: scale * 550, height: max(20, scale * 48))
+                .position(x: scale * 512, y: scale * 535)
+
+            photographicAmountWheels(scale: scale)
+                .frame(width: scale * 500, height: max(54, scale * 210))
+                .contextMenu { amountPresetKeys }
+                .position(x: scale * 512, y: scale * 685)
+
+            photographicBalance(rawBalance, scale: scale,
+                                warning: (model.detail?.remainingAmount ?? 0) < 0 ? "当前欠费" : nil)
+                .frame(width: scale * 550, height: max(44, scale * 72))
+                .position(x: scale * 512, y: scale * 870)
+
+            if let statusMessage, !statusMessage.isEmpty {
+                Text(CampusPrivacy.redact(statusMessage))
+                    .font(.system(size: max(9, scale * 26), weight: .medium))
+                    .foregroundStyle(Color(red: 0.97, green: 0.78, blue: 0.55))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.72)
+                    .frame(width: scale * 720, height: max(28, scale * 78))
+                    .position(x: scale * 512, y: scale * 1010)
+            }
+
+            if model.canOpenLogin {
+                photographicActionButton(title: "打开认证页面", accessibilityLabel: "打开认证页面",
+                                         identifier: "ecard-open-login", width: scale * 470,
+                                         height: max(44, scale * 124), isEnabled: true,
+                                         action: model.openLogin)
+                    .position(x: scale * 512, y: scale * 1215)
+            } else if model.errorText != nil && !canPayDisplayedAmount {
+                photographicActionButton(title: "重新加载", accessibilityLabel: "重新加载",
+                                         identifier: "meter-read-retry", width: scale * 470,
+                                         height: max(44, scale * 124),
+                                         isEnabled: !model.isStarting && !model.isSubmitting) {
+                    model.start(account: session.studentId, force: true)
+                }
+                .position(x: scale * 512, y: scale * 1215)
+            } else {
+                photographicActionButton(title: "立即缴费", accessibilityLabel: "立即缴费",
+                                         identifier: "meter-payment-submit", width: scale * 470,
+                                         height: max(44, scale * 124), isEnabled: canPayDisplayedAmount) {
+                    guard canPayDisplayedAmount else { return }
+                    model.prepareConfirmation()
+                }
+                .position(x: scale * 512, y: scale * 1215)
+            }
+        }
+    }
+
+    private func photographicSelectorWindow(field: MeterSelectionField, options: [ThirdOption],
+                                             value: String?, scale: CGFloat) -> some View {
+        let selectedName = CampusPrivacy.redact(options.first(where: { $0.value == value })?.name ?? "请选择")
+        let canChangeCampus = field == .building && model.campuses.count > 1
+        return Button { activeSelection = options.isEmpty && canChangeCampus ? .campus : field } label: {
+            photographicStaticLCD(label: field.title, value: selectedName, scale: scale)
+                .privacySensitive()
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .gesture(MeterSelectorTurnGesture(isEnabled: !options.isEmpty && !model.isSubmitting) { translation in
+            turnSelector(field, options: options, value: value, horizontal: translation.width,
+                         vertical: translation.height)
+        })
+        .contextMenu {
+            if case .building = field, model.campuses.count > 1 {
+                Button("选择校区", systemImage: "mappin.and.ellipse") { activeSelection = .campus }
+            }
+        }
+        .disabled((options.isEmpty && !canChangeCampus) || model.isSubmitting)
+        .accessibilityLabel("选择\(field.title)")
+        .accessibilityValue(selectedName)
+        .accessibilityIdentifier(field.controlIdentifier)
+    }
+
+    @ViewBuilder private func photographicAmountWheels(scale: CGFloat) -> some View {
+        if amountMaximum >= MeterAmount.minimum {
+            HStack(spacing: 0) {
+                photographicDigit(place: 100, label: "百位", scale: scale)
+                photographicDigit(place: 10, label: "十位", scale: scale)
+                photographicDigit(place: 1, label: "个位", scale: scale)
+            }
+        } else {
+            Text(model.isStarting ? "读取缴费规则…" : "暂不可用")
+                .font(.system(size: max(12, scale * 35), weight: .medium))
+                .foregroundStyle(.white.opacity(0.84))
+                .frame(maxWidth: .infinity, minHeight: max(54, scale * 210))
+        }
+    }
+
+    private func photographicDigit(place: Int, label: String, scale: CGFloat) -> some View {
+        let digit = amountValue / place % 10
+        let choices = MeterAmount.digits(amount: amountValue, place: place, maximum: amountMaximum)
+        return VintageAmountDrum(
+            digit: digit,
+            digits: choices,
+            height: max(54, scale * 210),
+            isEnabled: amountMaximum >= MeterAmount.minimum && !model.isSubmitting
+        ) { movement in
+            guard movement != 0 else { return }
+            adjustDigit(place: place, direction: movement > 0 ? 1 : -1, steps: abs(movement))
+        }
+        .accessibilityLabel("金额\(label)")
+        .accessibilityValue(String(digit))
+        .accessibilityIdentifier("meter-digit-\(place)")
+    }
+
+    private func photographicBalance(_ rawValue: String, scale: CGFloat, warning: String?) -> some View {
+        HStack(spacing: 5) {
+            if let warning {
+                Text(warning)
+                    .font(.system(size: max(8, scale * 23), weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+            }
+            Text("余额")
+                .font(.system(size: max(9, scale * 25), weight: .medium))
+                .lineLimit(1)
+            Text("\(rawValue) 元")
+                .font(.system(size: max(11, scale * 32), weight: .semibold, design: .rounded).monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+        }
+        .foregroundStyle(Color(red: 0.15, green: 0.14, blue: 0.12))
+        .frame(maxWidth: .infinity, minHeight: max(44, scale * 72))
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("剩余金额")
+        .accessibilityValue("\(rawValue) 元")
+        .accessibilityIdentifier("剩余金额")
+    }
+
+    private func photographicRecovery(_ issue: EcardReceiptRecoveryError, scale: CGFloat) -> some View {
+        Group {
+            photographicStaticLCD(label: "订单状态", value: "待确认订单", scale: scale)
+                .frame(width: scale * 320, height: max(44, scale * 125))
+                .position(x: scale * 320, y: scale * 330)
+            photographicStaticLCD(label: "缴费保护", value: "新缴费已暂停", scale: scale)
+                .frame(width: scale * 320, height: max(44, scale * 125))
+                .position(x: scale * 704, y: scale * 330)
+            Text("待确认订单需要恢复")
+                .font(.system(size: max(11, scale * 32), weight: .semibold))
+                .foregroundStyle(.white.opacity(0.94))
+                .frame(width: scale * 500, height: max(24, scale * 48))
+                .position(x: scale * 512, y: scale * 618)
+            Text(CampusPrivacy.redact(issue.localizedDescription))
+                .font(.system(size: max(9, scale * 26), weight: .medium))
+                .foregroundStyle(.white.opacity(0.84))
+                .multilineTextAlignment(.center)
+                .lineLimit(4)
+                .minimumScaleFactor(0.65)
+                .frame(width: scale * 470, height: max(54, scale * 138))
+                .position(x: scale * 512, y: scale * 704)
+            Text("新缴费已锁定，勿重复缴费")
+                .font(.system(size: max(9, scale * 25), weight: .medium))
+                .foregroundStyle(Color(red: 0.15, green: 0.14, blue: 0.12))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .frame(width: scale * 550, height: max(44, scale * 72))
+                .position(x: scale * 512, y: scale * 870)
+            Button("核实原订单") { showingRecoveryHelp = true }
+                .buttonStyle(MeterKeyButtonStyle())
+                .frame(width: scale * 410, height: max(44, scale * 100))
+                .position(x: scale * 512, y: scale * 1055)
+                .accessibilityIdentifier("payment-recovery-help")
+            photographicActionButton(title: model.isStarting ? "正在读取" : "重试读取",
+                                     accessibilityLabel: "重试读取", identifier: "payment-recovery-retry",
+                                     width: scale * 470, height: max(44, scale * 124),
+                                     isEnabled: !model.isStarting && !model.isSubmitting && !model.isChecking) {
+                model.retryRecovery(account: session.studentId)
+            }
+            .position(x: scale * 512, y: scale * 1215)
+        }
+    }
+
+    private func photographicReceipt(_ receipt: EcardPaymentModel.Receipt, scale: CGFloat) -> some View {
+        let status: String = switch receipt.status {
+        case .completed: "缴费成功"
+        case .pending: "结果待确认"
+        case .failed: "缴费未完成"
+        }
+        return Group {
+            photographicStaticLCD(label: "缴费房间", value: CampusPrivacy.redact(receipt.room), scale: scale)
+                .frame(width: scale * 320, height: max(44, scale * 125))
+                .position(x: scale * 320, y: scale * 330)
+            photographicStaticLCD(label: "缴费状态", value: status, scale: scale)
+                .frame(width: scale * 320, height: max(44, scale * 125))
+                .position(x: scale * 704, y: scale * 330)
+            Text(status)
+                .font(.system(size: max(11, scale * 32), weight: .semibold))
+                .foregroundStyle(.white.opacity(0.94))
+                .frame(width: scale * 500, height: max(24, scale * 48))
+                .position(x: scale * 512, y: scale * 618)
+            Text("¥\(CampusPrivacy.redact(receipt.amount)) 元")
+                .font(.system(size: max(20, scale * 72), weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.96))
+                .lineLimit(1)
+                .minimumScaleFactor(0.52)
+                .frame(width: scale * 500, height: max(54, scale * 138))
+                .position(x: scale * 512, y: scale * 704)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("缴费金额")
+                .accessibilityValue("\(CampusPrivacy.redact(receipt.amount)) 元")
+            Text(receipt.status == .pending ? "请查询原订单，不要重复缴费" : CampusPrivacy.redact(receipt.room))
+                .font(.system(size: max(9, scale * 25), weight: .medium))
+                .foregroundStyle(Color(red: 0.15, green: 0.14, blue: 0.12))
+                .lineLimit(2)
+                .minimumScaleFactor(0.68)
+                .multilineTextAlignment(.center)
+                .frame(width: scale * 550, height: max(44, scale * 72))
+                .position(x: scale * 512, y: scale * 870)
+            VStack(spacing: 3) {
+                if let orderID = receipt.orderID {
+                    Text("订单号 \(CampusPrivacy.redact(orderID))")
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                }
+                if let message = model.errorText ?? receipt.message, !message.isEmpty {
+                    Text(CampusPrivacy.redact(message)).lineLimit(2)
+                } else if receipt.status == .completed {
+                    Text("电表到账约 1–5 分钟")
+                }
+            }
+            .font(.system(size: max(10, scale * 27), weight: .medium))
+            .foregroundStyle(Color(red: 0.97, green: 0.88, blue: 0.72))
+            .multilineTextAlignment(.center)
+            .minimumScaleFactor(0.8)
+            .frame(width: scale * 720, height: max(54, scale * 154))
+            .position(x: scale * 512, y: scale * 1020)
+            if model.canOpenLogin {
+                photographicActionButton(title: "打开认证页面", accessibilityLabel: "打开认证页面",
+                                         identifier: "ecard-open-login", width: scale * 470,
+                                         height: max(44, scale * 124), isEnabled: true,
+                                         action: model.openLogin)
+                    .position(x: scale * 512, y: scale * 1215)
+            } else if receipt.status == .pending {
+                photographicActionButton(title: model.isStarting ? "正在连接" : model.isChecking ? "正在查询" : "查询支付结果",
+                                         accessibilityLabel: "查询支付结果", identifier: "pending-order-query",
+                                         width: scale * 470, height: max(44, scale * 124),
+                                         isEnabled: !model.isChecking && !model.isStarting) {
+                    Task { await model.checkOrder() }
+                }
+                .position(x: scale * 512, y: scale * 1215)
+            } else {
+                photographicActionButton(title: receipt.status == .completed ? "返回缴费页面" : "返回修改",
+                                         accessibilityLabel: receipt.status == .completed ? "返回缴费页面" : "返回修改",
+                                         identifier: "payment-result-return", width: scale * 470,
+                                         height: max(44, scale * 124), isEnabled: true,
+                                         action: model.returnToForm)
+                    .position(x: scale * 512, y: scale * 1215)
+            }
+        }
+    }
+
+    private func photographicStaticLCD(label: String, value: String, scale: CGFloat) -> some View {
+        VStack(spacing: 1) {
+            Text(label)
+                .font(.system(size: max(8, scale * 24), weight: .medium))
+                .lineLimit(1)
+            Text(value)
+                .font(.system(size: max(9, scale * 31), weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.48)
+        }
+        .foregroundStyle(Color(red: 0.025, green: 0.035, blue: 0.02))
+        .multilineTextAlignment(.center)
+        .frame(width: scale * 260)
+        .background {
+            RoundedRectangle(cornerRadius: scale * 10)
+                .fill(Color.white.opacity(0.20))
+                .frame(width: scale * 280, height: scale * 78)
+                .allowsHitTesting(false)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func photographicActionButton(title: String, accessibilityLabel: String, identifier: String,
+                                          width: CGFloat, height: CGFloat, isEnabled: Bool,
+                                          action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: max(13, width * 0.040), weight: .bold))
+                .foregroundStyle(Color.white.opacity(0.96))
+                .shadow(color: .black.opacity(0.8), radius: 1, x: 0, y: 1)
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
+                .frame(width: width, height: height)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(MeterActuatorButtonStyle())
+        .disabled(!isEnabled)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityIdentifier(identifier)
+    }
+
     private func instrumentPage(width: CGFloat) -> some View {
         let isRecovering = model.recoveryIssue != nil
         let hasReceipt = model.receipt != nil
@@ -136,9 +514,9 @@ struct EcardPaymentView: View {
                         VStack(spacing: 7) {
                             engravedPlate
                             roomSelection
-                            meterDisplay(model.detail)
-                            observationSlot
                             amountSelection()
+                            meterSeam
+                            adaptiveBalance
                         }
                     }
                     if model.recoveryIssue == nil, let message = model.errorText {
@@ -174,6 +552,23 @@ struct EcardPaymentView: View {
         .frame(maxWidth: width, alignment: .top)
         .frame(maxWidth: .infinity)
         .padding(.top, 2)
+    }
+
+    private var adaptiveBalance: some View {
+        let rawValue = model.detail?.show["剩余金额"] ?? (model.isStarting ? "读取中" : "—")
+        return VStack(spacing: 3) {
+            Text("剩余金额").font(.caption).foregroundStyle(enamelInk.opacity(0.76))
+            Text("\(rawValue) 元")
+                .font(.body.weight(.semibold).monospacedDigit())
+                .foregroundStyle(enamelInk)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("剩余金额")
+        .accessibilityValue("\(rawValue) 元")
+        .accessibilityIdentifier("剩余金额")
     }
 
     private func meterHanger(width: CGFloat) -> some View {
@@ -463,6 +858,11 @@ struct EcardPaymentView: View {
         }
         .buttonStyle(.plain)
         .background(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.12))
+        .contextMenu {
+            if case .building = field, model.campuses.count > 1 {
+                Button("选择校区", systemImage: "mappin.and.ellipse") { activeSelection = .campus }
+            }
+        }
         .gesture(MeterSelectorTurnGesture(isEnabled: !options.isEmpty && !model.isSubmitting) { translation in
             turnSelector(field, options: options, value: value, horizontal: translation.width,
                          vertical: translation.height)
@@ -698,6 +1098,7 @@ struct EcardPaymentView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("剩余金额")
         .accessibilityValue("\(rawValue) 元")
+        .accessibilityIdentifier("剩余金额")
     }
 
     private func amountSelection() -> some View {
@@ -709,12 +1110,19 @@ struct EcardPaymentView: View {
                 Text("¥\(amountValue) 元")
                     .font(.caption2.weight(.semibold).monospacedDigit()).foregroundStyle(enamelInk.opacity(0.70))
             }
-            HStack(spacing: 5) {
-                amountThumbwheel(place: 100, label: "百位")
-                amountThumbwheel(place: 10, label: "十位")
-                amountThumbwheel(place: 1, label: "个位")
+            if amountMaximum >= MeterAmount.minimum {
+                HStack(spacing: 5) {
+                    amountThumbwheel(place: 100, label: "百位")
+                    amountThumbwheel(place: 10, label: "十位")
+                    amountThumbwheel(place: 1, label: "个位")
+                }
+                .padding(.horizontal, 3)
+                .contextMenu { amountPresetKeys }
+            } else {
+                Text(model.isStarting ? "读取缴费规则…" : "暂不可用")
+                    .font(.caption.weight(.medium)).foregroundStyle(enamelInk.opacity(0.76))
+                    .frame(maxWidth: .infinity, minHeight: 44)
             }
-            .padding(.horizontal, 3)
             Text(amountMaximum >= MeterAmount.minimum
                  ? "可充值 \(MeterAmount.minimum)–\(amountMaximum) 元"
                  : "正在获取可充值金额范围")
@@ -747,76 +1155,18 @@ struct EcardPaymentView: View {
 
     private func amountThumbwheel(place: Int, label: String) -> some View {
         let currentDigit = amountValue / place % 10
-        return VStack(spacing: 2) {
-            MeterRollingGlyph(value: String(currentDigit), foreground: drumInk, height: 42)
-                .frame(maxWidth: .infinity, minHeight: 42)
-                .background(counterRollSurface)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.35), lineWidth: 0.8)
-                }
-                .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 10).onEnded { gesture in
-                    guard !model.isSubmitting,
-                          amountMaximum >= MeterAmount.minimum,
-                          abs(gesture.translation.height) >= 8 else { return }
-                    let direction = gesture.translation.height < 0 ? 1 : -1
-                    guard canAdjustDigit(place: place, direction: direction) else { return }
-                    let steps = max(1, Int(abs(gesture.translation.height) / 24))
-                    adjustDigit(place: place, direction: direction, steps: steps)
-                })
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("金额\(label)")
-                .accessibilityValue("\(currentDigit)")
-                .accessibilityAdjustableAction { direction in
-                    guard !model.isSubmitting, amountMaximum >= MeterAmount.minimum else { return }
-                    switch direction {
-                    case .increment:
-                        guard canAdjustDigit(place: place, direction: 1) else { return }
-                        adjustDigit(place: place, direction: 1)
-                    case .decrement:
-                        guard canAdjustDigit(place: place, direction: -1) else { return }
-                        adjustDigit(place: place, direction: -1)
-                    @unknown default: break
-                    }
-                }
-                .accessibilityIdentifier("meter-digit-\(place)")
-
-            HStack(spacing: 3) {
-                amountArrowButton(place: place, label: label, direction: -1)
-                amountArrowButton(place: place, label: label, direction: 1)
-            }
+        return VintageAmountDrum(
+            digit: currentDigit,
+            digits: MeterAmount.digits(amount: amountValue, place: place, maximum: amountMaximum),
+            height: dynamicTypeSize.isAccessibilitySize ? 100 : 72,
+            isEnabled: amountMaximum >= MeterAmount.minimum && !model.isSubmitting
+        ) { movement in
+            guard movement != 0 else { return }
+            adjustDigit(place: place, direction: movement > 0 ? 1 : -1, steps: abs(movement))
         }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var counterRollSurface: LinearGradient {
-        LinearGradient(colors: [Color(red: 0.035, green: 0.043, blue: 0.042), Color(red: 0.13, green: 0.14, blue: 0.13)],
-                       startPoint: .top, endPoint: .bottom)
-    }
-
-    private var drumInk: Color { Color(red: 0.94, green: 0.93, blue: 0.86) }
-
-    private func amountArrowButton(place: Int, label: String, direction: Int) -> some View {
-        let increasing = direction > 0
-        return Button {
-            adjustDigit(place: place, direction: direction)
-        } label: {
-            Image(systemName: increasing ? "chevron.up" : "chevron.down")
-                .font(.caption2.weight(.heavy))
-                .foregroundStyle(Color.white.opacity(0.84))
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .background {
-                    LinearGradient(colors: [Color(red: 0.27, green: 0.28, blue: 0.28), Color(red: 0.10, green: 0.11, blue: 0.11)],
-                                   startPoint: .top, endPoint: .bottom)
-                }
-                .overlay { Rectangle().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.7) }
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(MeterActuatorButtonStyle())
-        .disabled(!canAdjustDigit(place: place, direction: direction) || model.isSubmitting)
-        .accessibilityLabel("\(increasing ? "增加" : "减少")金额\(label)")
-        .accessibilityIdentifier("meter-digit-\(place)-\(increasing ? "increase" : "decrease")")
+        .accessibilityLabel("金额\(label)")
+        .accessibilityValue("\(currentDigit)")
+        .accessibilityIdentifier("meter-digit-\(place)")
     }
 
     private func canAdjustDigit(place: Int, direction: Int) -> Bool {
@@ -857,18 +1207,7 @@ struct EcardPaymentView: View {
 
     private func paymentTerminal(width: CGFloat) -> some View {
         terminalHousing(width: max(250, width * 0.88)) {
-            VStack(spacing: 5) {
-                HStack(spacing: 7) {
-                    meterFastener()
-                    Text("充值预置")
-                        .font(.caption2.weight(.semibold)).foregroundStyle(Color.white.opacity(0.74))
-                    Spacer(minLength: 2)
-                    Text("¥\(amountValue)")
-                        .font(.caption2.weight(.bold).monospacedDigit()).foregroundStyle(Color.white.opacity(0.88))
-                    meterFastener()
-                }
-                HStack(spacing: 3) { amountPresetKeys }
-
+            VStack(spacing: 7) {
                 Button {
                     guard canPayDisplayedAmount else { return }
                     model.prepareConfirmation()
@@ -920,7 +1259,8 @@ struct EcardPaymentView: View {
     private func confirmation(_ confirmed: EcardPaymentModel.Confirmation) -> some View {
         GeometryReader { geometry in
             let width = max(280, min(390, geometry.size.width - 32))
-            ScrollView {
+            if dynamicTypeSize.isAccessibilitySize || dynamicTypeSize >= .xxxLarge || width < 340 {
+                ScrollView {
                 VStack(spacing: -9) {
                     meterHanger(width: min(88, width * 0.24))
                         .frame(height: 34).zIndex(1)
@@ -974,9 +1314,93 @@ struct EcardPaymentView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
+                }
+                .background(Color(.systemGroupedBackground))
+            } else {
+                ScrollView {
+                    photographicConfirmation(confirmed, width: width)
+                        .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
+                }
+                .background(meterStageSurface)
             }
-            .background(Color(.systemGroupedBackground))
         }
+    }
+
+    private func photographicConfirmation(_ confirmed: EcardPaymentModel.Confirmation, width: CGFloat) -> some View {
+        let scale = width / 1024
+        let height = width * 1.5
+        return ZStack(alignment: .topLeading) {
+            Image("MeterInstrument")
+                .resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                .frame(width: width, height: height)
+                .accessibilityHidden(true).allowsHitTesting(false)
+
+            photographicStaticLCD(label: "缴费房间", value: CampusPrivacy.redact(confirmed.room), scale: scale)
+                .frame(width: scale * 320, height: max(44, scale * 125))
+                .position(x: scale * 320, y: scale * 330)
+            photographicStaticLCD(label: "支付方式", value: "一卡通余额", scale: scale)
+                .frame(width: scale * 320, height: max(44, scale * 125))
+                .position(x: scale * 704, y: scale * 330)
+            Text("确认缴费")
+                .font(.system(size: max(10, scale * 31), weight: .semibold))
+                .foregroundStyle(Color(red: 0.13, green: 0.13, blue: 0.12))
+                .frame(width: scale * 550, height: max(20, scale * 48))
+                .position(x: scale * 512, y: scale * 535)
+            Text("¥\(confirmed.amount.ecardAmountText) 元")
+                .font(.system(size: max(20, scale * 72), weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.96))
+                .lineLimit(1).minimumScaleFactor(0.52)
+                .frame(width: scale * 500, height: max(54, scale * 210))
+                .position(x: scale * 512, y: scale * 685)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("确认缴费金额")
+                .accessibilityValue("\(confirmed.amount.ecardAmountText) 元")
+            Text(CampusPrivacy.redact(confirmed.room))
+                .font(.system(size: max(12, scale * 34), weight: .medium))
+                .foregroundStyle(.white.opacity(0.96))
+                .lineLimit(2).minimumScaleFactor(0.85)
+                .multilineTextAlignment(.center)
+                .frame(width: scale * 570, height: max(32, scale * 88))
+                .position(x: scale * 512, y: scale * 790)
+                .privacySensitive()
+                .accessibilityIdentifier("payment-confirmation-room")
+            Text("免密支付，确认后将直接扣款")
+                .font(.system(size: max(9, scale * 25), weight: .medium))
+                .foregroundStyle(Color(red: 0.15, green: 0.14, blue: 0.12))
+                .lineLimit(1).minimumScaleFactor(0.68)
+                .frame(width: scale * 550, height: max(44, scale * 72))
+                .position(x: scale * 512, y: scale * 870)
+
+            if !model.isSubmitting {
+                Button("关闭确认缴费") { model.confirmation = nil }
+                    .buttonStyle(MeterKeyButtonStyle())
+                    .frame(width: scale * 410, height: max(44, scale * 100))
+                    .position(x: scale * 512, y: scale * 1055)
+            }
+
+            if model.isSubmitting {
+                HStack(spacing: 8) {
+                    ProgressView().tint(.white)
+                    Text("正在提交，请勿重复缴费")
+                        .font(.system(size: max(11, scale * 30), weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.95))
+                        .lineLimit(1).minimumScaleFactor(0.65)
+                }
+                .frame(width: scale * 470, height: max(44, scale * 124))
+                .position(x: scale * 512, y: scale * 1215)
+            } else {
+                photographicActionButton(title: "确认支付 \(confirmed.amount.ecardAmountText) 元",
+                                         accessibilityLabel: "确认支付 \(confirmed.amount.ecardAmountText) 元",
+                                         identifier: "payment-confirmation-submit", width: scale * 470,
+                                         height: max(44, scale * 124), isEnabled: true) {
+                    Task { await model.submit(confirmed) }
+                }
+                .position(x: scale * 512, y: scale * 1215)
+            }
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.48 : 0.30), radius: width * 0.055, x: 0, y: width * 0.045)
+        .frame(maxWidth: .infinity)
     }
 
     private func result(_ receipt: EcardPaymentModel.Receipt) -> some View {

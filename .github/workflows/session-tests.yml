@@ -121,6 +121,12 @@ jobs:
       - name: Run optional student name and logout cache regressions
         if: always()
         run: python3 ios/Tests/run-student-name-tests.py
+      - name: Run bounded physical meter amount regressions
+        if: always()
+        run: |
+          set -e
+          xcrun swiftc -parse-as-library ios/CCSUT/MeterAmount.swift ios/Tests/MeterAmountTests.swift -o "$RUNNER_TEMP/meter-amount-tests"
+          "$RUNNER_TEMP/meter-amount-tests"
       - name: Run retained material top blur regressions
         if: always()
         run: |

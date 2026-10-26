@@ -374,36 +374,66 @@ final class PageInteractionUITests: XCTestCase {
         func digit(_ place: Int) -> XCUIElement {
             app.descendants(matching: .any).matching(identifier: "meter-digit-\(place)").firstMatch
         }
-        let increase = app.buttons["meter-digit-100-increase"]
-        XCTAssertTrue(increase.waitForExistence(timeout: 8))
-        revealMeterControl(increase, in: app)
+        XCTAssertTrue(digit(100).waitForExistence(timeout: 8))
+        revealMeterControl(digit(100), in: app)
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "剩余金额").firstMatch.exists)
-        for _ in 0..<4 { increase.tap() }
+        for _ in 0..<4 { turnMeterDrum(digit(100)) }
         XCTAssertEqual(digit(100).value as? String, "4")
         XCTAssertEqual(digit(10).value as? String, "0")
         XCTAssertEqual(digit(1).value as? String, "0")
-        XCTAssertFalse(increase.isEnabled)
-        let preset = app.buttons["充值100元"]
-        revealMeterControl(preset, in: app)
-        preset.tap()
-        let decrease = app.buttons["meter-digit-100-decrease"]
-        revealMeterControl(decrease, in: app, upwards: false)
-        decrease.tap()
+        turnMeterDrum(digit(100))
+        XCTAssertEqual(digit(100).value as? String, "4", "The upper amount boundary cannot be exceeded by another turn")
+        for _ in 0..<4 { turnMeterDrum(digit(100), upwards: false) }
         XCTAssertEqual(digit(100).value as? String, "0")
         XCTAssertEqual(digit(10).value as? String, "1")
         XCTAssertEqual(digit(1).value as? String, "0")
-        XCTAssertFalse(app.buttons["meter-digit-10-decrease"].isEnabled)
-        XCTAssertFalse(app.buttons["meter-digit-1-decrease"].isEnabled)
-        app.buttons["meter-digit-1-increase"].tap()
-        XCTAssertEqual(digit(1).value as? String, "1")
-        app.buttons["meter-digit-1-decrease"].tap()
+        turnMeterDrum(digit(10), upwards: false)
+        turnMeterDrum(digit(1), upwards: false)
+        XCTAssertEqual(digit(10).value as? String, "1", "The minimum remains ten yuan")
         XCTAssertEqual(digit(1).value as? String, "0")
-        let start = digit(1).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
-        let end = digit(1).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
-        start.press(forDuration: 0.05, thenDragTo: end)
+        turnMeterDrum(digit(1))
+        XCTAssertEqual(digit(1).value as? String, "1")
+        turnMeterDrum(digit(1), upwards: false)
+        XCTAssertEqual(digit(1).value as? String, "0")
+        turnMeterDrum(digit(1))
         XCTAssertEqual(digit(1).value as? String, "1", "A short upward turn advances the physical thumbwheel once")
         XCTAssertFalse(app.buttons["立即缴费"].isEnabled, "Synthetic previews must never enable a real payment")
         capture(app, "campus-electricity-amount")
+    }
+
+    private func turnMeterDrum(_ drum: XCUIElement, upwards: Bool = true) {
+        let start = drum.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upwards ? 0.8 : 0.2))
+        let end = drum.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upwards ? 0.2 : 0.8))
+        start.press(forDuration: 0.05, thenDragTo: end)
+    }
+
+    func testPhysicalMeterStartupRecoveryControls() {
+        let campuses = launch("campus-electricity", arguments: ["--preview-multiple-campuses"])
+        let campus = campuses.buttons["选择校区"]
+        XCTAssertTrue(campus.waitForExistence(timeout: 8))
+        XCTAssertTrue(campus.isEnabled)
+        campus.tap()
+        XCTAssertTrue(campuses.buttons["meter-option-campus-0"].waitForExistence(timeout: 5),
+                      "Campus selection remains reachable before any building is available")
+        XCTAssertTrue(campuses.buttons["meter-option-campus-1"].exists)
+        capture(campuses, "physical-meter-campus-prerequisite")
+        campuses.terminate()
+
+        let failed = launch("campus-electricity", arguments: ["--preview-meter-startup-error"])
+        let retry = failed.buttons["重新加载"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 8))
+        revealMeterControl(retry, in: failed)
+        XCTAssertTrue(retry.isEnabled, "A read failure retains an explicit retry entry")
+        if failed.buttons["立即缴费"].exists { XCTAssertFalse(failed.buttons["立即缴费"].isEnabled) }
+        capture(failed, "physical-meter-startup-retry")
+        failed.terminate()
+
+        let pending = launch("campus-electricity-pending")
+        let order = pending.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "preview-order")).firstMatch
+        XCTAssertTrue(order.waitForExistence(timeout: 8), "The original order ID remains available for pending-payment recovery")
+        XCTAssertTrue(pending.buttons["查询支付结果"].exists)
+        XCTAssertFalse(pending.buttons["立即缴费"].exists)
+        capture(pending, "physical-meter-pending-order")
     }
 
     private func revealMeterControl(_ control: XCUIElement, in app: XCUIApplication, upwards: Bool = true) {
@@ -473,11 +503,10 @@ final class PageInteractionUITests: XCTestCase {
                 XCTAssertLessThanOrEqual(balance.frame.maxX, app.windows.firstMatch.frame.maxX)
                 screen("physical-meter-long-balance-large")
             }
-            let increase = app.buttons["meter-digit-1-increase"]
-            revealMeterControl(increase, in: app)
-            XCTAssertGreaterThanOrEqual(increase.frame.height, 44)
-            increase.tap()
             let ones = app.descendants(matching: .any).matching(identifier: "meter-digit-1").firstMatch
+            revealMeterControl(ones, in: app)
+            XCTAssertGreaterThanOrEqual(ones.frame.height, 44)
+            turnMeterDrum(ones)
             XCTAssertEqual(ones.value as? String, "1")
             let pay = app.buttons["立即缴费"]
             revealMeterControl(pay, in: app)
@@ -537,7 +566,7 @@ final class PageInteractionUITests: XCTestCase {
         let confirm = app.buttons["确认支付 50 元"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 8))
         revealMeterControl(confirm, in: app)
-        XCTAssertTrue(app.staticTexts["示例宿舍 1 栋 · 101 室"].exists)
+        XCTAssertEqual(app.staticTexts["payment-confirmation-room"].label, "示例宿舍 1 栋 · 101 室")
         capture(app, "physical-meter-confirmation")
         let close = app.buttons["关闭确认缴费"]
         revealMeterControl(close, in: app, upwards: false)
@@ -695,6 +724,12 @@ final class PageInteractionUITests: XCTestCase {
             let probe = app.staticTexts["campus-reduce-motion"]
             XCTAssertTrue(probe.waitForExistence(timeout: 8))
             XCTAssertEqual(probe.label, "reduce-motion-on", "Verify the real simulator preference reaches SwiftUI")
+            if page == "campus-electricity" {
+                let ones = app.descendants(matching: .any).matching(identifier: "meter-digit-1").firstMatch
+                revealMeterControl(ones, in: app)
+                turnMeterDrum(ones)
+                XCTAssertEqual(ones.value as? String, "1", "Reducing motion must retain the real amount interaction")
+            }
             capture(app, "campus-reduce-motion-\(page)")
             app.terminate()
         }
