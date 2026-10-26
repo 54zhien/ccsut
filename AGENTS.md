@@ -6,10 +6,16 @@ These project conventions record the user's requirements of 2026-10-26.
   documentation for the APIs and interaction being implemented. Record the
   relevant official references with the change; do not call an unchecked custom
   implementation an Apple-recommended pattern.
-- Prefer native system controls and native Liquid Glass styles when applicable,
-  including `.glass`, `.glassProminent`, standard menus, sheets and SF Symbols.
+- Use native Liquid Glass whenever an applicable system style is available,
+  including `.glass` and `.glassProminent`. Prefer native system controls,
+  standard menus, sheets and SF Symbols.
   Keep content surfaces legible and avoid decorative glass layers that interfere
   with the system's material or scroll-edge behavior.
+- Follow explicit page-specific refinements: keep elective controls restrained
+  rather than making every control glass; score/exam filter circles match the
+  neutral back control; campus add circles use theme-tinted glass. Use semantic
+  light/dark colors for content such as the meter, with dark styling only in dark
+  mode. These choices override the general glass preference for those surfaces.
 - Implement only the UI scope explicitly requested by the user. Preserve other
   accepted layouts, animations, branding and business behavior.
 - When concentric alignment is requested, use public container-corner geometry

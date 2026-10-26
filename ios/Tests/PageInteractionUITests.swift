@@ -93,6 +93,9 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(search.isHittable)
         let anchoredY = search.frame.minY
         XCTAssertLessThan(anchoredY, app.frame.height * 0.3, "Closed state controls stay at the top")
+        XCTAssertEqual(closed.frame.midX, app.frame.midX, accuracy: 3)
+        XCTAssertGreaterThan(closed.frame.midY, app.frame.height * 0.42, "Empty message should be centered, not attached to the filters")
+        XCTAssertLessThan(closed.frame.midY, app.frame.height * 0.65)
         for title in ["全部", "可选", "有余量"] {
             app.buttons[title].tap()
             XCTAssertTrue(closed.exists)
@@ -501,6 +504,47 @@ final class PageInteractionUITests: XCTestCase {
                 XCTAssertTrue(record.waitForExistence(timeout: 5), "Cancelling a form must retain existing records without a manual refresh")
             }
             capture(app, "campus-records-after-form-\(page)")
+            app.terminate()
+        }
+    }
+
+    func testBackgroundRoundTripRetainsVisibleContent() {
+        for (page, title) in [("schedule", "高等数学"), ("scores", "高等数学"), ("campus-leave", "示例请假记录")] {
+            let app = launch(page)
+            let content = app.staticTexts.matching(identifier: title).firstMatch
+            XCTAssertTrue(content.waitForExistence(timeout: 8))
+            capture(app, "background-before-\(page)")
+            // A real Home gesture plus pause exposes the actual app-switcher
+            // snapshot. Capture it separately from the foreground AX checks.
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.998))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.50))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 1)
+            let switcher = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            switcher.name = "background-switcher-\(page)"
+            switcher.lifetime = .keepAlways
+            add(switcher)
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            XCTAssertTrue(content.waitForExistence(timeout: 5), "Previously loaded content must survive foreground restoration")
+            XCTAssertTrue(content.isHittable)
+            capture(app, "background-restored-\(page)")
+            app.terminate()
+        }
+    }
+
+    func testCampusEmptyStatesStayCenteredWithLargerAddControl() {
+        for (page, title) in [("campus-leave", "暂无请假记录"), ("campus-travel", "暂无离校记录")] {
+            let app = launch(page, empty: true)
+            let message = app.staticTexts[title]
+            XCTAssertTrue(message.waitForExistence(timeout: 8))
+            XCTAssertEqual(message.frame.midX, app.frame.midX, accuracy: 3)
+            XCTAssertGreaterThan(message.frame.midY, app.frame.height * 0.42)
+            XCTAssertLessThan(message.frame.midY, app.frame.height * 0.65)
+            let addControl = app.buttons["campus-record-add"]
+            XCTAssertTrue(addControl.isHittable)
+            XCTAssertEqual(addControl.frame.width, 64, accuracy: 1)
+            XCTAssertEqual(addControl.frame.height, 64, accuracy: 1)
+            capture(app, "empty-centered-\(page)")
             app.terminate()
         }
     }
@@ -1014,6 +1058,9 @@ final class PageInteractionUITests: XCTestCase {
             XCTAssertTrue(menu.waitForExistence(timeout: 5))
             XCTAssertGreaterThanOrEqual(menu.frame.width, 44)
             XCTAssertGreaterThanOrEqual(menu.frame.height, 44)
+            let back = app.buttons["返回"]
+            XCTAssertEqual(menu.frame.width, back.frame.width, accuracy: 1, "Filter and back circles have the same rendered diameter")
+            XCTAssertEqual(menu.frame.height, back.frame.height, accuracy: 1)
             menu.tap()
             let target = app.buttons["2025–2026 学年 · 第二学期"]
             XCTAssertTrue(target.waitForExistence(timeout: 3))

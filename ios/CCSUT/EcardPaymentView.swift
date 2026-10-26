@@ -5,6 +5,7 @@ import Combine
 struct EcardPaymentView: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.dynamicTypeSize) private var textSize
+    @Environment(\.colorScheme) private var colorScheme
     @State private var model = EcardPaymentModel()
     @State private var showingRecoveryHelp = false
 
@@ -279,48 +280,63 @@ struct EcardPaymentView: View {
     }
 
     private var amountSelection: some View {
-        CampusSection("缴费金额") {
-            VStack(spacing: 10) {
-                HStack(spacing: 6) {
-                    Image(systemName: "bolt.fill").font(.caption2)
-                    Text("充值金额").font(.caption.weight(.medium))
-                    Spacer(minLength: 0)
-                    Text("人民币 · 元").font(.caption2)
-                }
-                .foregroundStyle(.white.opacity(0.58))
-                .padding(.horizontal, 4)
-                HStack(spacing: 6) {
-                    Text("¥").font(.title3.weight(.medium)).foregroundStyle(.white.opacity(0.7))
-                        .padding(.trailing, 4).accessibilityHidden(true)
-                    amountDrum(place: 100, label: "百位")
-                    amountDrum(place: 10, label: "十位")
-                    amountDrum(place: 1, label: "个位")
-                }
-                .padding(.horizontal, 10).padding(.vertical, 4)
-                .background(.black.opacity(0.55), in: .rect(cornerRadius: 16))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
-                        .allowsHitTesting(false)
-                }
-            }
-            .padding(14)
-            .background {
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(LinearGradient(colors: [Color(white: 0.19), Color(white: 0.09)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 24)
-                            .strokeBorder(LinearGradient(colors: [.white.opacity(0.3), .white.opacity(0.04)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("缴费金额").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(spacing: 10) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bolt.fill").font(.caption2)
+                        Text("充值金额").font(.caption.weight(.medium))
+                        Spacer(minLength: 0)
+                        Text("人民币 · 元").font(.caption2)
                     }
+                    .foregroundStyle(meterIsDark ? .white.opacity(0.58) : .black.opacity(0.56))
+                    .padding(.horizontal, 4)
+                    HStack(spacing: 6) {
+                        Text("¥").font(.title3.weight(.medium)).foregroundStyle(meterIsDark ? .white.opacity(0.7) : .black.opacity(0.68))
+                            .padding(.trailing, 4).accessibilityHidden(true)
+                        amountDrum(place: 100, label: "百位")
+                        amountDrum(place: 10, label: "十位")
+                        amountDrum(place: 1, label: "个位")
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(meterIsDark ? .black.opacity(0.55) : Color(red: 0.75, green: 0.78, blue: 0.82), in: .rect(cornerRadius: 16))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16).strokeBorder(meterIsDark ? .white.opacity(0.08) : .black.opacity(0.1), lineWidth: 0.5)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .padding(14)
+                .background {
+                    RoundedRectangle(cornerRadius: 24)
+                        .fill(LinearGradient(colors: meterIsDark
+                            ? [Color(white: 0.19), Color(white: 0.09)]
+                            : [Color(red: 0.95, green: 0.96, blue: 0.98), Color(red: 0.83, green: 0.86, blue: 0.9)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 24)
+                                .strokeBorder(LinearGradient(colors: meterIsDark
+                                    ? [.white.opacity(0.3), .white.opacity(0.04)]
+                                    : [.white.opacity(0.95), .black.opacity(0.12)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+                        }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("缴费金额，\(amountValue)元，上下滑动数字调整")
+                Text(amountMaximum > 0 ? "上下滑动调整 · \(MeterAmount.minimum)–\(amountMaximum) 元" : "正在获取可充值金额范围")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if let hint = model.amountHint {
+                    Text(hint).font(.footnote).foregroundStyle(.red)
+                }
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("缴费金额，\(amountValue)元，上下滑动数字调整")
-            Text(amountMaximum > 0 ? "上下滑动调整 · \(MeterAmount.minimum)–\(amountMaximum) 元" : "正在获取可充值金额范围")
-                .font(.footnote).foregroundStyle(.secondary)
-            if let hint = model.amountHint {
-                Text(hint).font(.footnote).foregroundStyle(.red)
-            }
+            .padding(amountContentInset).frame(maxWidth: .infinity, alignment: .leading)
+            // Match the meter's 24pt corner plus this section's actual 20pt inset.
+            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24 + amountContentInset))
         }
     }
+    private var amountContentInset: CGFloat { 20 }
+    private var meterIsDark: Bool { colorScheme == .dark }
     private var amountMaximum: Int {
         MeterAmount.maximum(perPayment: model.fee?.maxAmount, perDay: model.fee?.dayMaxAmount)
     }
@@ -344,15 +360,19 @@ struct EcardPaymentView: View {
         )) {
             ForEach(MeterAmount.digits(amount: amountValue, place: place, maximum: amountMaximum), id: \.self) { digit in
                 Text(String(digit)).font(.system(size: textSize.isAccessibilitySize ? 40 : 34, weight: .medium, design: .monospaced))
+                    .foregroundStyle(meterIsDark ? Color.white : Color(.label))
                     .tag(digit)
             }
         }
         .pickerStyle(.wheel).labelsHidden()
         .frame(minWidth: 44, maxWidth: .infinity).frame(height: textSize.isAccessibilitySize ? 160 : 132)
-        .clipped().environment(\.colorScheme, .dark)
-        .background(LinearGradient(colors: [.black.opacity(0.65), Color(white: 0.13), .black.opacity(0.65)], startPoint: .top, endPoint: .bottom), in: .rect(cornerRadius: 10))
+        .clipped()
+        .background(LinearGradient(colors: meterIsDark
+            ? [.black.opacity(0.65), Color(white: 0.13), .black.opacity(0.65)]
+            : [Color(red: 0.78, green: 0.81, blue: 0.85), Color(red: 0.95, green: 0.96, blue: 0.97), Color(red: 0.78, green: 0.81, blue: 0.85)],
+            startPoint: .top, endPoint: .bottom), in: .rect(cornerRadius: 10))
         .overlay {
-            LinearGradient(colors: [.black.opacity(0.65), .clear, .black.opacity(0.65)], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [Color.black.opacity(meterIsDark ? 0.65 : 0.08), .clear, Color.black.opacity(meterIsDark ? 0.65 : 0.08)], startPoint: .top, endPoint: .bottom)
                 .clipShape(.rect(cornerRadius: 10)).allowsHitTesting(false)
         }
         .disabled(amountMaximum == 0 || model.isSubmitting)

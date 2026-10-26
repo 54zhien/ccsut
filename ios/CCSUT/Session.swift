@@ -488,11 +488,13 @@ final class SessionStore {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             guard publishVerifiedIdentity(generation: generation), let studentId else { return }
             prepareEcardSession(studentId, WebStore.dataStore)
-            // A missing name is preferable to coupling authentication to selection.
+            // This optional display metadata belongs to the already verified
+            // request generation. Some responses omit the repeated account field;
+            // reject an explicit mismatch without requiring that optional field.
             guard let initData = try? await api.electiveInit(),
                   CookieJar.generation == generation, !Task.isCancelled,
-                  initData.xsxh == studentId else { return }
-            if let name = initData.xsxm, !name.isEmpty {
+                  initData.xsxh == nil || initData.xsxh == studentId else { return }
+            if let name = initData.xsxm?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
                 studentName = name
                 UserDefaults.standard.set(name, forKey: nameKey)
             }

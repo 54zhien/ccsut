@@ -38,14 +38,17 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
             transitionTabBar(hidden: false, animated: animated, navigation: nav)
         }
 
-        /// UIKit owns the actual tab bar's slide and safe-area transition; the
-        /// accompanying opacity follows the same navigation coordinator. Never
+        /// UIKit owns tab-bar visibility and the safe-area transition; the actual
+        /// bar's translation and opacity follow the navigation coordinator. Never
         /// replace the system tab bar or reach into its private subviews.
         /// Apple references checked 2026-10-26:
         /// https://developer.apple.com/documentation/uikit/uitabbarcontroller/settabbarhidden(_:animated:)
         /// https://developer.apple.com/documentation/uikit/uiviewcontroller/transitioncoordinator
         /// https://developer.apple.com/documentation/uikit/uiviewcontrollertransitioncoordinatorcontext/isanimated
         /// https://developer.apple.com/documentation/uikit/uiviewcontrollertransitioncoordinator/animatealongsidetransition(in:animation:completion:)
+        /// https://developer.apple.com/documentation/uikit/uiview/transform
+        /// https://developer.apple.com/documentation/corefoundation/cgaffinetransform/translatedby(x:y:)
+        /// https://developer.apple.com/documentation/uikit/uiview/performwithoutanimation(_:)
         private func transitionTabBar(hidden: Bool, animated: Bool, navigation: UINavigationController) {
             let coordinator = navigation.transitionCoordinator
             // Cancelling an interactive pop calls viewWillAppear again on the
@@ -56,6 +59,9 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
             let id = UUID()
             tabTransitionID = id
             let bar = tabs.tabBar
+            let originalTransform = bar.transform
+            let originalAlpha = bar.alpha
+            let loweredTransform = originalTransform.translatedBy(x: 0, y: max(bar.bounds.height, 1))
             let shouldAnimate = (coordinator?.isAnimated ?? animated) && !UIAccessibility.isReduceMotionEnabled
             let previousHidden = tabs.isTabBarHidden
             #if DEBUG
@@ -64,31 +70,46 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
             #endif
             guard shouldAnimate else {
                 tabs.setTabBarHidden(hidden, animated: false)
-                bar.alpha = 1
+                bar.transform = originalTransform
+                bar.alpha = originalAlpha
                 return
             }
-            // A showing bar starts transparent before UIKit puts it on screen.
-            bar.alpha = hidden ? 1 : 0
+            // Establish the real bar's start state before native visibility/layout changes.
+            let prepare = {
+                bar.transform = hidden ? originalTransform : loweredTransform
+                bar.alpha = hidden ? originalAlpha : 0
+            }
+            UIView.performWithoutAnimation(prepare)
             tabs.setTabBarHidden(hidden, animated: true)
+            // Native visibility must not overwrite the staged starting transform.
+            UIView.performWithoutAnimation(prepare)
             let finish: (Bool) -> Void = { [weak self, weak tabs] cancelled in
                 guard let self, self.tabTransitionID == id, let tabs else { return }
                 self.tabTransitionCoordinator = nil
                 tabs.setTabBarHidden(cancelled ? previousHidden : hidden, animated: false)
-                tabs.tabBar.alpha = 1
+                UIView.performWithoutAnimation {
+                    tabs.tabBar.transform = originalTransform
+                    tabs.tabBar.alpha = originalAlpha
+                }
             }
             if let coordinator {
                 tabTransitionCoordinator = coordinator
                 let queued = coordinator.animateAlongsideTransition(in: bar, animation: { _ in
-                    bar.alpha = hidden ? 0 : 1
+                    bar.transform = hidden ? loweredTransform : originalTransform
+                    bar.alpha = hidden ? 0 : originalAlpha
                 }, completion: { context in finish(context.isCancelled) })
                 #if DEBUG
                 AcademicTabTransitionDiagnostics.record(childAnimated: animated,
                                                         coordinatorAnimated: coordinator.isAnimated, queued: queued)
                 #endif
-                if !queued { bar.alpha = hidden ? 0 : 1 }
+                if !queued {
+                    bar.transform = hidden ? loweredTransform : originalTransform
+                    bar.alpha = hidden ? 0 : originalAlpha
+                }
             } else {
                 UIView.animate(withDuration: 0.3, delay: 0, options: [.beginFromCurrentState, .curveEaseInOut]) {
-                    bar.alpha = hidden ? 0 : 1
+                    bar.transform = hidden ? loweredTransform : originalTransform
+                    bar.alpha = hidden ? 0 : originalAlpha
                 } completion: { _ in finish(false) }
             }
         }
@@ -144,6 +165,7 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
 #if DEBUG
 @MainActor private enum AcademicTabTransitionDiagnostics {
     static var entry = "entry childAnimated=unset coordinatorAnimated=unset queued=unset"
+    private static var entryID = 0
     private static var previousTabSample: (frame: CGRect, opacity: Float)?
     private static var tabDownSamples = 0
     private static var tabUpSamples = 0
@@ -155,20 +177,37 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
     private static var minimumOpacity: Float?
     private static var maximumOpacity: Float?
 
-    static var tabReport: String {
+    private static var motionReport: String {
         let range = String(format: "%.3f", Double((maximumY ?? 0) - (minimumY ?? 0)))
         let lowOpacity = minimumOpacity.map { String(format: "%.3f", Double($0)) } ?? "nil"
         let highOpacity = maximumOpacity.map { String(format: "%.3f", Double($0)) } ?? "nil"
-        return "tabDown=\(tabDownSamples) tabUp=\(tabUpSamples) tabSamples=\(validSamples) "
-            + "tabMissing=\(missingSamples) tabDetached=\(detachedCount) tabYRange=\(range) "
+        return "tabDown=\(tabDownSamples) tabUp=\(tabUpSamples) tabDetached=\(detachedCount) tabYRange=\(range) "
             + "tabOpacityMin=\(lowOpacity) tabOpacityMax=\(highOpacity)"
+    }
+
+    static var publicationKey: String {
+        "\(motionReport) tabPresent=\(previousTabSample != nil) \(entry)"
+    }
+
+    static var tabReport: String {
+        "\(motionReport) tabSamples=\(validSamples) tabMissing=\(missingSamples)"
     }
 
     static func record(childAnimated: Bool, coordinatorAnimated: Bool?, queued: Bool?) {
         guard InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-transition") else { return }
+        if queued == nil {
+            entryID += 1
+            previousTabSample = nil
+            tabDownSamples = 0
+            tabUpSamples = 0
+            minimumY = nil
+            maximumY = nil
+            minimumOpacity = nil
+            maximumOpacity = nil
+        }
         let coordinatorValue = coordinatorAnimated.map { String($0) } ?? "nil"
         let queuedValue = queued.map { String($0) } ?? "nil"
-        entry = "entry childAnimated=\(childAnimated) coordinatorAnimated=\(coordinatorValue) queued=\(queuedValue)"
+        entry = "entry childAnimated=\(childAnimated) coordinatorAnimated=\(coordinatorValue) queued=\(queuedValue) entryID=\(entryID)"
     }
 
     static func detached() {
@@ -341,10 +380,11 @@ struct AcademicTransitionProbe: UIViewRepresentable {
                 self.baseline = localTitleX
             }
             if ticks % 30 == 0 {
-                let state = "active=\(activeTicks) maxX=\(Int(maxTranslation)) baseline=\(baseline != nil) width=\(Int(bounds.width)) \(AcademicTabTransitionDiagnostics.tabReport) \(AcademicTabTransitionDiagnostics.entry)"
+                let titleState = "active=\(activeTicks) maxX=\(Int(maxTranslation)) baseline=\(baseline != nil) width=\(Int(bounds.width))"
+                let state = "\(titleState) \(AcademicTabTransitionDiagnostics.publicationKey)"
                 guard state != lastDiagnosticState else { return }
                 lastDiagnosticState = state
-                report(maximum, samples, "ticks=\(ticks) \(state)")
+                report(maximum, samples, "ticks=\(ticks) \(titleState) \(AcademicTabTransitionDiagnostics.tabReport) \(AcademicTabTransitionDiagnostics.entry)")
             }
         }
     }

@@ -31,6 +31,7 @@ struct ElectiveView: View {
     @State private var pending: PendingAction?
     @State private var workingId: String?
     @State private var actionMessage: String?
+    @State private var controlsHeight: CGFloat = 0
 #if DEBUG
     @State private var previewPublicationCount = 0
     @State private var previewCatalogFailureInjected = false
@@ -48,7 +49,7 @@ struct ElectiveView: View {
 
     var body: some View {
         PageScrollSurface(refresh: { await load(force: true) }, refreshHaptics: true) { viewport, _ in
-            list
+            list(viewportHeight: viewport.height)
                 .frame(maxWidth: .infinity, minHeight: viewport.height, alignment: .top)
         }
         .scrollDismissesKeyboard(.immediately)
@@ -110,30 +111,32 @@ struct ElectiveView: View {
         .padding(.leading, 16)
         .padding(.trailing, keyword.isEmpty ? 16 : 4)
         .frame(minHeight: 52)
-        .glassEffect(.regular.interactive(), in: .capsule)
+        .background(Color(.secondarySystemGroupedBackground), in: .capsule)
     }
 
-    private var list: some View {
-        LazyVStack(spacing: 16) {
-            GlassEffectContainer(spacing: 8) {
+    private func list(viewportHeight: CGFloat) -> some View {
+        // Only the result region expands; the measured controls stay at the top.
+        return LazyVStack(spacing: 16) {
+            VStack(spacing: 16) {
                 VStack(spacing: 14) {
                     searchField
                     filterBar
                     if selectedFilter == .selected { enrolledHeader }
                     else if let initData { header(initData) }
                 }
-            }
-            .accessibilityIdentifier("elective-controls")
+                .accessibilityIdentifier("elective-controls")
 
-            if let errorText {
-                PageStatusNotice(message:errorText) { Task { await load(force:true) } }
+                if let errorText {
+                    PageStatusNotice(message:errorText) { Task { await load(force:true) } }
+                }
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
             if selectedFilter == .selected {
                 if isLoading && enrolledModel.context == nil {
                     ProgressView("读取完整已选结果…")
                         .frame(maxWidth: .infinity, minHeight: 160)
                 } else {
-                    enrolledList
+                    enrolledList(viewportHeight: viewportHeight)
                 }
             } else if isLoading && classes.isEmpty {
                 ProgressView("拉取教学班…")
@@ -142,15 +145,17 @@ struct ElectiveView: View {
                 ContentUnavailableView("选课通道暂未开启", systemImage: "calendar.badge.clock",
                     description: Text("可前往“已选”查看当前或历史选课记录。"))
                     .accessibilityIdentifier("elective-channel-closed")
+                    .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
             } else {
                 ForEach(filtered) { item in catalogCard(item) }
                 if classes.isEmpty {
                     ContentUnavailableView(errorText == nil ? "当前没有可选课程" : AppMessages.loadFailure,
                                            systemImage:errorText == nil ? "tray" : "exclamationmark.icloud")
+                        .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
                 }
             }
 
-            if selectedFilter != .selected && !classes.isEmpty && filtered.isEmpty {
+            if selectedFilter != .selected && !electiveState.isChannelClosed && !classes.isEmpty && filtered.isEmpty {
                 ContentUnavailableView {
                     Label("未找到课程", systemImage: "magnifyingglass")
                 } description: {
@@ -160,8 +165,8 @@ struct ElectiveView: View {
                         .buttonStyle(.borderedProminent)
                         .accessibilityHint("清除搜索文字并切换为全部课程")
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
+                .accessibilityIdentifier("elective-no-results")
+                .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
             }
         }
         .padding(.horizontal, 16)
@@ -249,8 +254,9 @@ struct ElectiveView: View {
                     .padding(.horizontal, 6)
                     .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.roundedRectangle(radius: 20))
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10)
+                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20))
                 .accessibilityIdentifier("enrolled-term-menu")
                 .accessibilityLabel("已选课程学期")
                 .accessibilityValue(SchedulePresentation.termTitle(selectedTerm))
@@ -278,7 +284,7 @@ struct ElectiveView: View {
         }
     }
 
-    @ViewBuilder private var enrolledList: some View {
+    @ViewBuilder private func enrolledList(viewportHeight: CGFloat) -> some View {
         if enrolledModel.isLoading {
             ProgressView("读取完整已选结果…")
         }
@@ -306,6 +312,8 @@ struct ElectiveView: View {
             } description: {
                 Text(enrolledModel.snapshot?.isEmpty == true ? "教务系统返回该学期暂无个人课程。" : "请尝试其他课程名或教师。")
             }
+            .accessibilityIdentifier("elective-enrolled-empty")
+            .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
         }
     }
 
@@ -513,9 +521,9 @@ struct ElectiveView: View {
         .padding(.top, 2)
     }
 
-    @ViewBuilder private func filterButton(_ filter: Filter) -> some View {
+    private func filterButton(_ filter: Filter) -> some View {
         let selected = filter == selectedFilter
-        let button = Button {
+        return Button {
             withAnimation(.snappy(duration: 0.18)) { selectedFilter = filter }
         } label: {
             HStack(spacing: 6) {
@@ -527,16 +535,16 @@ struct ElectiveView: View {
                 }
             }
             .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 4)
-            .frame(minHeight: 32)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            .foregroundStyle(selected ? Color.accentColor : Color.primary)
+            .background(selected ? Color.accentColor.opacity(0.12) : Color(.secondarySystemGroupedBackground), in: .capsule)
+            .contentShape(.capsule)
         }
-        .buttonBorderShape(.capsule)
+        .buttonStyle(.plain)
         .accessibilityLabel(filter.rawValue)
         .accessibilityValue(filter == .selected ? "\(selectedCount) 门" : "")
         .accessibilityAddTraits(selected ? .isSelected : [])
-
-        if selected { button.buttonStyle(.glassProminent) }
-        else { button.buttonStyle(.glass) }
     }
 
     // MARK: 筛选
@@ -1017,5 +1025,22 @@ struct ClassDetailSheet: View {
                     .multilineTextAlignment(.trailing)
             }
         }
+    }
+}
+
+// Measure the intrinsic empty group before adding space. Aim at the whole
+// viewport midpoint, clamping below the anchored controls for large text.
+private struct ElectiveEmptyStateLayout: ViewModifier {
+    let viewportHeight: CGFloat
+    let controlsHeight: CGFloat
+    @State private var contentHeight: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        let contentTop = 12 + controlsHeight + 16
+        content
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+            .padding(.top, max(0, (viewportHeight - contentHeight) / 2 - contentTop))
+            .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - contentTop - 24), alignment: .top)
     }
 }

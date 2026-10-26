@@ -51,12 +51,14 @@ import ImageIO
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ScrollViewReader { proxy in
+                            GeometryReader { scrollViewport in
                             ScrollView {
-                                VStack(alignment: .leading, spacing: 24) {
+                                VStack(alignment: presentsStatus ? .center : .leading, spacing: 24) {
                                     content
                                 }
                                 .padding(.horizontal, 16).padding(.vertical, 24)
-                                .frame(maxWidth: 720).frame(maxWidth: .infinity)
+                                .frame(maxWidth: 720, minHeight: presentsStatus ? scrollViewport.size.height : 0)
+                                .frame(maxWidth: .infinity)
                             }
                             .scrollDismissesKeyboard(.interactively)
                             .scrollEdgeEffectHidden(true, for: .top)
@@ -69,6 +71,7 @@ import ImageIO
                             }
                             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
                                 if let identifier = activeEditor ?? focusedPhone { proxy.scrollTo(identifier, anchor: .center) }
+                            }
                             }
                         }
                     }
@@ -110,6 +113,8 @@ import ImageIO
         .task(id: model.candidateKey) { await model.refreshApprovers() }
         .onDisappear { location.cancel(); model.stop() }
     }
+
+    private var presentsStatus: Bool { model.state == .submitted || model.configuration == nil }
 
     @ViewBuilder private var content: some View {
         if model.state == .submitted {

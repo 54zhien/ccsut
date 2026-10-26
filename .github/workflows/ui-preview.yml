@@ -38,7 +38,7 @@ on:
         type: boolean
         default: false
       navigation_checks_only:
-        description: 'Verify only native tab motion, cancelled pop and root restoration'
+        description: 'Verify tab motion, cancelled pop, root restoration and elective reset'
         type: boolean
         default: false
       blur_diagnostics:
@@ -64,6 +64,7 @@ jobs:
           set -euo pipefail
           xcrun swiftc -parse-as-library ios/CCSUT/MeterAmount.swift ios/Tests/MeterAmountTests.swift -o "$RUNNER_TEMP/meter-tests"
           "$RUNNER_TEMP/meter-tests"
+          python3 ios/Tests/run-student-name-tests.py
           python3 ios/Tests/run-elective-load-tests.py
           SOURCES=(ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift
             ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift
@@ -193,6 +194,9 @@ jobs:
               -only-testing:CCSUTUITests/PageInteractionUITests/testDetailTabsHideAndReturnWithHome
               -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
               -only-testing:CCSUTUITests/PageInteractionUITests/testClosedElectiveChannelPreservesControlsAndEnrolledResults
+                -only-testing:CCSUTUITests/PageInteractionUITests/testElectiveEmptySearchCanResetAndDisabledReasonIsVisible
+                -only-testing:CCSUTUITests/PageInteractionUITests/testCampusEmptyStatesStayCenteredWithLargerAddControl
+                -only-testing:CCSUTUITests/PageInteractionUITests/testBackgroundRoundTripRetainsVisibleContent
             )
           fi
           if [ "$MENU_FIT_ONLY" = 'true' ]; then
@@ -202,6 +206,7 @@ jobs:
             TEST_SELECTION=(
               -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
               -only-testing:CCSUTUITests/PageInteractionUITests/testDetailTabsHideAndReturnWithHome
+              -only-testing:CCSUTUITests/PageInteractionUITests/testElectiveEmptySearchCanResetAndDisabledReasonIsVisible
             )
           fi
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
@@ -271,6 +276,12 @@ jobs:
             fi
             if [ "$PAGE" = 'campus-form-leave-large' ]; then
               LAUNCH_ARGS=(--preview-ui --preview-page campus-form-leave -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
+            fi
+            if [ "$PAGE" = 'campus-leave-empty' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page campus-leave --preview-empty)
+            fi
+            if [ "$PAGE" = 'campus-travel-empty' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page campus-travel --preview-empty)
             fi
             xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
             xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut "${LAUNCH_ARGS[@]}"

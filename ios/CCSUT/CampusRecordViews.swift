@@ -68,6 +68,7 @@ private struct CampusRecordContent: View {
     @State private var officialPage: CampusWebDestination?
     @State private var nativeForm: CampusFormKind?
     @State private var addControlSize: CGSize = .zero
+    @State private var headerHeight: CGFloat = 0
     private struct ReadTask: Hashable { let model: ObjectIdentifier; let kind: CampusTravelKind }
 
     var body: some View {
@@ -75,18 +76,25 @@ private struct CampusRecordContent: View {
             PageScrollSurface(refresh: {
                 if mode == .leave { await model.loadLeave(reset: true) }
                 else { await model.loadTravel(kind: selected) }
-            }, refreshHaptics: true) { _, _ in
+            }, refreshHaptics: true) { contentViewport, _ in
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    if mode == .travel {
-                        Picker("记录类型", selection: $selected) {
-                            ForEach(CampusTravelKind.allCases, id: \.self) { Text($0.title).tag($0) }
+                    VStack(alignment: .leading, spacing: 16) {
+                        if mode == .travel {
+                            Picker("记录类型", selection: $selected) {
+                                ForEach(CampusTravelKind.allCases, id: \.self) { Text($0.title).tag($0) }
+                            }
+                            .pickerStyle(.segmented)
+                            .accessibilityIdentifier("campus-travel-kind")
                         }
-                        .pickerStyle(.segmented)
-                        .accessibilityIdentifier("campus-travel-kind")
+                        Text(mode == .leave ? "申请记录" : selected.title).font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary).padding(.horizontal, 4).padding(.top, 8).accessibilityAddTraits(.isHeader)
                     }
-                    Text(mode == .leave ? "申请记录" : selected.title).font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary).padding(.horizontal, 4).padding(.top, 8).accessibilityAddTraits(.isHeader)
-                    if mode == .leave { leaveContent } else { travelContent }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+                    if mode == .leave {
+                        leaveContent(viewportHeight: contentViewport.height)
+                    } else {
+                        travelContent(viewportHeight: contentViewport.height)
+                    }
                 }
                 .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 28)
                 .frame(maxWidth: 720).frame(maxWidth: .infinity)
@@ -94,10 +102,19 @@ private struct CampusRecordContent: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 HStack {
                     Spacer(minLength: 0)
-                    SheetSymbolButton(symbol: "plus", label: addRecordTitle, action: addRecord)
-                        .onGeometryChange(for: CGSize.self) { $0.size } action: { addControlSize = $0 }
-                        .accessibilityHint(addRecordHint)
-                        .accessibilityIdentifier("campus-record-add")
+                    Button(action: addRecord) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundStyle(.white)
+                            .frame(width: 64, height: 64)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.tint(.accentColor).interactive(), in: Circle())
+                    .onGeometryChange(for: CGSize.self) { $0.size } action: { addControlSize = $0 }
+                    .accessibilityLabel(addRecordTitle)
+                    .accessibilityHint(addRecordHint)
+                    .accessibilityIdentifier("campus-record-add")
                 }
                 // Convert the screen-edge inset into this horizontally safe viewport.
                 // The measured native circle and the physical corner share a center.
@@ -136,7 +153,7 @@ private struct CampusRecordContent: View {
         else { officialPage = .returning }
     }
 
-    @ViewBuilder private var leaveContent: some View {
+    @ViewBuilder private func leaveContent(viewportHeight: CGFloat) -> some View {
         if let error = model.leaveError {
             notice(error) { Task { await model.loadLeave(reset: model.leaveFailureWasRefresh) } }
         }
@@ -144,6 +161,8 @@ private struct CampusRecordContent: View {
             ProgressView("正在读取请假记录…").frame(maxWidth: .infinity).padding(.vertical, 32)
         } else if model.leave.items.isEmpty && model.leaveError == nil {
             ContentUnavailableView("暂无请假记录", systemImage: "doc.text.magnifyingglass")
+                .accessibilityIdentifier("campus-leave-empty")
+                .modifier(CampusRecordEmptyStateLayout(viewportHeight: viewportHeight, headerHeight: headerHeight))
         }
         ForEach(model.leave.items) { record in
             recordCard(title: record.typeName ?? "请假记录", status: record.statusText, pending: record.status == 0) {
@@ -169,7 +188,7 @@ private struct CampusRecordContent: View {
         }
     }
 
-    @ViewBuilder private var travelContent: some View {
+    @ViewBuilder private func travelContent(viewportHeight: CGFloat) -> some View {
         if let error = model.travelErrors[selected] {
             notice(error) { Task { await model.loadTravel(kind: selected) } }
         }
@@ -178,6 +197,8 @@ private struct CampusRecordContent: View {
             ProgressView("正在读取\(selected.title)…").frame(maxWidth: .infinity).padding(.vertical, 32)
         } else if records.isEmpty && model.travelErrors[selected] == nil {
             ContentUnavailableView("暂无\(selected.title)", systemImage: "calendar.badge.checkmark")
+                .accessibilityIdentifier("campus-travel-empty")
+                .modifier(CampusRecordEmptyStateLayout(viewportHeight: viewportHeight, headerHeight: headerHeight))
         }
         ForEach(records) { record in
             recordCard(title: record.title, status: record.statusText, pending: record.statusText == "待审核") {
@@ -243,6 +264,11 @@ private actor CampusPreviewReader: CampusReading {
         if leaveReads > 1 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
             await PreviewRefreshCompletionGate.shared.waitForRelease()
         }
+        if InterfacePreview.emptyPage {
+            return try CampusDecoder.leavePage(Data("""
+            {"data":{"list":[],"pageNum":1,"pageSize":20,"total":0,"hasNextPage":false}}
+            """.utf8))
+        }
         return try CampusDecoder.leavePage(Data("""
         {"data":{"list":[{"id":"preview-leave","leaveTypeName":"事假","beginTime":"2026-10-01 08:00",
         "endTime":"2026-10-02 18:00","leaveDay":2,"status":0,"reason":"示例请假记录"}],
@@ -254,6 +280,7 @@ private actor CampusPreviewReader: CampusReading {
         if travelReads[kind, default: 0] > 1 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
             await PreviewRefreshCompletionGate.shared.waitForRelease()
         }
+        if InterfacePreview.emptyPage { return [] }
         return try CampusDecoder.travelRecords(Data("""
         {"code":"2000","data":[{"openid":"preview-travel","typeName":"节假日登记","status":"待审核",
         "startDate":"2026-10-01","endDate":"2026-10-07","txdz":"示例区县","jtgj":"公共交通"}]}
@@ -261,3 +288,18 @@ private actor CampusPreviewReader: CampusReading {
     }
 }
 #endif
+
+private struct CampusRecordEmptyStateLayout: ViewModifier {
+    let viewportHeight: CGFloat
+    let headerHeight: CGFloat
+    @State private var contentHeight: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        let contentTop = 24 + headerHeight + 16
+        content
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+            .padding(.top, max(0, (viewportHeight - contentHeight) / 2 - contentTop))
+            .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - contentTop - 28), alignment: .top)
+    }
+}
