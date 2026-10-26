@@ -98,10 +98,12 @@ struct ElectiveView: View {
                 .submitLabel(.search)
             if !keyword.isEmpty {
                 Button { keyword = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.circle)
                 }
                 .buttonStyle(.plain)
-                .frame(width: 44, height: 44)
                 .accessibilityLabel("清除搜索")
             }
         }
