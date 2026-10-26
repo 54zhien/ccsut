@@ -532,6 +532,27 @@ final class PageInteractionUITests: XCTestCase {
         }
     }
 
+    func testDetailSheetsKeepContentAndCloseReachable() {
+        for page in ["course", "account", "elective-detail", "enrolled-detail"] {
+            for large in [false, true] {
+                let app = launch(page, largeText: large)
+                let close = app.buttons[page == "account" ? "关闭账号" : "关闭课程详情"]
+                XCTAssertTrue(close.waitForExistence(timeout: 8))
+                XCTAssertTrue(close.isHittable)
+                XCTAssertGreaterThanOrEqual(close.frame.width, 44)
+                XCTAssertGreaterThanOrEqual(close.frame.height, 44)
+                if page == "account" {
+                    XCTAssertTrue(app.staticTexts["预览同学"].isHittable)
+                }
+                capture(app, "detail-sheet-\(page)-\(large ? "large" : "standard")")
+                close.tap()
+                let dismissed = NSPredicate { _, _ in !close.exists }
+                XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: dismissed, evaluatedWith: app)], timeout: 5), .completed)
+                app.terminate()
+            }
+        }
+    }
+
     func testWebLoginControlsUseMatchingNativeGeometry() {
         let app = launch("web-login")
         let close = app.buttons["关闭网页登录"]

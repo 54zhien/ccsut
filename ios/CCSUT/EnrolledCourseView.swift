@@ -84,7 +84,7 @@ struct EnrolledCourseDetail: View {
             }
             .navigationTitle("课程详情").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button(role: .close) { dismiss() }
                         .foregroundStyle(.primary).tint(nil).accessibilityLabel("关闭课程详情")
                 }

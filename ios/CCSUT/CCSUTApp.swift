@@ -27,6 +27,8 @@ struct CCSUTApp: App {
                     case "launch": LaunchView()
                     #if DEBUG
                     case "web-login": WebLoginPreviewHost()
+                    case "elective-detail": DetailPreviewHost { CourseDetailSheet(item: InterfacePreview.classes[0]) }
+                    case "enrolled-detail": DetailPreviewHost { EnrolledCourseDetail(record: InterfacePreview.enrolledCourses(term: "2026-2027-1")[1]) }
                     case "campus-privacy": CampusPrivacyPreview()
                     case "campus-form-leave": CampusFormPreviewHost(kind: .leave)
                     case "campus-form-departure": CampusFormPreviewHost(kind: .departure)
@@ -64,6 +66,16 @@ struct CCSUTApp: App {
 // MARK: - 根视图
 
 #if DEBUG
+private struct DetailPreviewHost<Content: View>: View {
+    @State private var presented = true
+    private let content: Content
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
+    var body: some View {
+        Color(.systemGroupedBackground).ignoresSafeArea()
+            .sheet(isPresented: $presented) { content }
+    }
+}
+
 private struct WebLoginPreviewHost: View {
     @State private var presented = true
     var body: some View {
@@ -310,7 +322,7 @@ struct ProfileView: View {
             }
             .navigationTitle("账号").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button(role: .close) { dismiss() }
                         .foregroundStyle(.primary).tint(nil).accessibilityLabel("关闭账号")
                 }
