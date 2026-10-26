@@ -144,12 +144,115 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
 #if DEBUG
 @MainActor private enum AcademicTabTransitionDiagnostics {
     static var entry = "entry childAnimated=unset coordinatorAnimated=unset queued=unset"
+    private static var previousTabSample: (frame: CGRect, opacity: Float)?
+    private static var tabDownSamples = 0
+    private static var tabUpSamples = 0
+    private static var validSamples = 0
+    private static var missingSamples = 0
+    private static var detachedCount = 0
+    private static var minimumY: CGFloat?
+    private static var maximumY: CGFloat?
+    private static var minimumOpacity: Float?
+    private static var maximumOpacity: Float?
+
+    static var tabReport: String {
+        let range = String(format: "%.3f", Double((maximumY ?? 0) - (minimumY ?? 0)))
+        let lowOpacity = minimumOpacity.map { String(format: "%.3f", Double($0)) } ?? "nil"
+        let highOpacity = maximumOpacity.map { String(format: "%.3f", Double($0)) } ?? "nil"
+        return "tabDown=\(tabDownSamples) tabUp=\(tabUpSamples) tabSamples=\(validSamples) "
+            + "tabMissing=\(missingSamples) tabDetached=\(detachedCount) tabYRange=\(range) "
+            + "tabOpacityMin=\(lowOpacity) tabOpacityMax=\(highOpacity)"
+    }
 
     static func record(childAnimated: Bool, coordinatorAnimated: Bool?, queued: Bool?) {
         guard InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-transition") else { return }
         let coordinatorValue = coordinatorAnimated.map { String($0) } ?? "nil"
         let queuedValue = queued.map { String($0) } ?? "nil"
         entry = "entry childAnimated=\(childAnimated) coordinatorAnimated=\(coordinatorValue) queued=\(queuedValue)"
+    }
+
+    static func detached() {
+        detachedCount += 1
+        previousTabSample = nil
+    }
+
+    /// Public controller containment and presentation-layer geometry only.
+    /// Apple references checked 2026-10-26:
+    /// https://developer.apple.com/documentation/uikit/uiviewcontroller/children
+    /// https://developer.apple.com/documentation/quartzcore/calayer/presentation()
+    /// https://developer.apple.com/documentation/quartzcore/calayer/convert(_:to:)-tly5
+    private static func findTabController(in controller: UIViewController) -> UITabBarController? {
+        if let tabs = controller as? UITabBarController { return tabs }
+        if let presented = controller.presentedViewController,
+           let tabs = findTabController(in: presented) { return tabs }
+        for child in controller.children {
+            if let tabs = findTabController(in: child) { return tabs }
+        }
+        return nil
+    }
+
+    static func sampleTabBar(in window: UIWindow?) {
+        guard let window, let root = window.rootViewController,
+              let tabs = findTabController(in: root), tabs.tabBar.window === window,
+              let layer = tabs.tabBar.layer.presentation(),
+              let windowLayer = window.layer.presentation() else {
+            missingSamples += 1
+            previousTabSample = nil
+            return
+        }
+        let renderedFrame = layer.convert(layer.bounds, to: windowLayer)
+        let opacity = layer.opacity
+        validSamples += 1
+        minimumY = min(minimumY ?? renderedFrame.minY, renderedFrame.minY)
+        maximumY = max(maximumY ?? renderedFrame.minY, renderedFrame.minY)
+        minimumOpacity = min(minimumOpacity ?? opacity, opacity)
+        maximumOpacity = max(maximumOpacity ?? opacity, opacity)
+        if let previous = previousTabSample {
+            let deltaY = renderedFrame.minY - previous.frame.minY
+            let deltaOpacity = opacity - previous.opacity
+            // Each count requires both changes within the same adjacent rendered samples.
+            if deltaY > 0.1 && deltaOpacity < -0.001 { tabDownSamples += 1 }
+            if deltaY < -0.1 && deltaOpacity > 0.001 { tabUpSamples += 1 }
+        }
+        previousTabSample = (renderedFrame, opacity)
+    }
+}
+
+/// Persist at the TabView root so sampling starts before a detail push.
+/// Cleanup references checked 2026-10-26:
+/// https://developer.apple.com/documentation/quartzcore/cadisplaylink/invalidate()
+/// https://developer.apple.com/documentation/swiftui/uiviewrepresentable/dismantleuiview(_:coordinator:)
+struct AcademicTabTransitionRootProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> SamplerView { SamplerView(frame: .zero) }
+    func updateUIView(_ view: SamplerView, context: Context) {}
+    static func dismantleUIView(_ view: SamplerView, coordinator: ()) { view.stopSampling() }
+
+    final class SamplerView: UIView {
+        private var displayLink: CADisplayLink?
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            isAccessibilityElement = false
+            accessibilityElementsHidden = true
+            backgroundColor = .clear
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            stopSampling()
+            guard window != nil else { return }
+            let link = CADisplayLink(target: self, selector: #selector(sample))
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+        func stopSampling() {
+            if displayLink != nil { AcademicTabTransitionDiagnostics.detached() }
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+        deinit { displayLink?.invalidate() }
+        @objc private func sample() { AcademicTabTransitionDiagnostics.sampleTabBar(in: window) }
     }
 }
 
@@ -182,9 +285,6 @@ struct AcademicTransitionProbe: UIViewRepresentable {
         private var activeTicks = 0
         private var maxTranslation: CGFloat = 0
         private var lastDiagnosticState = ""
-        private var previousTabSample: (frame: CGRect, opacity: Float)?
-        private var tabDownSamples = 0
-        private var tabUpSamples = 0
 
         init(report: @escaping (CGFloat, Int, String) -> Void) {
             self.report = report
@@ -197,7 +297,6 @@ struct AcademicTransitionProbe: UIViewRepresentable {
             super.didMoveToWindow()
             displayLink?.invalidate()
             displayLink = nil
-            previousTabSample = nil
             if window != nil {
                 let link = CADisplayLink(target: self, selector: #selector(sample))
                 link.add(to: .main, forMode: .common)
@@ -226,42 +325,9 @@ struct AcademicTransitionProbe: UIViewRepresentable {
             if let presented = controller.presentedViewController, isPopActive(in: presented) { return true }
             return controller.children.contains { isPopActive(in: $0) }
         }
-        /// Public controller containment and presentation-layer geometry only.
-        /// Apple references checked 2026-10-26:
-        /// https://developer.apple.com/documentation/uikit/uiviewcontroller/children
-        /// https://developer.apple.com/documentation/quartzcore/calayer/presentation()
-        /// https://developer.apple.com/documentation/quartzcore/calayer/convert(_:to:)-tly5
-        private func findTabController(in controller: UIViewController) -> UITabBarController? {
-            if let tabs = controller as? UITabBarController { return tabs }
-            if let presented = controller.presentedViewController,
-               let tabs = findTabController(in: presented) { return tabs }
-            for child in controller.children {
-                if let tabs = findTabController(in: child) { return tabs }
-            }
-            return nil
-        }
-        private func sampleTabBar(in root: UIViewController, window: UIWindow) {
-            guard let tabs = findTabController(in: root), tabs.tabBar.window === window,
-                  let layer = tabs.tabBar.layer.presentation(),
-                  let windowLayer = window.layer.presentation() else {
-                previousTabSample = nil
-                return
-            }
-            let renderedFrame = layer.convert(layer.bounds, to: windowLayer)
-            let opacity = layer.opacity
-            if let previous = previousTabSample {
-                let deltaY = renderedFrame.minY - previous.frame.minY
-                let deltaOpacity = opacity - previous.opacity
-                // Each count requires both changes within the same adjacent rendered samples.
-                if deltaY > 0.1 && deltaOpacity < -0.001 { tabDownSamples += 1 }
-                if deltaY < -0.1 && deltaOpacity > 0.001 { tabUpSamples += 1 }
-            }
-            previousTabSample = (renderedFrame, opacity)
-        }
         @objc private func sample() {
             ticks += 1
             guard let window, let root = window.rootViewController else { return }
-            sampleTabBar(in: root, window: window)
             guard let marker = findMarker(window) else { return }
             let pageX = frame(self, in: window).minX
             let localTitleX = frame(marker, in: window).midX - pageX
@@ -275,7 +341,7 @@ struct AcademicTransitionProbe: UIViewRepresentable {
                 self.baseline = localTitleX
             }
             if ticks % 30 == 0 {
-                let state = "active=\(activeTicks) maxX=\(Int(maxTranslation)) baseline=\(baseline != nil) width=\(Int(bounds.width)) tabDown=\(tabDownSamples) tabUp=\(tabUpSamples) \(AcademicTabTransitionDiagnostics.entry)"
+                let state = "active=\(activeTicks) maxX=\(Int(maxTranslation)) baseline=\(baseline != nil) width=\(Int(bounds.width)) \(AcademicTabTransitionDiagnostics.tabReport) \(AcademicTabTransitionDiagnostics.entry)"
                 guard state != lastDiagnosticState else { return }
                 lastDiagnosticState = state
                 report(maximum, samples, "ticks=\(ticks) \(state)")

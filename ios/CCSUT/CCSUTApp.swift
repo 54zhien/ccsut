@@ -191,6 +191,15 @@ struct MainTabs: View {
             }
         }
         .tabBarMinimizeBehavior(.never)
+        #if DEBUG
+        .background {
+            if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-transition") {
+                AcademicTabTransitionRootProbe()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        #endif
     }
 }
 
