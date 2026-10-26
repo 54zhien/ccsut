@@ -35,3 +35,14 @@ Review and verification ledger:
 - Final screenshot review: warm gradient and dark brown background visible; leather flap, stitches and paper edges visible; 8-ticket vertical layout and long reason wrapping inspected from native simulator output.
 - c8a8173 changes only the retained refresh-test locator and its loaded-count assertion; Swift syntax parse passed. Its automatic CI is additional to the completed 46adb92 application-code checks and was still running at closeout.
 - Branch remains separate and pushed; no merge or real school submission. No IPA was requested or produced in this task.
+
+## Leather finish follow-up (2026-10-26)
+
+User requested more refined shadows and stitching. Implementation commit: 150cafb.
+- Added round thread strokes over darker needle holes, inset seam grooves, edge paint and fine bevel highlights.
+- Replaced diagonal modular grain with deterministic scattered pores; detailed the brass clasp.
+- Added narrow cover/contact shadows and a soft grouped ambient shadow. Geometry and animation parameters are unchanged.
+- Native build, receipt policy, 4/4 UI tests, dark capture and reduced-motion interaction passed: run 40313022446.
+- Existing business regressions passed: run 40313022375.
+- Inspected native closed/open/light/dark screenshots: seams remain readable, paper edges remain visible, and shadows do not obscure the ticket content.
+- Physical-device visual and haptic acceptance remains separate. Branch not merged.
