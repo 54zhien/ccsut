@@ -485,7 +485,7 @@ final class PageInteractionUITests: XCTestCase {
             let landscapeAction = app.buttons[page == "campus-electricity" ? "立即缴费" : "campus-form-review"]
             XCTAssertTrue(landscapeAction.isHittable)
             add(XCTAttachment(string: "orientation=\(XCUIDevice.shared.orientation.rawValue) app=\(app.frame) window=\(app.windows.firstMatch.frame) action=\(landscapeAction.frame)"))
-            let deviceCapture = XCTAttachment(screenshot: XCUIDevice.shared.screenshot())
+            let deviceCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             deviceCapture.name = "campus-landscape-device-\(page)"
             deviceCapture.lifetime = .keepAlways
             add(deviceCapture)
@@ -551,22 +551,90 @@ final class PageInteractionUITests: XCTestCase {
     func testDetailSheetsKeepContentAndCloseReachable() {
         for page in ["course", "account", "elective-detail", "enrolled-detail"] {
             for large in [false, true] {
+              let edges: [CGVector] = page == "course"
+                  ? [CGVector(dx: -21, dy: 0), CGVector(dx: 21, dy: 0),
+                     CGVector(dx: 0, dy: -21), CGVector(dx: 0, dy: 21)]
+                  : [CGVector(dx: 0, dy: 21)]
+              for (edgeIndex, edge) in edges.enumerated() {
                 let app = launch(page, largeText: large)
                 let close = app.buttons[page == "account" ? "关闭账号" : "关闭课程详情"]
                 XCTAssertTrue(close.waitForExistence(timeout: 8))
                 XCTAssertTrue(close.isHittable)
-                XCTAssertGreaterThanOrEqual(close.frame.width, 44)
-                XCTAssertGreaterThanOrEqual(close.frame.height, 44)
                 if page == "account" {
                     XCTAssertTrue(app.staticTexts["预览同学"].isHittable)
                 }
-                capture(app, "detail-sheet-\(page)-\(large ? "large" : "standard")")
-                close.tap()
+                capture(app, "detail-sheet-\(page)-\(large ? "large" : "standard")-edge\(edgeIndex)")
+                // UIKit may expose the glyph's AX frame, which is smaller than
+                // its hit region. Exercise the actual 44pt target at each edge.
+                add(XCTAttachment(string: "close=\(close.frame) edge=\(edge)"))
+                close.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                    .withOffset(edge).tap()
                 let dismissed = NSPredicate { _, _ in !close.exists }
-                XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: dismissed, evaluatedWith: app)], timeout: 5), .completed)
+                XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: dismissed, evaluatedWith: app)], timeout: 5), .completed,
+                               "The native close control must dismiss at the edge of a 44pt touch target")
                 app.terminate()
+              }
             }
         }
+    }
+
+    func testTodayCoursesSwitchesToAllTimetables() {
+        let app = launch("today")
+        let mode = app.buttons["schedule-mode-switch"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 8))
+        XCTAssertEqual(mode.label, "今日课程")
+        let first = app.buttons["today-course-0"]
+        let second = app.buttons["today-course-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertTrue(first.label.contains("大学物理"))
+        XCTAssertTrue(second.label.contains("高等数学"))
+        XCTAssertLessThan(first.frame.minY, second.frame.minY)
+        XCTAssertFalse(app.buttons["本周"].exists)
+        capture(app, "today-course-timeline")
+        first.tap()
+        let close = app.buttons["关闭课程详情"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.tap()
+        mode.tap()
+        XCTAssertEqual(mode.label, "所有课表")
+        let currentWeek = app.buttons["本周"]
+        XCTAssertTrue(currentWeek.waitForExistence(timeout: 5))
+        XCTAssertTrue(currentWeek.isHittable)
+        XCTAssertLessThanOrEqual(currentWeek.frame.minY - mode.frame.maxY, 32,
+                                "The existing week capsules sit directly below the header")
+        capture(app, "all-timetables-capsules")
+        app.buttons["第 8 周"].tap()
+        mode.tap()
+        XCTAssertEqual(mode.label, "今日课程")
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertTrue(first.label.contains("大学物理"))
+    }
+
+    func testTodayCoursesDistinguishesEmptyFromUnknownWeek() {
+        let empty = launch("today-empty")
+        XCTAssertTrue(empty.staticTexts["今天没有课程"].waitForExistence(timeout: 8))
+        XCTAssertFalse(empty.buttons["today-course-0"].exists)
+        capture(empty, "today-empty")
+        empty.terminate()
+        let unknown = launch("today-unverified")
+        XCTAssertTrue(unknown.staticTexts["暂时无法确认今日课程"].waitForExistence(timeout: 8))
+        XCTAssertFalse(unknown.staticTexts["今天没有课程"].exists)
+        XCTAssertTrue(unknown.buttons["schedule-mode-switch"].isHittable)
+        capture(unknown, "today-unverified")
+    }
+
+    func testTodayCoursesLargeTextKeepsModeAndDetailsReachable() {
+        let app = launch("today", largeText: true)
+        let mode = app.buttons["schedule-mode-switch"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 8))
+        XCTAssertTrue(mode.isHittable)
+        XCTAssertTrue(app.buttons["账号"].isHittable)
+        let first = app.buttons["today-course-0"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertTrue(first.isHittable)
+        capture(app, "today-largest-type")
+        first.tap()
+        XCTAssertTrue(app.buttons["关闭课程详情"].waitForExistence(timeout: 5))
     }
 
     func testWebLoginControlsUseMatchingNativeGeometry() {
@@ -839,10 +907,11 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testAcademicHomeWithoutReminderHasStableSpacedEntries() {
-        let app = launch("academic", withoutUpcoming: true)
+        let app = launch("academic")
         let first = app.buttons["academic-scores"]
         let last = app.buttons["academic-electives"]
         XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["接下来的考试"].exists)
         let before = first.frame
         let account = app.buttons["账号"]
         XCTAssertGreaterThanOrEqual(before.minY - account.frame.maxY, 24)

@@ -15,7 +15,7 @@ on:
       test_scope:
         description: 'Interaction checks to run (focused checks preserve full-suite failure evidence)'
         type: choice
-        options: [all, design-layout, design-adaptive, design-sheets, design-motion, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
+        options: [all, design-final, design-layout, design-adaptive, design-sheets, design-motion, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
         default: all
       appearance_source_ref:
         description: 'Optional source revision for the focused appearance comparison'
@@ -141,6 +141,21 @@ jobs:
           fi
           if [ "$TEST_SCOPE" = 'design-adaptive' ]; then
             TEST_SELECTION=(-only-testing:CCSUTUITests/PageInteractionUITests/testCampusAdaptiveLayout)
+          fi
+          if [ "$TEST_SCOPE" = 'design-final' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTodayCoursesSwitchesToAllTimetables
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTodayCoursesDistinguishesEmptyFromUnknownWeek
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTodayCoursesLargeTextKeepsModeAndDetailsReachable
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicHomeWithoutReminderHasStableSpacedEntries
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusAdaptiveLayout
+              -only-testing:CCSUTUITests/PageInteractionUITests/testDetailSheetsKeepContentAndCloseReachable
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
+              -only-testing:CCSUTUITests/PageInteractionUITests/testDetailTabsHideAndReturnWithHome
+              -only-testing:CCSUTUITests/PageInteractionUITests/testRecordInitialLoadingIsCentered
+              -only-testing:CCSUTUITests/PageInteractionUITests/testWebLoginControlsUseMatchingNativeGeometry
+            )
           fi
           if [ "$TEST_SCOPE" = 'design-layout' ]; then
             TEST_SELECTION=(
@@ -291,7 +306,7 @@ jobs:
             SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG CCSUT_TEST_LEGACY_TOP_BLUR" \
             2>&1 | tee "$RUNNER_TEMP/legacy-blur-test.log"
       - name: Render focused appearance comparison
-        if: ${{ !cancelled() && (inputs.test_scope == 'appearance-screens' || inputs.test_scope == 'design-sheets') && steps.simulator.conclusion == 'success' }}
+        if: ${{ !cancelled() && (inputs.test_scope == 'appearance-screens' || inputs.test_scope == 'design-sheets' || inputs.test_scope == 'design-final') && steps.simulator.conclusion == 'success' }}
         env:
           APPEARANCE_PAGES: ${{ inputs.appearance_pages || 'schedule academic campus scores' }}
         run: |
@@ -304,6 +319,9 @@ jobs:
               *[!a-z-]*|'') echo "Invalid preview page"; exit 1 ;;
             esac
             LAUNCH_ARGS=(--preview-ui --preview-page "$PAGE")
+            if [ "$PAGE" = 'today-large' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page today -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
+            fi
             if [ "$PAGE" = 'electives-selected' ]; then
               LAUNCH_ARGS=(--preview-ui --preview-page electives --preview-complete-selected --preview-selected-tab)
             fi

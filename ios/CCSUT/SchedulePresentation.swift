@@ -54,6 +54,20 @@ enum SchedulePresentation {
         }.sorted { ($0.weekday, $0.section) < ($1.weekday, $1.section) }
     }
 
+    /// Returns nil when the verified week is unavailable or invalid; an empty
+    /// array means that the verified week has no courses on this Shanghai day.
+    static func todayCourses(_ slots: [ScheduleSlot], week: Int?, on date: Date) -> [ScheduleSlot]? {
+        guard let week, (1...53).contains(week) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let calendarWeekday = calendar.component(.weekday, from: date)
+        let weekday = calendarWeekday == 1 ? 7 : calendarWeekday - 1
+        let courses = cells(slots, week: week)
+            .filter { $0.weekday == weekday }
+            .flatMap(\.courses)
+        return courses.sorted(by: chronologicalOrder)
+    }
+
     private struct CourseKey: Hashable {
         let name: String
         let teacher: String
@@ -87,6 +101,15 @@ enum SchedulePresentation {
             if $0.startPeriod != $1.startPeriod { return $0.startPeriod < $1.startPeriod }
             return ($0.course, $0.room, $0.teacher) < ($1.course, $1.room, $1.teacher)
         }
+    }
+
+    private static func chronologicalOrder(_ lhs: ScheduleSlot, _ rhs: ScheduleSlot) -> Bool {
+        if lhs.startPeriod != rhs.startPeriod { return lhs.startPeriod < rhs.startPeriod }
+        if lhs.course != rhs.course { return lhs.course < rhs.course }
+        if lhs.room != rhs.room { return lhs.room < rhs.room }
+        if lhs.teacher != rhs.teacher { return lhs.teacher < rhs.teacher }
+        if lhs.endPeriod != rhs.endPeriod { return lhs.endPeriod < rhs.endPeriod }
+        return lhs.weeks.sorted().lexicographicallyPrecedes(rhs.weeks.sorted())
     }
 }
 

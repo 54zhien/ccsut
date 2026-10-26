@@ -51,9 +51,7 @@ struct EcardPaymentView: View {
                 if let issue = model.recoveryIssue { recoveryCard(issue) }
                 else if let receipt = model.receipt { result(receipt) }
                 else {
-                    roomSelection
-                    if let detail = model.detail { meterCard(detail) }
-                    amountSelection
+                    meterCard(model.detail)
                 }
                 if model.recoveryIssue == nil, let message = model.errorText {
                     VStack(alignment: .leading, spacing: 10) {
@@ -164,156 +162,325 @@ struct EcardPaymentView: View {
     }
 
     private var roomSelection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CampusSection("缴费房间") {
-                if model.campuses.count > 1 {
-                    selectionRow("校区", placeholder: "请选择校区", options: model.campuses,
-                                 value: model.campus, action: model.selectCampus)
-                    Divider()
-                }
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) { buildingChoice; roomChoice }
-                    VStack(spacing: 12) { buildingChoice; roomChoice }
-                }
+        VStack(alignment: .leading, spacing: 10) {
+            Text("缴费房间")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if model.campuses.count > 1 { campusChoice }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) { buildingChoice; roomChoice }
+                VStack(spacing: 10) { buildingChoice; roomChoice }
             }
             if model.isStarting || model.loadingText != nil {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text(model.loadingText ?? "正在连接一卡通…").font(.footnote).foregroundStyle(.secondary)
-                }.padding(.horizontal, 4)
+                    Text(model.loadingText ?? "正在连接一卡通…")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                .padding(.top, 2)
             }
         }
+    }
+
+    private var campusChoice: some View {
+        selectionNameplate("校区", symbol: "mappin.and.ellipse", placeholder: "请选择校区",
+                           options: model.campuses, value: model.campus, action: model.selectCampus)
     }
     private var buildingChoice: some View {
-        roomChoice("楼栋", symbol: "building.2", placeholder: "选择楼栋", options: model.buildings,
-                   value: model.building, action: model.selectBuilding)
+        selectionNameplate("楼栋", symbol: "building.2", placeholder: "选择楼栋",
+                           options: model.buildings, value: model.building, action: model.selectBuilding)
     }
     private var roomChoice: some View {
-        roomChoice("房间", symbol: "door.left.hand.closed", placeholder: "选择房间", options: model.rooms,
-                   value: model.room, action: model.selectRoom)
+        selectionNameplate("房间", symbol: "door.left.hand.closed", placeholder: "选择房间",
+                           options: model.rooms, value: model.room, action: model.selectRoom)
     }
-    private func roomChoice(_ title: String, symbol: String, placeholder: String, options: [ThirdOption],
-                            value: String?, action: @escaping (String?) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label(title, systemImage: symbol).font(.caption).foregroundStyle(.secondary)
-            Menu {
-                Picker(title, selection: Binding(get: { value }, set: action)) {
-                    Text(placeholder).tag(nil as String?)
-                    ForEach(options, id: \.value) { option in
-                        Text(CampusPrivacy.redact(option.name)).tag(Optional(option.value))
-                    }
+    private func selectionNameplate(_ title: String, symbol: String, placeholder: String,
+                                    options: [ThirdOption], value: String?,
+                                    action: @escaping (String?) -> Void) -> some View {
+        Menu {
+            Picker(title, selection: Binding(get: { value }, set: action)) {
+                Text(placeholder).tag(nil as String?)
+                ForEach(options, id: \.value) { option in
+                    Text(CampusPrivacy.redact(option.name)).tag(Optional(option.value))
                 }
-            } label: {
-                HStack(spacing: 8) {
-                    Text(CampusPrivacy.redact(options.first(where: { $0.value == value })?.name ?? placeholder))
-                        .font(.subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold))
-                }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             }
-            .disabled(options.isEmpty || model.isSubmitting)
-            .accessibilityLabel("选择\(title)")
-        }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 18))
-    }
-    private func selectionRow(_ title: String, placeholder: String, options: [ThirdOption],
-                              value: String?, action: @escaping (String?) -> Void) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack {
-                Text(title).foregroundStyle(.secondary)
-                Spacer(minLength: 8)
-                selectionPicker(title, placeholder: placeholder, options: options, value: value, action: action)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
+        } label: {
             VStack(alignment: .leading, spacing: 8) {
-                Text(title).foregroundStyle(.secondary)
-                selectionPicker(title, placeholder: placeholder, options: options, value: value, action: action)
+                HStack(spacing: 6) {
+                    Label(title, systemImage: symbol)
+                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(CampusPrivacy.redact(options.first(where: { $0.value == value })?.name ?? placeholder))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(value == nil ? Color.secondary : Color.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
             }
-        }.frame(minHeight: 44)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(.tertiarySystemGroupedBackground))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.06), lineWidth: 1)
+                    }
+            }
+        }
+        .disabled(options.isEmpty || model.isSubmitting)
+        .accessibilityLabel("选择\(title)")
     }
-    private func selectionPicker(_ title: String, placeholder: String, options: [ThirdOption],
-                                 value: String?, action: @escaping (String?) -> Void) -> some View {
-        Picker(title, selection: Binding(get: { value }, set: action)) {
-            Text(placeholder).tag(nil as String?)
-            ForEach(options, id: \.value) { option in Text(CampusPrivacy.redact(option.name)).tag(Optional(option.value)) }
-        }.pickerStyle(.menu).labelsHidden().disabled(options.isEmpty || model.isSubmitting).accessibilityLabel(title)
+
+    private func meterCard(_ detail: MeterDetail?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "bolt.fill")
+                    .font(.headline.weight(.semibold)).foregroundStyle(Color.accentColor)
+                    .frame(width: 34, height: 34)
+                    .background(Color.accentColor.opacity(colorScheme == .dark ? 0.16 : 0.10), in: .circle)
+                Text("电费计量")
+                    .font(.headline.weight(.semibold))
+                Spacer(minLength: 8)
+                if let type = detail?.meterTypeName {
+                    Text(CampusPrivacy.redact(type))
+                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        .lineLimit(2).multilineTextAlignment(.trailing)
+                }
+            }
+
+            meterSeam.padding(.vertical, 14)
+            roomSelection
+            meterSeam.padding(.vertical, 14)
+            meterDisplay(detail)
+            meterSeam.padding(.vertical, 14)
+            amountSelection
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(chassisSurface(cornerRadius: 30))
+        .overlay {
+            GeometryReader { geometry in
+                ZStack {
+                    meterFastener.position(x: 10, y: 10)
+                    meterFastener.position(x: geometry.size.width - 10, y: 10)
+                    meterFastener.position(x: 10, y: geometry.size.height - 10)
+                    meterFastener.position(x: geometry.size.width - 10, y: geometry.size.height - 10)
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.28 : 0.12), radius: 14, x: 0, y: 9)
     }
-    private func meterCard(_ detail: MeterDetail) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+
+    private var meterFastener: some View {
+        Circle()
+            .fill(LinearGradient(
+                colors: colorScheme == .dark
+                    ? [Color.white.opacity(0.24), Color.black.opacity(0.48)]
+                    : [Color.white.opacity(0.92), Color.black.opacity(0.18)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            ))
+            .overlay {
+                Circle().strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.18 : 0.10), lineWidth: 0.5)
+            }
+            .overlay {
+                Capsule()
+                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.36 : 0.30))
+                    .frame(width: 3.5, height: 0.7)
+                    .rotationEffect(.degrees(-35))
+            }
+            .frame(width: 6, height: 6)
+    }
+
+    private var meterSeam: some View {
+        Rectangle()
+            .fill(LinearGradient(
+                colors: colorScheme == .dark
+                    ? [Color.black.opacity(0.48), Color.white.opacity(0.08), Color.black.opacity(0.35)]
+                    : [Color.black.opacity(0.14), Color.white.opacity(0.88), Color.black.opacity(0.08)],
+                startPoint: .top, endPoint: .bottom
+            ))
+            .frame(height: 1)
+            .accessibilityHidden(true)
+    }
+
+    private func chassisSurface(cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return shape
+            .fill(LinearGradient(
+                colors: colorScheme == .dark
+                    ? [Color(red: 0.28, green: 0.29, blue: 0.29), Color(red: 0.16, green: 0.17, blue: 0.17), Color(red: 0.23, green: 0.24, blue: 0.24)]
+                    : [Color(.systemGray5), Color(.secondarySystemGroupedBackground), Color(.systemGray4), Color(.systemGray5)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            ))
+            .overlay {
+                shape.strokeBorder(LinearGradient(
+                    colors: colorScheme == .dark
+                        ? [Color.white.opacity(0.20), Color.black.opacity(0.45)]
+                        : [Color.white.opacity(0.90), Color.black.opacity(0.12)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ), lineWidth: 1)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: max(1, cornerRadius - 5), style: .continuous)
+                    .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.035) : Color.white.opacity(0.66), lineWidth: 0.7)
+                    .padding(4)
+            }
+    }
+
+    private var lcdSurface: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(LinearGradient(
+                colors: colorScheme == .dark
+                    ? [Color(red: 0.13, green: 0.19, blue: 0.15), Color(red: 0.09, green: 0.14, blue: 0.11)]
+                    : [Color(red: 0.87, green: 0.91, blue: 0.76), Color(red: 0.78, green: 0.84, blue: 0.65)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            ))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.50 : 0.22), lineWidth: 1)
+            }
+            .overlay(alignment: .top) {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(LinearGradient(colors: [Color.white.opacity(colorScheme == .dark ? 0.06 : 0.42), .clear],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(height: 30)
+                    .allowsHitTesting(false)
+            }
+    }
+
+    private var lcdInk: Color {
+        colorScheme == .dark ? Color(red: 0.79, green: 0.91, blue: 0.75) : Color(red: 0.18, green: 0.25, blue: 0.14)
+    }
+
+    private func meterDisplay(_ detail: MeterDetail?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("剩余金额", systemImage: "bolt.fill").font(.subheadline).foregroundStyle(.secondary)
-                Spacer()
-                if (detail.remainingAmount ?? 0) < 0 {
+                Label("剩余金额", systemImage: "bolt.fill")
+                    .font(.subheadline.weight(.medium)).foregroundStyle(lcdInk.opacity(0.82))
+                Spacer(minLength: 8)
+                if (detail?.remainingAmount ?? 0) < 0 {
                     Text("当前欠费").font(.caption.weight(.semibold)).foregroundStyle(.red)
                 }
             }
-            ViewThatFits(in: .horizontal) {
-                balance(detail).fixedSize(horizontal: true, vertical: false)
-                balance(detail).minimumScaleFactor(0.5)
-            }
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(CampusPrivacy.redact(detail.roomDescription ?? "—"))
-                    Spacer(minLength: 0)
-                    Text(CampusPrivacy.redact(detail.meterTypeName ?? "—"))
+            if let detail {
+                ViewThatFits(in: .horizontal) {
+                    balance(detail).fixedSize(horizontal: true, vertical: false)
+                    balance(detail).minimumScaleFactor(0.5)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(CampusPrivacy.redact(detail.roomDescription ?? "—"))
-                    Text(CampusPrivacy.redact(detail.meterTypeName ?? "—"))
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(CampusPrivacy.redact(detail.roomDescription ?? "—"))
+                        Spacer(minLength: 0)
+                        Text(CampusPrivacy.redact(detail.meterTypeName ?? "—"))
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(CampusPrivacy.redact(detail.roomDescription ?? "—"))
+                        Text(CampusPrivacy.redact(detail.meterTypeName ?? "—"))
+                    }
                 }
+                .font(.caption).foregroundStyle(lcdInk.opacity(0.78))
+                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(model.isStarting ? "正在读取余额…" : "余额暂不可用")
+                    .font(.title3.weight(.medium)).foregroundStyle(lcdInk.opacity(0.82))
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .font(.caption).foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(20).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        .background(lcdSurface)
+        .padding(3)
+        .background {
+            RoundedRectangle(cornerRadius: 21, style: .continuous)
+                .fill(Color.black.opacity(colorScheme == .dark ? 0.42 : 0.16))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 21, style: .continuous)
+                        .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.72), lineWidth: 1)
+                }
+        }
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.20 : 0.08), radius: 3, x: 0, y: 2)
     }
+
     private func balance(_ detail: MeterDetail) -> some View {
+        let rawValue = detail.show["剩余金额"] ?? "—"
+        let valueInk = (detail.remainingAmount ?? 0) < 0 ? Color.red : lcdInk
+        return Group {
+            if SevenSegmentBalanceDisplay.canRender(rawValue) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .bottom, spacing: 8) {
+                        SevenSegmentBalanceDisplay(value: rawValue, ink: valueInk)
+                        Text("元").font(.subheadline).foregroundStyle(lcdInk.opacity(0.78))
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    textBalance(rawValue, ink: valueInk)
+                }
+            } else {
+                textBalance(rawValue, ink: valueInk)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(rawValue) 元")
+    }
+
+    private func textBalance(_ value: String, ink: Color) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(CampusPrivacy.redact(detail.show["剩余金额"] ?? "—"))
-                .font(.system(.largeTitle, design: .rounded, weight: .semibold).monospacedDigit()).lineLimit(1)
-                .foregroundStyle((detail.remainingAmount ?? 0) < 0 ? Color.red : Color.primary)
-            Text("元").font(.subheadline).foregroundStyle(.secondary)
-        }.accessibilityElement(children: .combine)
+            Text(value)
+                .font(.system(.largeTitle, design: .rounded, weight: .semibold).monospacedDigit())
+                .lineLimit(1).minimumScaleFactor(0.45)
+                .foregroundStyle(ink)
+            Text("元").font(.subheadline).foregroundStyle(lcdInk.opacity(0.78))
+        }
     }
 
     private var amountSelection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            AppSectionHeading("充值金额")
-            VStack(alignment: .leading, spacing: 20) {
-                HStack {
-                    Text("上下滑动选择金额").font(.subheadline).foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
-                    Text("人民币 · 元").font(.caption).foregroundStyle(.secondary)
-                }
-                HStack(spacing: 0) {
-                    Text("¥").font(.title2.weight(.medium)).foregroundStyle(.secondary)
-                        .padding(.leading, 20).padding(.trailing, 8).accessibilityHidden(true)
-                    amountDrum(place: 100, label: "百位")
-                    amountDrum(place: 10, label: "十位")
-                    amountDrum(place: 1, label: "个位")
-                }
-                .padding(.trailing, 12)
-                .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 24))
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("缴费金额，\(amountValue)元，上下滑动数字调整")
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) { amountPresets }
-                    VStack(spacing: 8) { amountPresets }
-                }
-                Text(amountMaximum > 0 ? "可充值 \(MeterAmount.minimum)–\(amountMaximum) 元" : "正在获取可充值金额范围")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                if let hint = model.amountHint {
-                    Label(hint, systemImage: "exclamationmark.circle")
-                        .font(.footnote).foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            HStack(alignment: .firstTextBaseline) {
+                Text("充值金额").font(.headline.weight(.semibold))
+                Spacer(minLength: 8)
+                Text("人民币 · 元").font(.caption).foregroundStyle(.secondary)
             }
-            .padding(20).frame(maxWidth: .infinity, alignment: .leading)
-            .appContentCard()
+            HStack(spacing: 0) {
+                Text("¥").font(.title2.weight(.medium)).foregroundStyle(.secondary)
+                    .padding(.leading, 10).padding(.trailing, 6).accessibilityHidden(true)
+                amountDrum(place: 100, label: "百位")
+                amountDrum(place: 10, label: "十位")
+                amountDrum(place: 1, label: "个位")
+            }
+            .padding(.trailing, 8)
+            .background {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(LinearGradient(
+                        colors: colorScheme == .dark
+                            ? [Color.black.opacity(0.34), Color.black.opacity(0.20)]
+                            : [Color.white.opacity(0.54), Color(.systemGray6).opacity(0.68)],
+                        startPoint: .top, endPoint: .bottom
+                    ))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.07), lineWidth: 1)
+                    }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("缴费金额，\(amountValue)元，上下滑动数字调整")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { amountPresets }
+                VStack(spacing: 8) { amountPresets }
+            }
+            Text(amountMaximum > 0 ? "可充值 \(MeterAmount.minimum)–\(amountMaximum) 元" : "正在获取可充值金额范围")
+                .font(.footnote).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+            if let hint = model.amountHint {
+                Label(hint, systemImage: "exclamationmark.circle")
+                    .font(.footnote).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -325,7 +492,7 @@ struct EcardPaymentView: View {
                 Text("\(amount) 元").font(.subheadline.weight(.semibold)).monospacedDigit()
                     .frame(maxWidth: .infinity, minHeight: 32)
             }
-            .buttonStyle(.bordered).buttonBorderShape(.capsule)
+            .buttonStyle(.bordered).buttonBorderShape(.roundedRectangle)
             .tint(amountValue == amount ? Color.accentColor : Color.secondary)
             .disabled(amountMaximum < amount || model.isSubmitting)
             .accessibilityLabel("充值\(amount)元")
@@ -366,22 +533,27 @@ struct EcardPaymentView: View {
         .accessibilityLabel("金额\(label)")
     }
     private var payBar: some View {
-        CampusActionDock(controlInset: 20) {
-            VStack(spacing: 10) {
-                Button {
-                    guard canPayDisplayedAmount else { return }
-                    model.prepareConfirmation()
-                } label: {
-                    Text("立即缴费").font(.headline).frame(maxWidth: .infinity, minHeight: 32)
-                }
-                .buttonStyle(.glassProminent).buttonBorderShape(.capsule).controlSize(.large)
-                .campusActionControl()
-                .disabled(!canPayDisplayedAmount)
-                Text("从一卡通余额扣款，确认后即支付")
-                    .font(.caption).foregroundStyle(.secondary)
+        VStack(spacing: 10) {
+            Button {
+                guard canPayDisplayedAmount else { return }
+                model.prepareConfirmation()
+            } label: {
+                Text("立即缴费").font(.headline).frame(maxWidth: .infinity, minHeight: 32)
             }
-            .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 4)
+            .buttonStyle(.glassProminent).buttonBorderShape(.capsule).controlSize(.large)
+            .campusActionControl()
+            .disabled(!canPayDisplayedAmount)
+            Text("从一卡通余额扣款，确认后即支付")
+                .font(.caption).foregroundStyle(.secondary)
         }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .frame(maxWidth: 720)
+        .background(chassisSurface(cornerRadius: 22))
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.22 : 0.09), radius: 10, x: 0, y: 4)
+        .padding(.horizontal, AppLayout.pageInset)
+        .padding(.top, 8).padding(.bottom, 6)
+        .frame(maxWidth: .infinity)
+        .background(Color(.systemGroupedBackground).opacity(0.97).ignoresSafeArea(edges: .bottom))
     }
     private func confirmation(_ confirmed: EcardPaymentModel.Confirmation) -> some View {
         VStack(spacing: 0) {
@@ -451,6 +623,111 @@ struct EcardPaymentView: View {
     }
     private func info(_ label: String, _ value: String) -> some View {
         CampusInfoRow(label, value: value)
+    }
+}
+
+private struct SevenSegmentBalanceDisplay: View {
+    let value: String
+    let ink: Color
+    @ScaledMetric(relativeTo: .largeTitle) private var digitHeight: CGFloat = 44
+
+    static func canRender(_ value: String) -> Bool {
+        let characters = Array(value)
+        guard !characters.isEmpty, characters.count <= 12 else { return false }
+        var hasDigit = false
+        var hasDecimal = false
+        for (index, character) in characters.enumerated() {
+            if let ascii = character.asciiValue, (48...57).contains(ascii) {
+                hasDigit = true
+            } else if character == ".", !hasDecimal, hasDigit, index < characters.count - 1 {
+                hasDecimal = true
+            } else if character == "-", index == 0 {
+                continue
+            } else {
+                return false
+            }
+        }
+        return hasDigit
+    }
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: digitHeight * 0.055) {
+            ForEach(Array(value.enumerated()), id: \.offset) { item in
+                if item.element == "." {
+                    Circle()
+                        .fill(ink.opacity(0.92))
+                        .frame(width: digitHeight * 0.12, height: digitHeight * 0.12)
+                        .padding(.horizontal, digitHeight * 0.035)
+                        .padding(.bottom, digitHeight * 0.055)
+                } else {
+                    SevenSegmentDigit(character: item.element, ink: ink)
+                        .frame(width: digitHeight * 0.60, height: digitHeight)
+                }
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct SevenSegmentDigit: View {
+    private enum Segment: CaseIterable, Hashable {
+        case top, upperRight, lowerRight, bottom, lowerLeft, upperLeft, middle
+    }
+
+    let character: Character
+    let ink: Color
+
+    private var activeSegments: Set<Segment> {
+        switch character {
+        case "0": return [.top, .upperRight, .lowerRight, .bottom, .lowerLeft, .upperLeft]
+        case "1": return [.upperRight, .lowerRight]
+        case "2": return [.top, .upperRight, .middle, .lowerLeft, .bottom]
+        case "3": return [.top, .upperRight, .middle, .lowerRight, .bottom]
+        case "4": return [.upperLeft, .middle, .upperRight, .lowerRight]
+        case "5": return [.top, .upperLeft, .middle, .lowerRight, .bottom]
+        case "6": return [.top, .upperLeft, .middle, .lowerRight, .bottom, .lowerLeft]
+        case "7": return [.top, .upperRight, .lowerRight]
+        case "8": return Set(Segment.allCases)
+        case "9": return [.top, .upperRight, .lowerRight, .bottom, .upperLeft, .middle]
+        case "-": return [.middle]
+        default: return []
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let height = geometry.size.height
+            let thickness = max(1.5, height * 0.085)
+            let horizontalLength = max(0, width - thickness * 1.8)
+            let verticalLength = max(0, (height - thickness * 3) / 2)
+
+            ZStack {
+                segment(.top, width: horizontalLength, height: thickness,
+                        x: width / 2, y: thickness / 2)
+                segment(.middle, width: horizontalLength, height: thickness,
+                        x: width / 2, y: height / 2)
+                segment(.bottom, width: horizontalLength, height: thickness,
+                        x: width / 2, y: height - thickness / 2)
+                segment(.upperLeft, width: thickness, height: verticalLength,
+                        x: thickness / 2, y: thickness + verticalLength / 2)
+                segment(.upperRight, width: thickness, height: verticalLength,
+                        x: width - thickness / 2, y: thickness + verticalLength / 2)
+                segment(.lowerLeft, width: thickness, height: verticalLength,
+                        x: thickness / 2, y: height - thickness - verticalLength / 2)
+                segment(.lowerRight, width: thickness, height: verticalLength,
+                        x: width - thickness / 2, y: height - thickness - verticalLength / 2)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func segment(_ segment: Segment, width: CGFloat, height: CGFloat, x: CGFloat, y: CGFloat) -> some View {
+        Capsule()
+            .fill(ink.opacity(activeSegments.contains(segment) ? 0.92 : 0.055))
+            .frame(width: width, height: height)
+            .position(x: x, y: y)
     }
 }
 

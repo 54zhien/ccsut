@@ -30,6 +30,8 @@ struct ScheduleView: View {
     @State private var pendingDetail: ScheduleSlot?
     @State private var headerScrollOffset: CGFloat = 0
     @State private var previewRefreshCount = 0
+    @State private var showsAllTimetables = InterfacePreview.enabled && !InterfacePreview.page.hasPrefix("today")
+    @State private var todayHeadingHeight: CGFloat = 0
     private var railWidth: CGFloat { max(48, timeFont * 4.5) }
     private var headerHeight: CGFloat { max(52, dayFont + dateFont + 24) }
     private let weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -42,22 +44,26 @@ struct ScheduleView: View {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
                         VStack(spacing: 0) {
+                            Color.clear.frame(height: 0).id("page-top")
                             if let bundle, !bundle.isEmpty {
                                 VStack(spacing: 16) {
                                     if let errorText {
                                         PageStatusNotice(message: errorText) { Task { await load(force: true) } }
                                     }
-                                    scheduleHeading.id("page-top")
-                                    weekBar()
-                                    VStack(spacing: 8) {
-                                        timetable(viewport: viewport.size)
+                                    if showsAllTimetables {
+                                        weekBar()
+                                        VStack(spacing: 8) {
+                                            termSummary
+                                            timetable(viewport: viewport.size)
+                                        }
+                                        .padding(.vertical, 12)
+                                        .appContentCard()
+                                        .clipShape(.rect(cornerRadius: AppLayout.cardRadius))
+                                        .padding(.horizontal, 12)
+                                        .id("timetable-panel")
+                                    } else {
+                                        todaySchedule(viewportHeight: viewport.size.height)
                                     }
-                                    .padding(.top, 12)
-                                    .padding(.bottom, 12)
-                                    .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
-                                    .clipShape(.rect(cornerRadius: 28))
-                                    .padding(.horizontal, 12)
-                                    .id("timetable-panel")
                                     Color.clear.frame(height: 1).id("page-end")
                                 }
                                 .padding(.top, 8)
@@ -93,6 +99,10 @@ struct ScheduleView: View {
                     .onScrollGeometryChange(for: CGFloat.self) { geometry in
                         max(geometry.contentOffset.y + geometry.contentInsets.top, 0)
                     } action: { _, offset in headerScrollOffset = offset }
+                    .onChange(of: showsAllTimetables) { _, _ in
+                        proxy.scrollTo("page-top", anchor: .top)
+                        headerScrollOffset = 0
+                    }
                     .task {
                         #if DEBUG
                         if InterfacePreview.page == "bottom" || InterfacePreview.page == "header-hidden" {
@@ -112,7 +122,10 @@ struct ScheduleView: View {
             .accessibilityIdentifier("schedule-surface")
             .background(Color(.systemGroupedBackground))
             .nagiPageChrome(title: "课表", scrollOffset: headerScrollOffset) {
-                AccountButton()
+                HStack(spacing: 8) {
+                    modeSwitch
+                    AccountButton()
+                }
             }
             .task { if bundle == nil { await load() } }
             .task {
@@ -177,19 +190,8 @@ struct ScheduleView: View {
         }
     }
 
-    private var scheduleHeading: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("第 \(selectedWeek) 周")
-                    .font(.system(.title, design: .rounded, weight: .bold))
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 8)
-                if let monday = date(for: 1), let sunday = date(for: 7) {
-                    Text("\(calendar.component(.month, from: monday))月\(calendar.component(.day, from: monday))日 – \(calendar.component(.month, from: sunday))月\(calendar.component(.day, from: sunday))日")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+    private var termSummary: some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(SchedulePresentation.termTitle(bundle?.title ?? ""))
                     .font(.footnote).foregroundStyle(.secondary)
@@ -207,6 +209,141 @@ struct ScheduleView: View {
         }
         .frame(minHeight: 28)
         .padding(.horizontal, AppLayout.pageInset)
+    }
+
+    private var modeSwitch: some View {
+        Button {
+            showsAllTimetables.toggle()
+        } label: {
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    Image(systemName: showsAllTimetables ? "calendar" : "list.bullet")
+                        .font(.system(size: 20, weight: .medium))
+                        .frame(width: 48)
+                } else {
+                    Text(showsAllTimetables ? "所有课表" : "今日课程")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14)
+                }
+            }
+            .frame(height: 48)
+            .foregroundStyle(.primary)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Capsule())
+        .accessibilityIdentifier("schedule-mode-switch")
+        .accessibilityLabel(showsAllTimetables ? "所有课表" : "今日课程")
+        .accessibilityHint(showsAllTimetables ? "切换到今日课程" : "切换到所有课表")
+    }
+
+    private var todayDate: Date { referenceDate ?? calendarCheckedAt }
+
+    private var todaysCourses: [ScheduleSlot]? {
+        SchedulePresentation.todayCourses(bundle?.slots ?? [], week: currentWeek, on: todayDate)
+    }
+
+    private func todaySchedule(viewportHeight: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(calendar.component(.month, from: todayDate))月\(calendar.component(.day, from: todayDate))日")
+                    .font(.title2.weight(.bold)).accessibilityAddTraits(.isHeader)
+                let weekday = (calendar.component(.weekday, from: todayDate) + 5) % 7
+                Text("\(weekdays[weekday])\(todaysCourses.map { " · \($0.count) 门课程" } ?? "")")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { todayHeadingHeight = $0 }
+            if let courses = todaysCourses {
+                if courses.isEmpty {
+                    ContentUnavailableView("今天没有课程", systemImage: "sun.max",
+                                           description: Text("可以切换到所有课表查看其他安排。"))
+                        .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - todayHeadingHeight - 52))
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(courses.enumerated()), id: \.offset) { index, slot in
+                            todayCourse(slot, index: index, isLast: index == courses.count - 1)
+                        }
+                    }
+                }
+            } else {
+                ContentUnavailableView {
+                    Label("暂时无法确认今日课程", systemImage: "calendar.badge.exclamationmark")
+                } description: {
+                    Text("教学周次暂未获取。请下拉刷新，或切换到所有课表。")
+                } actions: {
+                    Button("重新加载") { Task { await load(force: true) } }
+                }
+                .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - todayHeadingHeight - 52))
+            }
+        }
+        .padding(.horizontal, AppLayout.pageInset)
+        .padding(.top, 12)
+        .frame(maxWidth: 720).frame(maxWidth: .infinity)
+        .accessibilityIdentifier("today-course-list")
+    }
+
+    @ViewBuilder private func todayCourse(_ slot: ScheduleSlot, index: Int, isLast: Bool) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 12) {
+                todayTime(slot, horizontal: true)
+                todayCourseCard(slot, index: index)
+            }
+            .padding(.bottom, isLast ? 0 : 24)
+        } else {
+            HStack(alignment: .top, spacing: 12) {
+                todayTime(slot, horizontal: false).frame(width: 64, alignment: .leading)
+                VStack(spacing: 0) {
+                    Circle().fill(Color.accentColor).frame(width: 7, height: 7).padding(.top, 7)
+                    Rectangle().fill(Color(.separator).opacity(0.4)).frame(width: 1)
+                        .opacity(isLast ? 0 : 1)
+                }
+                .accessibilityHidden(true)
+                todayCourseCard(slot, index: index).padding(.bottom, isLast ? 0 : 20)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func todayTime(_ slot: ScheduleSlot, horizontal: Bool) -> some View {
+        let section = slot.bigSection - 1
+        let hasTime = classTimes.indices.contains(section) && slot.startPeriod == section * 2 + 1 && slot.endPeriod == section * 2 + 2
+        return VStack(alignment: .leading, spacing: 5) {
+            if hasTime {
+                Text(horizontal ? "\(classTimes[section].0)–\(classTimes[section].1)" : classTimes[section].0)
+                    .font(.system(.headline, design: .rounded)).monospacedDigit()
+                if !horizontal {
+                    Text(classTimes[section].1).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                }
+            }
+            Text(SchedulePresentation.periodCaption(slot))
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func todayCourseCard(_ slot: ScheduleSlot, index: Int) -> some View {
+        Button { detail = slot } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(slot.course).font(.headline).foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
+                if !slot.room.isEmpty {
+                    Label(slot.room, systemImage: "mappin.and.ellipse").font(.subheadline).foregroundStyle(.secondary)
+                }
+                if !slot.teacher.isEmpty {
+                    Label(slot.teacher, systemImage: "person").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+            .appContentCard().contentShape(.rect(cornerRadius: AppLayout.cardRadius))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("today-course-\(index)")
+        .accessibilityHint("查看课程详情")
     }
 
     private var maxWeek: Int { max(18, bundle?.slots.flatMap(\.weeks).max() ?? 18, currentWeek ?? 1) }
@@ -397,6 +534,12 @@ struct ScheduleView: View {
             selectedWeek = 7
             didPickWeek = true
             referenceDate = ISO8601DateFormatter().date(from: "2026-10-23T09:41:00+08:00")
+            if InterfacePreview.page == "today-empty" {
+                referenceDate = ISO8601DateFormatter().date(from: "2026-10-24T09:41:00+08:00")
+            } else if InterfacePreview.page == "today-unverified" {
+                currentWeek = nil
+                weekUnavailable = true
+            }
             if InterfacePreview.page == "course" { detail = cells.first?.courses.first }
             if InterfacePreview.page == "conflict" { choosing = cells.first(where: { $0.courses.count > 1 }) }
             if force { previewRefreshCount += 1 }

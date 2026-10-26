@@ -23,23 +23,30 @@
 5. Room changes/pending payment must never allow duplicate or mismatched payment.
 
 ## Task 1: Regressions and identity
-- [ ] Add and run identity/name regressions before repair; preserve account-generation checks.
-- [ ] Add native record-loading and short tab-travel assertions; run against baseline where supported.
-- [ ] Audit existing session/payment/forms/data ownership and record validated findings.
+- [x] Add and run identity/name regressions before repair; preserve account-generation checks.
+- [x] Add native record-loading and short tab-travel assertions; run against baseline where supported.
+- [x] Audit existing session/payment/forms/data ownership and record validated findings.
 Files: Session.swift, Models.swift, API.swift, relevant identity tests; PageInteractionUITests.swift.
 
 ## Task 2: Main pages and detail system
-- [ ] Add reusable content helpers in PageSurface.swift (section headings, service entries, detail information, loading indicator).
-- [ ] Apply to AcademicView, CampusView, ScheduleView and all their detail sheets.
-- [ ] Rework score/exam/elective content hierarchy and native control consistency.
-- [ ] Center CampusRecordViews loading and empty states using measured viewport/header.
+- [x] Add reusable content helpers in PageSurface.swift (section headings, service entries, detail information, loading indicator).
+- [x] Apply to AcademicView, CampusView, ScheduleView and all their detail sheets.
+- [x] Rework score/exam/elective content hierarchy and native control consistency.
+- [x] Center CampusRecordViews loading and empty states using measured viewport/header.
 Consumes: existing data models and navigation IDs. Produces: presentation only; preserves IDs/actions.
 
 ## Task 3: Meter and navigation controls
-- [ ] Restyle EcardPaymentView with semantic content surfaces and native amount wheels; preserve 10–400 limits and server limits.
-- [ ] Make WebLoginSheet refresh and dismiss controls share symbol metrics and circle dimensions.
-- [ ] Change AcademicNavigation displacement to 20pt while retaining transition coordination and cancellation.
+- [x] Rebuild EcardPaymentView as a physical meter housing with integrated native room menus, LCD balance and amount wheels; preserve 10–400 limits and server limits.
+- [x] Make WebLoginSheet refresh and dismiss controls share symbol metrics and circle dimensions.
+- [x] Change AcademicNavigation displacement to 20pt while retaining transition coordination and cancellation.
 Verification: meter regression, native selection UI, tab restore/cancel/Reduce Motion tests.
+
+## User refinements: Today and full timetable
+- [x] Add the account-adjacent Today / All toggle, defaulting to Today.
+- [x] Filter and sort today's courses using the verified current week and Shanghai date, with distinct empty and unknown-week states.
+- [x] Preserve the existing week capsules and remove the new heading above them.
+- [x] Remove the academic home upcoming-exam card and its data requests.
+- [ ] Verify native timeline navigation, mode switching, maximum text and revised meter appearance.
 
 ## Task 4: Verify and deliver
 - [ ] Run appropriate local regression suites, native source CI and screenshot/UI checks.
