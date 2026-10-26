@@ -223,6 +223,16 @@ private actor CampusPreviewReader: CampusReading {
         if leaveReads > 1 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
             await PreviewRefreshCompletionGate.shared.waitForRelease()
         }
+        if ProcessInfo.processInfo.arguments.contains("--preview-wallet-many") || ProcessInfo.processInfo.arguments.contains("--preview-empty") {
+            let count = ProcessInfo.processInfo.arguments.contains("--preview-empty") ? 0 : 8
+            let list: [[String: Any]] = (0..<count).map { index in
+                ["id": "wallet-\(index)", "leaveTypeName": index % 2 == 0 ? "事假" : "病假",
+                 "beginTime": "2026-10-01 08:00", "endTime": "2026-10-02 18:00", "leaveDay": 2,
+                 "status": 0, "reason": "示例请假条 \(index + 1) · 用于确认票夹展开后的排列与长文字换行，不包含真实学生信息。"]
+            }
+            let payload: [String: Any] = ["data": ["list": list, "pageNum": 1, "pageSize": 20, "total": count, "hasNextPage": false]]
+            return try CampusDecoder.leavePage(JSONSerialization.data(withJSONObject: payload))
+        }
         return try CampusDecoder.leavePage(Data("""
         {"data":{"list":[{"id":"preview-leave","leaveTypeName":"事假","beginTime":"2026-10-01 08:00",
         "endTime":"2026-10-02 18:00","leaveDay":2,"status":0,"reason":"示例请假记录"}],

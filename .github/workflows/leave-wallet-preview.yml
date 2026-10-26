@@ -23,7 +23,7 @@ jobs:
       - name: Wallet interaction
         run: |
           set -o pipefail
-          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/wallet.xcresult" -only-testing:CCSUTUITests/PageInteractionUITests/testLeaveWalletOpenCloseAndCancel -only-testing:CCSUTUITests/PageInteractionUITests/testLeaveWalletLargeText -only-testing:CCSUTUITests/PageInteractionUITests/testLeaveWalletPrintOnce -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/wallet-tests.log"
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/wallet.xcresult" -only-testing:CCSUTUITests/PageInteractionUITests/testLeaveWalletOpenCloseAndCancel -only-testing:CCSUTUITests/PageInteractionUITests/testLeaveWalletLargeText -only-testing:CCSUTUITests/PageInteractionUITests/testLeaveWalletManyAndEmpty -only-testing:CCSUTUITests/PageInteractionUITests/testLeaveWalletPrintOnce -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/wallet-tests.log"
       - name: Capture dark and reduced motion
         run: |
           xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance dark

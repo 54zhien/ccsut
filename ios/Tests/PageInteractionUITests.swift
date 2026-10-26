@@ -444,6 +444,30 @@ final class PageInteractionUITests: XCTestCase {
         capture(app, "wallet-large-text")
     }
 
+    func testLeaveWalletManyAndEmpty() {
+        var app = launch("campus-leave", arguments: ["--preview-wallet-many"])
+        var toggle = app.buttons["leave-wallet-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        XCTAssertEqual(toggle.value as? String, "8 张请假条")
+        capture(app, "wallet-eight-closed")
+        toggle.tap()
+        app.swipeUp()
+        capture(app, "wallet-eight-expanded")
+        let last = app.descendants(matching: .any)["leave-ticket-wallet-7"]
+        for _ in 0..<10 {
+            if last.exists && last.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(last.exists)
+        app.terminate()
+        app = launch("campus-leave", empty: true)
+        toggle = app.buttons["leave-wallet-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        XCTAssertEqual(toggle.value as? String, "0 张请假条")
+        XCTAssertTrue(app.buttons["campus-record-add"].isEnabled)
+        capture(app, "wallet-empty")
+    }
+
     func testCampusRecordsSurviveFormDismissal() {
         for page in ["campus-leave", "campus-travel"] {
             let app = launch(page)
