@@ -15,7 +15,7 @@ on:
       test_scope:
         description: 'Interaction checks to run (focused checks preserve full-suite failure evidence)'
         type: choice
-        options: [all, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
+        options: [all, design-layout, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
         default: all
       appearance_source_ref:
         description: 'Optional source revision for the focused appearance comparison'
@@ -133,6 +133,18 @@ jobs:
           VIDEO_PID=$!
           trap 'kill -INT "$VIDEO_PID"; wait "$VIDEO_PID" || true' EXIT
           TEST_SELECTION=(-skip-testing:CCSUTUITests/PageInteractionUITests/testSemesterAndWeekdaysMoveWithCourses)
+          if [ "$TEST_SCOPE" = 'design-layout' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicHomeWithoutReminderHasStableSpacedEntries
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusEntryAndRecords
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusLargeTextEntries
+              -only-testing:CCSUTUITests/PageInteractionUITests/testLargeTextKeepsAcademicControlsAccessible
+              -only-testing:CCSUTUITests/PageInteractionUITests/testScoreBreakdownExpandsAndHomeKeepsOnlyEntryTitles
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusAdaptiveLayout
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusReducedMotion
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusRecordsSurviveFormDismissal
+            )
+          fi
           if [ "$TEST_SCOPE" = 'refresh-and-search' ]; then
             TEST_SELECTION=(
               -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicPagesPullToRefreshIncludingEmptyStates
