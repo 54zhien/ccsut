@@ -317,6 +317,12 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(review.waitForExistence(timeout: 8))
         XCTAssertGreaterThanOrEqual(review.frame.height, 44)
         app.swipeUp()
+        XCTAssertTrue(review.isHittable)
+        XCTAssertGreaterThanOrEqual(review.frame.minX, app.frame.minX - 1)
+        XCTAssertLessThanOrEqual(review.frame.maxX, app.frame.maxX + 1,
+                                 "Large text cannot push the primary capsule beyond the physical screen")
+        XCTAssertEqual(review.frame.minX - app.frame.minX, app.frame.maxX - review.frame.maxX, accuracy: 2,
+                       "The primary capsule retains symmetric concentric side insets")
         capture(app, "campus-native-accessibility-form")
     }
 

@@ -29,6 +29,10 @@ on:
         description: 'Run only amount wheels, semester filter and detail tab visibility checks'
         type: boolean
         default: false
+      form_fit_only:
+        description: 'Verify only the scoped campus form containment follow-up'
+        type: boolean
+        default: false
       blur_diagnostics:
         description: 'Run the three failed checks in legacy mode and render both blur versions'
         type: boolean
@@ -47,7 +51,7 @@ jobs:
         with:
           ref: ${{ inputs.appearance_source_ref || github.ref }}
       - name: Verify scoped amount and elective boundaries
-        if: ${{ inputs.test_scope == 'appearance-screens' && inputs.detail_checks }}
+        if: ${{ inputs.test_scope == 'appearance-screens' && inputs.detail_checks && !inputs.form_fit_only }}
         run: |
           set -euo pipefail
           xcrun swiftc -parse-as-library ios/CCSUT/MeterAmount.swift ios/Tests/MeterAmountTests.swift -o "$RUNNER_TEMP/meter-tests"
@@ -159,23 +163,32 @@ jobs:
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
       - name: Verify focused detail controls
         if: ${{ inputs.test_scope == 'appearance-screens' && inputs.detail_checks && steps.simulator.conclusion == 'success' }}
+        env:
+          FORM_FIT_ONLY: ${{ inputs.form_fit_only }}
         run: |
           set -o pipefail
           xcrun simctl io "$CCSUT_PREVIEW_DEVICE" recordVideo --codec=h264 "$RUNNER_TEMP/ui-screenshots/scoped-detail-interactions.mp4" &
           VIDEO_PID=$!
           trap 'kill -INT "$VIDEO_PID"; wait "$VIDEO_PID" || true' EXIT
+          TEST_SELECTION=(
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeLeaveForm
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeDepartureForm
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeFormLargeText
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusFormKeyboardKeepsEditorVisible
+          )
+          if [ "$FORM_FIT_ONLY" != 'true' ]; then
+            TEST_SELECTION+=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
+              -only-testing:CCSUTUITests/PageInteractionUITests/testSemesterMenusReachHistoricalContent
+              -only-testing:CCSUTUITests/PageInteractionUITests/testDetailTabsHideAndReturnWithHome
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
+              -only-testing:CCSUTUITests/PageInteractionUITests/testClosedElectiveChannelPreservesControlsAndEnrolledResults
+            )
+          fi
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
             -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
-            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection \
-            -only-testing:CCSUTUITests/PageInteractionUITests/testSemesterMenusReachHistoricalContent \
-            -only-testing:CCSUTUITests/PageInteractionUITests/testDetailTabsHideAndReturnWithHome \
-            -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage \
-            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeLeaveForm \
-            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeDepartureForm \
-            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeFormLargeText \
-            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusFormKeyboardKeepsEditorVisible \
-            -only-testing:CCSUTUITests/PageInteractionUITests/testClosedElectiveChannelPreservesControlsAndEnrolledResults \
+            "${TEST_SELECTION[@]}" \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
       - name: Export interaction screenshots
         if: always()
@@ -236,6 +249,9 @@ jobs:
             fi
             if [ "$PAGE" = 'electives-closed-large' ]; then
               LAUNCH_ARGS=(--preview-ui --preview-page electives --preview-closed-catalog --preview-complete-selected -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
+            fi
+            if [ "$PAGE" = 'campus-form-leave-large' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page campus-form-leave -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
             fi
             xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
             xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut "${LAUNCH_ARGS[@]}"

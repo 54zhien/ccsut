@@ -75,7 +75,7 @@ import ImageIO
                 }
                 .background(Color(.systemGroupedBackground))
                 .overlay(alignment: .top) { topBarMaterial }
-                .safeAreaInset(edge: .bottom, spacing: 0) { if model.state != .loading { footer(in: viewport) } }
+                .safeAreaInset(edge: .bottom, alignment: .leading, spacing: 0) { if model.state != .loading { footer(in: viewport) } }
                 .navigationTitle(model.kind.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(.hidden, for: .navigationBar)
@@ -278,12 +278,20 @@ import ImageIO
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             footerAction
+                .frame(width: footerControlWidth(in: viewport, inset: inset))
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { reviewControlHeight = $0 }
                 .padding(.leading, inset - viewport.safeAreaInsets.leading)
                 .padding(.trailing, inset - viewport.safeAreaInsets.trailing)
         }
+        .frame(width: viewport.size.width, alignment: .leading)
         .padding(.top, 16)
         .padding(.bottom, inset)
+    }
+
+    // Constrain the native capsule independently of oversized form content.
+    // https://developer.apple.com/documentation/swiftui/view/frame(minwidth:idealwidth:maxwidth:minheight:idealheight:maxheight:alignment:)
+    private func footerControlWidth(in viewport: GeometryProxy, inset: CGFloat) -> CGFloat {
+        max(0, viewport.size.width + viewport.safeAreaInsets.leading + viewport.safeAreaInsets.trailing - 2 * inset)
     }
 
     private var footerMessages: some View {
@@ -303,17 +311,24 @@ import ImageIO
     }
 
     @ViewBuilder private var footerAction: some View {
+        // Fit only action labels; retain Dynamic Type throughout the form.
+        // https://developer.apple.com/documentation/swiftui/view/minimumscalefactor(_:)
         if model.state == .unknown {
             Button { Task { await model.checkResult() } } label: {
-                HStack { if model.isChecking { ProgressView() }; Text("查询提交结果") }.frame(maxWidth: .infinity, minHeight: 44)
+                HStack {
+                    if model.isChecking { ProgressView() }
+                    Text("查询提交结果").lineLimit(1).minimumScaleFactor(0.5)
+                }.frame(minWidth: 0, maxWidth: .infinity, minHeight: 44)
             }.buttonStyle(.glassProminent).campusActionControl().disabled(model.isChecking)
         } else if model.state == .submitted {
             Button { onSubmitted(); dismiss() } label: {
-                Text("完成").frame(maxWidth: .infinity, minHeight: 44)
+                Text("完成").lineLimit(1).minimumScaleFactor(0.5)
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 44)
             }.buttonStyle(.glassProminent).campusActionControl()
         } else if model.configuration != nil {
             Button { endEditing(); model.prepareConfirmation() } label: {
-                Text("核对并提交").frame(maxWidth: .infinity, minHeight: 44)
+                Text("核对并提交").lineLimit(1).minimumScaleFactor(0.5)
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 44)
             }.buttonStyle(.glassProminent).campusActionControl().disabled(!model.canReview || isImporting || isLocating)
                 .accessibilityIdentifier("campus-form-review")
         }
@@ -386,14 +401,19 @@ import ImageIO
                     }.padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .scrollEdgeEffectHidden(true, for: .top)
-                .safeAreaInset(edge: .bottom, spacing: 0) {
+                .safeAreaInset(edge: .bottom, alignment: .leading, spacing: 0) {
                     Button { Task { await model.submit(snapshot) } } label: {
-                        HStack { if model.state == .submitting { ProgressView() }; Text(model.state == .submitting ? "正在提交…" : "确认提交") }
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                        HStack {
+                            if model.state == .submitting { ProgressView() }
+                            Text(model.state == .submitting ? "正在提交…" : "确认提交")
+                                .lineLimit(1).minimumScaleFactor(0.5)
+                        }.frame(minWidth: 0, maxWidth: .infinity, minHeight: 44)
                     }.buttonStyle(.glassProminent).campusActionControl()
+                        .frame(width: footerControlWidth(in: viewport, inset: confirmationControlInset))
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { confirmationControlHeight = $0 }
                         .padding(.leading, confirmationControlInset - viewport.safeAreaInsets.leading)
                         .padding(.trailing, confirmationControlInset - viewport.safeAreaInsets.trailing)
+                        .frame(width: viewport.size.width, alignment: .leading)
                         .padding(.top, 16)
                         .padding(.bottom, confirmationControlInset)
                         .disabled(model.state == .submitting)
