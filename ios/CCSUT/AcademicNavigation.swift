@@ -19,6 +19,7 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
         private var saved: [SavedGesture] = []
         private var tabTransitionID = UUID()
         private var tabTransitionCoordinator: (any UIViewControllerTransitionCoordinator)?
+        private var visibleTabAppearance: (transform: CGAffineTransform, alpha: CGFloat)?
 
         override func loadView() {
             view = UIView()
@@ -59,12 +60,19 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
             let id = UUID()
             tabTransitionID = id
             let bar = tabs.tabBar
-            let originalTransform = bar.transform
-            let originalAlpha = bar.alpha
+            // Hidden UIKit bars can have a zero alpha or a translated transform.
+            // Reverse toward the appearance captured while the bar was visible,
+            // rather than treating that hidden presentation as the visible target.
+            if hidden { visibleTabAppearance = (bar.transform, bar.alpha) }
+            let originalTransform = visibleTabAppearance?.transform ?? .identity
+            let originalAlpha = visibleTabAppearance?.alpha ?? 1
             let loweredTransform = originalTransform.translatedBy(x: 0, y: max(bar.bounds.height, 1))
             let shouldAnimate = (coordinator?.isAnimated ?? animated) && !UIAccessibility.isReduceMotionEnabled
             let previousHidden = tabs.isTabBarHidden
             #if DEBUG
+            if InterfacePreview.enabled {
+                print("TAB_APPEARANCE hidden=\(hidden) currentAlpha=\(bar.alpha) visibleAlpha=\(originalAlpha) currentY=\(bar.transform.ty) visibleY=\(originalTransform.ty)")
+            }
             AcademicTabTransitionDiagnostics.record(childAnimated: animated,
                                                     coordinatorAnimated: coordinator?.isAnimated, queued: nil)
             #endif

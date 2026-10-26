@@ -38,7 +38,7 @@ on:
         type: boolean
         default: false
       navigation_checks_only:
-        description: 'Verify tab motion, cancelled pop, root restoration and elective reset'
+        description: 'Verify tab motion, cancelled pop and root restoration'
         type: boolean
         default: false
       blur_diagnostics:
@@ -206,7 +206,6 @@ jobs:
             TEST_SELECTION=(
               -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
               -only-testing:CCSUTUITests/PageInteractionUITests/testDetailTabsHideAndReturnWithHome
-              -only-testing:CCSUTUITests/PageInteractionUITests/testElectiveEmptySearchCanResetAndDisabledReasonIsVisible
             )
           fi
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
