@@ -246,7 +246,20 @@ final class PageInteractionUITests: XCTestCase {
         app.buttons["campus-form-review"].tap()
         XCTAssertTrue(app.staticTexts["campus-form-error"].waitForExistence(timeout: 5))
         let reason = app.textViews["campus-form-reason"]
-        reason.tap(); reason.typeText("reason 18000000000")
+        reason.tap()
+        // First input removes validation messages and reflows the form. Send
+        // every literal character once and acknowledge it before continuing;
+        // never repair or retry missing input to conceal a failed interaction.
+        var acknowledged = ""
+        for character in "reason" {
+            reason.typeText(String(character))
+            acknowledged.append(character)
+            let expected = acknowledged
+            let received = NSPredicate { _, _ in (reason.value as? String ?? "") == expected }
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: received, evaluatedWith: reason)], timeout: 3), .completed,
+                           "Literal input must be acknowledged without correction: \(reason.value as? String ?? "missing")")
+        }
+        reason.typeText(" 18000000000")
         let visible = reason.value as? String ?? ""
         XCTAssertTrue(visible.contains("reason"))
         XCTAssertFalse(visible.contains("18000000000"))
@@ -667,6 +680,11 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testAcademicCancelledSwipeKeepsHeaderAttachedToPage() {
+        func motionSamples(_ key: String, in report: String) -> Int {
+            let prefix = key + "="
+            guard let field = report.split(separator: " ").first(where: { $0.hasPrefix(prefix) }) else { return 0 }
+            return Int(field.dropFirst(prefix.count)) ?? 0
+        }
         for page in ["scores", "exams", "electives"] {
             let app = launch("academic", transition: true)
             let entry = app.buttons["academic-\(page)"]
@@ -681,11 +699,18 @@ final class PageInteractionUITests: XCTestCase {
                 : app.descendants(matching: .any).matching(identifier: "term-header-2026-2027-1").firstMatch
             XCTAssertTrue(contentReady.waitForExistence(timeout: 8))
             XCTAssertTrue(contentReady.isHittable)
+            let diagnostic = app.staticTexts["transition-diagnostics"]
+            let pushed = NSPredicate { _, _ in motionSamples("tabDown", in: diagnostic.label) > 0 }
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: pushed, evaluatedWith: diagnostic)], timeout: 5), .completed,
+                           "Push must contain actual simultaneous tab-bar sinking and fading: \(diagnostic.label)")
             let before = back.frame
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.45))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.45))
             start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 1.5)
             capture(app, "cancelled-pop-\(page)")
+            let reversed = NSPredicate { _, _ in motionSamples("tabUp", in: diagnostic.label) > 0 }
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: reversed, evaluatedWith: diagnostic)], timeout: 5), .completed,
+                           "Pop must contain actual simultaneous rising and fading in: \(diagnostic.label)")
             let sampleCount = Int(app.staticTexts["transition-samples"].label) ?? 0
             let drift = Double(app.staticTexts["transition-drift"].label) ?? 999
             print("Transition diagnostic \(page): \(app.staticTexts["transition-diagnostics"].label)")

@@ -41,17 +41,27 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
         /// UIKit owns the actual tab bar's slide and safe-area transition; the
         /// accompanying opacity follows the same navigation coordinator. Never
         /// replace the system tab bar or reach into its private subviews.
+        /// Apple references checked 2026-10-26:
+        /// https://developer.apple.com/documentation/uikit/uitabbarcontroller/settabbarhidden(_:animated:)
+        /// https://developer.apple.com/documentation/uikit/uiviewcontroller/transitioncoordinator
+        /// https://developer.apple.com/documentation/uikit/uiviewcontrollertransitioncoordinatorcontext/isanimated
+        /// https://developer.apple.com/documentation/uikit/uiviewcontrollertransitioncoordinator/animatealongsidetransition(in:animation:completion:)
         private func transitionTabBar(hidden: Bool, animated: Bool, navigation: UINavigationController) {
+            let coordinator = navigation.transitionCoordinator
             // Cancelling an interactive pop calls viewWillAppear again on the
             // detail. Let the original coordinator restore its captured state.
-            if let active = tabTransitionCoordinator, let current = navigation.transitionCoordinator,
-               active === current { return }
+            if let active = tabTransitionCoordinator, let coordinator,
+               active === coordinator { return }
             guard let tabs = navigation.tabBarController, tabs.isTabBarHidden != hidden else { return }
             let id = UUID()
             tabTransitionID = id
             let bar = tabs.tabBar
-            let shouldAnimate = animated && !UIAccessibility.isReduceMotionEnabled
+            let shouldAnimate = (coordinator?.isAnimated ?? animated) && !UIAccessibility.isReduceMotionEnabled
             let previousHidden = tabs.isTabBarHidden
+            #if DEBUG
+            AcademicTabTransitionDiagnostics.record(childAnimated: animated,
+                                                    coordinatorAnimated: coordinator?.isAnimated, queued: nil)
+            #endif
             guard shouldAnimate else {
                 tabs.setTabBarHidden(hidden, animated: false)
                 bar.alpha = 1
@@ -66,11 +76,15 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
                 tabs.setTabBarHidden(cancelled ? previousHidden : hidden, animated: false)
                 tabs.tabBar.alpha = 1
             }
-            if let coordinator = navigation.transitionCoordinator {
+            if let coordinator {
                 tabTransitionCoordinator = coordinator
                 let queued = coordinator.animateAlongsideTransition(in: bar, animation: { _ in
                     bar.alpha = hidden ? 0 : 1
                 }, completion: { context in finish(context.isCancelled) })
+                #if DEBUG
+                AcademicTabTransitionDiagnostics.record(childAnimated: animated,
+                                                        coordinatorAnimated: coordinator.isAnimated, queued: queued)
+                #endif
                 if !queued { bar.alpha = hidden ? 0 : 1 }
             } else {
                 UIView.animate(withDuration: 0.3, delay: 0, options: [.beginFromCurrentState, .curveEaseInOut]) {
@@ -128,6 +142,17 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
 }
 
 #if DEBUG
+@MainActor private enum AcademicTabTransitionDiagnostics {
+    static var entry = "entry childAnimated=unset coordinatorAnimated=unset queued=unset"
+
+    static func record(childAnimated: Bool, coordinatorAnimated: Bool?, queued: Bool?) {
+        guard InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-transition") else { return }
+        let coordinatorValue = coordinatorAnimated.map { String($0) } ?? "nil"
+        let queuedValue = queued.map { String($0) } ?? "nil"
+        entry = "entry childAnimated=\(childAnimated) coordinatorAnimated=\(coordinatorValue) queued=\(queuedValue)"
+    }
+}
+
 struct AcademicTitleMarker: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
@@ -157,6 +182,9 @@ struct AcademicTransitionProbe: UIViewRepresentable {
         private var activeTicks = 0
         private var maxTranslation: CGFloat = 0
         private var lastDiagnosticState = ""
+        private var previousTabSample: (frame: CGRect, opacity: Float)?
+        private var tabDownSamples = 0
+        private var tabUpSamples = 0
 
         init(report: @escaping (CGFloat, Int, String) -> Void) {
             self.report = report
@@ -169,6 +197,7 @@ struct AcademicTransitionProbe: UIViewRepresentable {
             super.didMoveToWindow()
             displayLink?.invalidate()
             displayLink = nil
+            previousTabSample = nil
             if window != nil {
                 let link = CADisplayLink(target: self, selector: #selector(sample))
                 link.add(to: .main, forMode: .common)
@@ -197,9 +226,43 @@ struct AcademicTransitionProbe: UIViewRepresentable {
             if let presented = controller.presentedViewController, isPopActive(in: presented) { return true }
             return controller.children.contains { isPopActive(in: $0) }
         }
+        /// Public controller containment and presentation-layer geometry only.
+        /// Apple references checked 2026-10-26:
+        /// https://developer.apple.com/documentation/uikit/uiviewcontroller/children
+        /// https://developer.apple.com/documentation/quartzcore/calayer/presentation()
+        /// https://developer.apple.com/documentation/quartzcore/calayer/convert(_:to:)-tly5
+        private func findTabController(in controller: UIViewController) -> UITabBarController? {
+            if let tabs = controller as? UITabBarController { return tabs }
+            if let presented = controller.presentedViewController,
+               let tabs = findTabController(in: presented) { return tabs }
+            for child in controller.children {
+                if let tabs = findTabController(in: child) { return tabs }
+            }
+            return nil
+        }
+        private func sampleTabBar(in root: UIViewController, window: UIWindow) {
+            guard let tabs = findTabController(in: root), tabs.tabBar.window === window,
+                  let layer = tabs.tabBar.layer.presentation(),
+                  let windowLayer = window.layer.presentation() else {
+                previousTabSample = nil
+                return
+            }
+            let renderedFrame = layer.convert(layer.bounds, to: windowLayer)
+            let opacity = layer.opacity
+            if let previous = previousTabSample {
+                let deltaY = renderedFrame.minY - previous.frame.minY
+                let deltaOpacity = opacity - previous.opacity
+                // Each count requires both changes within the same adjacent rendered samples.
+                if deltaY > 0.1 && deltaOpacity < -0.001 { tabDownSamples += 1 }
+                if deltaY < -0.1 && deltaOpacity > 0.001 { tabUpSamples += 1 }
+            }
+            previousTabSample = (renderedFrame, opacity)
+        }
         @objc private func sample() {
             ticks += 1
-            guard let window, let root = window.rootViewController, let marker = findMarker(window) else { return }
+            guard let window, let root = window.rootViewController else { return }
+            sampleTabBar(in: root, window: window)
+            guard let marker = findMarker(window) else { return }
             let pageX = frame(self, in: window).minX
             let localTitleX = frame(marker, in: window).midX - pageX
             let active = isPopActive(in: root)
@@ -212,7 +275,7 @@ struct AcademicTransitionProbe: UIViewRepresentable {
                 self.baseline = localTitleX
             }
             if ticks % 30 == 0 {
-                let state = "active=\(activeTicks) maxX=\(Int(maxTranslation)) baseline=\(baseline != nil) width=\(Int(bounds.width))"
+                let state = "active=\(activeTicks) maxX=\(Int(maxTranslation)) baseline=\(baseline != nil) width=\(Int(bounds.width)) tabDown=\(tabDownSamples) tabUp=\(tabUpSamples) \(AcademicTabTransitionDiagnostics.entry)"
                 guard state != lastDiagnosticState else { return }
                 lastDiagnosticState = state
                 report(maximum, samples, "ticks=\(ticks) \(state)")
