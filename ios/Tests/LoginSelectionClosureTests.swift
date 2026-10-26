@@ -3,7 +3,7 @@ import WebKit
 
 /// Every request stays in this local protocol. No school login or network is used.
 final class LoginClosureProtocol: URLProtocol {
-    enum Mode { case authenticated, loggedOut, publicPage, foreignRedirect }
+    enum Mode { case authenticated, loggedOut, publicPage, foreignRedirect, otherAccount, replacedDuringRead }
     private static let lock = NSLock()
     nonisolated(unsafe) private static var mode: Mode = .authenticated
     nonisolated(unsafe) private static var paths: [String] = []
@@ -26,12 +26,14 @@ final class LoginClosureProtocol: URLProtocol {
             body = #"{"ret":-1,"msg":"没有可选的教学班"}"#
         } else if path == "/admin/" || path == "/admin" {
             switch mode {
-            case .authenticated: status = 303; headers["Location"] = Self.landing
+            case .authenticated, .replacedDuringRead: status = 303; headers["Location"] = Self.landing
+            case .otherAccount: status = 303; headers["Location"] = Self.landing.replacingOccurrences(of: Self.number, with: "fixture-other")
             case .loggedOut: status = 303; headers["Location"] = "/admin/login"
             case .publicPage: break
             case .foreignRedirect: status = 303; headers["Location"] = "https://attacker.invalid/?username=fixture-student&enc=fixture"
             }
         }
+        if mode == .replacedDuringRead { CookieJar.shared = [] }
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
@@ -70,6 +72,11 @@ final class LoginClosureProtocol: URLProtocol {
               "verified account remains available to campus and electricity pages")
         check(adopted.lastError == nil, "optional name enrichment cannot surface elective closure as a login error")
 
+        LoginClosureProtocol.reset(.otherAccount)
+        check(!(await adopted.probe()), "silent verification rejects a different server account")
+        check(adopted.studentId == LoginClosureProtocol.number, "a rejected server account does not replace visible identity")
+
+        LoginClosureProtocol.reset(.authenticated)
         CookieJar.shared = [cookie]
         let cold = store()
         await cold.bootstrap()
@@ -82,6 +89,14 @@ final class LoginClosureProtocol: URLProtocol {
             check(!(await store().probe()), "rejects \(label)")
             check(LoginClosureProtocol.requestedPaths.count == 1, "does not follow \(label) or forward credentials")
         }
+        CookieJar.shared = [cookie]
+        LoginClosureProtocol.reset(.replacedDuringRead)
+        check(!(await store().probe()), "late redirect cannot authenticate after cookie generation changes")
+        check(CookieJar.shared.isEmpty, "late redirect does not restore cleared credentials")
+        CookieJar.shared = [HTTPCookie(properties: [.name:"TGC", .value:"fixture-cas", .domain:"auth.ccsut.cn", .path:"/", .secure:"TRUE"])!]
+        LoginClosureProtocol.reset(.authenticated)
+        check(!(await store().probe()) && LoginClosureProtocol.requestedPaths.isEmpty,
+              "no TLS-matching cookie means no anonymous identity request")
         print("Login closure regression failures: \(failures)")
         exit(failures == 0 ? 0 : 1)
     }

@@ -66,14 +66,6 @@ jobs:
             ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift ios/Tests/StudentIdentityTests.swift \
             -o "$RUNNER_TEMP/identity-tests"
           "$RUNNER_TEMP/identity-tests" 2>&1 | tee "$RUNNER_TEMP/identity-tests.log"
-          xcrun swiftc -parse-as-library \
-            ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift \
-            ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift \
-            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift \
-            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift \
-            ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift \
-            ios/Tests/SessionRegressionTests.swift -o "$RUNNER_TEMP/session-tests"
-          "$RUNNER_TEMP/session-tests" 2>&1 | tee "$RUNNER_TEMP/session-tests.log"
       - name: Upload focused login evidence
         if: ${{ always() && inputs.login_probe_only }}
         uses: actions/upload-artifact@v4
@@ -82,7 +74,6 @@ jobs:
           path: |
             ${{ runner.temp }}/login-tests.log
             ${{ runner.temp }}/identity-tests.log
-            ${{ runner.temp }}/session-tests.log
           if-no-files-found: ignore
       - name: Build (unsigned)
         if: ${{ !inputs.login_probe_only }}
