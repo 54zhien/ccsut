@@ -1,0 +1,26 @@
+name: Focused login independence
+on:
+  workflow_dispatch:
+jobs:
+  login:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run production login regression
+        run: |
+          set -o pipefail
+          xcrun swiftc -parse-as-library \
+            ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift \
+            ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift \
+            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift \
+            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift \
+            ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift \
+            ios/Tests/LoginSelectionClosureTests.swift -o "$RUNNER_TEMP/login-tests"
+          "$RUNNER_TEMP/login-tests" 2>&1 | tee "$RUNNER_TEMP/login-tests.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: login-independence-evidence
+          path: ${{ runner.temp }}/login-tests.log
+          if-no-files-found: ignore
