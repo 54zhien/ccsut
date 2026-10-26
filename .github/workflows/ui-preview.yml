@@ -15,7 +15,7 @@ on:
       test_scope:
         description: 'Interaction checks to run (focused checks preserve full-suite failure evidence)'
         type: choice
-        options: [all, design-layout, design-sheets, design-motion, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
+        options: [all, design-layout, design-adaptive, design-sheets, design-motion, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
         default: all
       appearance_source_ref:
         description: 'Optional source revision for the focused appearance comparison'
@@ -97,7 +97,7 @@ jobs:
         if: failure()
         run: xcrun simctl list devices > "$RUNNER_TEMP/ui-screenshots/simulator-state.txt"
       - name: Verify initial and selected week positioning
-        if: ${{ !inputs.blur_diagnostics && inputs.test_scope != 'design-sheets' && inputs.test_scope != 'design-motion' && inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' && inputs.test_scope != 'appearance-screens' }}
+        if: ${{ !inputs.blur_diagnostics && inputs.test_scope != 'design-adaptive' && inputs.test_scope != 'design-sheets' && inputs.test_scope != 'design-motion' && inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' && inputs.test_scope != 'appearance-screens' }}
         run: |
           set -o pipefail
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
@@ -138,6 +138,9 @@ jobs:
           )
           if [ "$TEST_SCOPE" = 'design-sheets' ]; then
             TEST_SELECTION=(-only-testing:CCSUTUITests/PageInteractionUITests/testDetailSheetsKeepContentAndCloseReachable)
+          fi
+          if [ "$TEST_SCOPE" = 'design-adaptive' ]; then
+            TEST_SELECTION=(-only-testing:CCSUTUITests/PageInteractionUITests/testCampusAdaptiveLayout)
           fi
           if [ "$TEST_SCOPE" = 'design-layout' ]; then
             TEST_SELECTION=(

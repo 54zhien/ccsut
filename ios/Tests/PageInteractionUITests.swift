@@ -470,9 +470,25 @@ final class PageInteractionUITests: XCTestCase {
             app.terminate()
             app = launch(page)
             XCUIDevice.shared.orientation = .landscapeLeft
-            let landscape = NSPredicate { _, _ in app.frame.width > app.frame.height }
-            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: landscape, evaluatedWith: app)], timeout: 5), .completed)
-            XCTAssertTrue(app.buttons[page == "campus-electricity" ? "立即缴费" : "campus-form-review"].isHittable)
+            var previousWindow: CGRect?
+            var stableSamples = 0
+            let landscape = NSPredicate { _, _ in
+                let window = app.windows.firstMatch.frame
+                guard app.frame.width > app.frame.height, window.width > window.height else {
+                    stableSamples = 0; previousWindow = nil; return false
+                }
+                stableSamples = previousWindow == window ? stableSamples + 1 : 0
+                previousWindow = window
+                return stableSamples >= 3
+            }
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: landscape, evaluatedWith: app)], timeout: 10), .completed)
+            let landscapeAction = app.buttons[page == "campus-electricity" ? "立即缴费" : "campus-form-review"]
+            XCTAssertTrue(landscapeAction.isHittable)
+            add(XCTAttachment(string: "orientation=\(XCUIDevice.shared.orientation.rawValue) app=\(app.frame) window=\(app.windows.firstMatch.frame) action=\(landscapeAction.frame)"))
+            let deviceCapture = XCTAttachment(screenshot: XCUIDevice.shared.screenshot())
+            deviceCapture.name = "campus-landscape-device-\(page)"
+            deviceCapture.lifetime = .keepAlways
+            add(deviceCapture)
             capture(app, "campus-landscape-\(page)")
             app.terminate()
         }
