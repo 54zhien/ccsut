@@ -117,6 +117,7 @@ struct ScoreView: View {
                 .frame(width: 28, height: 28)
         }
         .buttonStyle(.glass)
+        .controlSize(.large)
         .buttonBorderShape(.circle)
         .accessibilityLabel("学期筛选")
         .accessibilityValue(selectedTerm.map(SchedulePresentation.termTitle) ?? "全部学期")

@@ -33,6 +33,10 @@ on:
         description: 'Verify only the scoped campus form containment follow-up'
         type: boolean
         default: false
+      menu_fit_only:
+        description: 'Verify only native glass menu size and semester interaction'
+        type: boolean
+        default: false
       blur_diagnostics:
         description: 'Run the three failed checks in legacy mode and render both blur versions'
         type: boolean
@@ -51,7 +55,7 @@ jobs:
         with:
           ref: ${{ inputs.appearance_source_ref || github.ref }}
       - name: Verify scoped amount and elective boundaries
-        if: ${{ inputs.test_scope == 'appearance-screens' && inputs.detail_checks && !inputs.form_fit_only }}
+        if: ${{ inputs.test_scope == 'appearance-screens' && inputs.detail_checks && !inputs.form_fit_only && !inputs.menu_fit_only }}
         run: |
           set -euo pipefail
           xcrun swiftc -parse-as-library ios/CCSUT/MeterAmount.swift ios/Tests/MeterAmountTests.swift -o "$RUNNER_TEMP/meter-tests"
@@ -165,6 +169,7 @@ jobs:
         if: ${{ inputs.test_scope == 'appearance-screens' && inputs.detail_checks && steps.simulator.conclusion == 'success' }}
         env:
           FORM_FIT_ONLY: ${{ inputs.form_fit_only }}
+          MENU_FIT_ONLY: ${{ inputs.menu_fit_only }}
         run: |
           set -o pipefail
           xcrun simctl io "$CCSUT_PREVIEW_DEVICE" recordVideo --codec=h264 "$RUNNER_TEMP/ui-screenshots/scoped-detail-interactions.mp4" &
@@ -184,6 +189,9 @@ jobs:
               -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
               -only-testing:CCSUTUITests/PageInteractionUITests/testClosedElectiveChannelPreservesControlsAndEnrolledResults
             )
+          fi
+          if [ "$MENU_FIT_ONLY" = 'true' ]; then
+            TEST_SELECTION=(-only-testing:CCSUTUITests/PageInteractionUITests/testSemesterMenusReachHistoricalContent)
           fi
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
             -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
