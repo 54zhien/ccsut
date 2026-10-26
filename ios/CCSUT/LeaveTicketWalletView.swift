@@ -30,7 +30,7 @@ struct LeaveTicketWalletView: View {
     #endif
 
     var body: some View {
-        PageScrollSurface(refresh: { await refresh() }, backgroundColor: .clear) { _, _ in
+        PageScrollSurface(refresh: { await refresh() }, backgroundColor: .clear) { _, proxy in
             VStack(spacing: 24) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -41,6 +41,7 @@ struct LeaveTicketWalletView: View {
                     Spacer(minLength: 8)
                 }
                 .padding(.top, 12)
+                .id("leave-wallet-heading")
 
                 Button {
                     withAnimation(reduceMotion ? nil : .spring(duration: 0.65, bounce: 0.08)) {
@@ -122,6 +123,9 @@ struct LeaveTicketWalletView: View {
             }
             .padding(.horizontal, 24).padding(.bottom, 32)
             .frame(maxWidth: 560).frame(maxWidth: .infinity)
+            .onChange(of: printing?.id) { _, id in
+                if id != nil { proxy.scrollTo("leave-wallet-heading", anchor: .top) }
+            }
         }
         .safeAreaInset(edge: .bottom) {
             Button {
