@@ -79,7 +79,7 @@ jobs:
         run: |
           xcrun swiftc -target "$(uname -m)-apple-macos14.0" -parse-as-library ios/CCSUT/TopBarBlurProfile.swift ios/Tests/TopBarBlurTests.swift -o "$RUNNER_TEMP/top-blur-tests"
           "$RUNNER_TEMP/top-blur-tests"
-          xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
           "$RUNNER_TEMP/schedule-tests"
           xcrun swiftc -parse-as-library ios/CCSUT/InterfacePreview.swift ios/Tests/ReleasePreviewTests.swift -o "$RUNNER_TEMP/release-preview-tests"
           "$RUNNER_TEMP/release-preview-tests" --preview-ui --preview-page academic
