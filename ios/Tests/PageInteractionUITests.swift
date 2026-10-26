@@ -451,6 +451,14 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(back.isHittable)
         XCTAssertFalse(app.tabBars.firstMatch.isHittable)
         XCTAssertTrue(app.buttons["选择楼栋"].exists)
+        let building = app.buttons["选择楼栋"]
+        let beforeTurn = building.value as? String
+        let turnStart = building.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+        let turnEnd = building.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
+        turnStart.press(forDuration: 0.05, thenDragTo: turnEnd)
+        XCTAssertTrue(back.exists, "Turning an embedded selector must not invoke content-swipe navigation")
+        XCTAssertTrue(building.exists)
+        XCTAssertEqual(building.value as? String, beforeTurn, "A single-option selector stops at its boundary")
         let pay = app.buttons["立即缴费"]
         XCTAssertTrue(pay.isHittable, "The standard meter opens with its embedded payment key visible")
         XCTAssertLessThanOrEqual(pay.frame.maxY, app.windows.firstMatch.frame.maxY,

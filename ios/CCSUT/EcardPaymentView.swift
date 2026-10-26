@@ -278,18 +278,18 @@ struct EcardPaymentView: View {
 
     private var enamelColors: [Color] {
         colorScheme == .dark
-            ? [Color(red: 0.72, green: 0.69, blue: 0.61), Color(red: 0.57, green: 0.55, blue: 0.49)]
+            ? [Color(red: 0.79, green: 0.77, blue: 0.69), Color(red: 0.70, green: 0.68, blue: 0.60)]
             : [Color(red: 0.98, green: 0.96, blue: 0.88), Color(red: 0.91, green: 0.88, blue: 0.78)]
     }
 
     private var engravedPlateColors: [Color] {
         colorScheme == .dark
-            ? [Color(red: 0.48, green: 0.47, blue: 0.42), Color(red: 0.37, green: 0.37, blue: 0.34)]
+            ? [Color(red: 0.78, green: 0.76, blue: 0.69), Color(red: 0.70, green: 0.68, blue: 0.61)]
             : [Color(red: 0.84, green: 0.82, blue: 0.75), Color(red: 0.68, green: 0.68, blue: 0.62)]
     }
 
     private var enamelInk: Color {
-        colorScheme == .dark ? Color(red: 0.12, green: 0.13, blue: 0.12) : Color(red: 0.15, green: 0.16, blue: 0.15)
+        colorScheme == .dark ? Color(red: 0.025, green: 0.03, blue: 0.025) : Color(red: 0.15, green: 0.16, blue: 0.15)
     }
 
     private var counterInk: Color { Color(red: 0.94, green: 0.93, blue: 0.86) }
