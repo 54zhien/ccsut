@@ -108,7 +108,7 @@ struct LeaveTicketWalletView: View {
                                 .transition(.asymmetric(
                                     insertion: .offset(y: reduceMotion ? 0 : -35).combined(with: .opacity)
                                         .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.04).delay(Double(min(index, 5)) * 0.045)),
-                                    removal: .opacity))
+                                    removal: .offset(y: reduceMotion ? 0 : -80).combined(with: .opacity)))
                         }
                         if model.leave.hasMore {
                             Button(model.isLoadingLeave ? "正在加载…" : "加载更多请假条") {

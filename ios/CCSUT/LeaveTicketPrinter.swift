@@ -81,16 +81,16 @@ final class LeavePrinterSurface: UIView {
             self.body.center.y = 0
         } completion: { [weak self] finished in
             guard let self, finished, self.generation == token, self.window != nil else { return }
-            self.stopHaptics()
-            UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.55)
             // Continue feeding downward behind the wallet's front leather panel.
             // Keep the paper in the same clipping coordinate space throughout.
-            UIView.animate(withDuration: 0.48, delay: 0.12, options: [.curveEaseInOut, .allowUserInteraction]) {
+            UIView.animate(withDuration: 0.48, delay: 0.2, options: [.curveEaseInOut, .allowUserInteraction]) {
                 self.body.center.y = 210
                 self.machine.alpha = 0
                 self.lip.alpha = 0
             } completion: { [weak self] finished in
                 guard let self, finished, self.generation == token, self.window != nil else { return }
+                self.stopHaptics()
+                UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.55)
                 self.completion?()
             }
         }
