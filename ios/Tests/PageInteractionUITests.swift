@@ -484,6 +484,14 @@ final class PageInteractionUITests: XCTestCase {
             let selector = app.buttons[label]
             XCTAssertTrue(selector.waitForExistence(timeout: 8))
             revealMeterControl(selector, in: app)
+            // This fixture has one valid choice. Turning either way must stop at
+            // the boundary without clearing dependent room data or the balance.
+            let previousValue = selector.value as? String
+            let left = selector.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
+            let right = selector.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
+            right.press(forDuration: 0.05, thenDragTo: left)
+            left.press(forDuration: 0.05, thenDragTo: right)
+            XCTAssertEqual(selector.value as? String, previousValue)
             selector.tap()
             let current = app.buttons["meter-option-\(field)-0"]
             XCTAssertTrue(current.waitForExistence(timeout: 5))
