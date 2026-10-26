@@ -158,6 +158,7 @@ actor FixtureCampusTransport: CampusTransport {
 @main
 struct CampusAPITests {
     static let identity = #"{"errcode":2000,"account":"fixture-account","userId":"fixture-user-id","data":{"access_token":"fixture-access-token","token_type":"bearer"}}"#
+    static let identityWithName = #"{"errcode":2000,"account":"fixture-account","userId":"fixture-user-id","realName":"  示例学生  ","data":{"access_token":"fixture-access-token","token_type":"bearer"}}"#
     static let emptyPage = #"{"data":{"list":[],"pageNum":1,"pageSize":20,"total":0,"hasNextPage":false}}"#
 
     static func main() async throws {
@@ -193,6 +194,49 @@ struct CampusAPITests {
         check(CampusOfficialNavigationPolicy.decision(
             for: URL(string: "https://outside.invalid/popup"), targetIsMainFrame: nil
         ) == .blocked(reportFailure: false), "off-domain popup is cancelled without failing the visible page")
+
+        let displayNameTransport = FixtureCampusTransport { _, _ in (200, [:], identityWithName) }
+        let displayNameClient = CampusClient(account: "fixture-account", credentials: FixtureCredentials(), transport: displayNameTransport)
+        let displayName = try await displayNameClient.authenticatedDisplayName(
+            expectedAccount: "fixture-account", expectedGeneration: 1
+        )
+        let displayNameRequests = await displayNameTransport.requests
+        check(displayName == CampusStudentDisplayName(account: "fixture-account", generation: 1, value: "示例学生"),
+              "display name is trimmed and bound to the validated account generation")
+        check(displayNameRequests.count == 1 && displayNameRequests[0].url!.path.hasSuffix("validate_full") &&
+              displayNameRequests[0].httpMethod == "GET",
+              "display-name lookup uses only the existing read-only identity validation")
+
+        let mismatchedDisplayNameTransport = FixtureCampusTransport { _, _ in (200, [:], identityWithName) }
+        let mismatchedDisplayNameClient = CampusClient(
+            account: "fixture-account", credentials: FixtureCredentials(), transport: mismatchedDisplayNameTransport
+        )
+        do {
+            _ = try await mismatchedDisplayNameClient.authenticatedDisplayName(
+                expectedAccount: "another-account", expectedGeneration: 1
+            )
+            check(false, "display-name lookup rejects an unexpected account before network access")
+        } catch {
+            let requests = await mismatchedDisplayNameTransport.requests
+            check(error as? CampusError == .identityMismatch && requests.isEmpty,
+                  "display-name lookup rejects an unexpected account before network access")
+        }
+
+        let staleDisplayNameTransport = FixtureCampusTransport { _, _ in (200, [:], identityWithName) }
+        let staleDisplayNameClient = CampusClient(
+            account: "fixture-account", credentials: FixtureCredentials(), transport: staleDisplayNameTransport
+        )
+        do {
+            _ = try await staleDisplayNameClient.authenticatedDisplayName(
+                expectedAccount: "fixture-account", expectedGeneration: 2
+            )
+            check(false, "display-name lookup rejects a stale generation before network access")
+        } catch {
+            let requests = await staleDisplayNameTransport.requests
+            check(error as? CampusError == .identityMismatch && requests.isEmpty,
+                  "display-name lookup rejects a stale generation before network access")
+        }
+
         check(CampusOfficialNavigationPolicy.decision(
             for: URL(string: "http://ehall.ccsut.cn:8080/backstage/page"), targetIsMainFrame: true
         ) == .blocked(reportFailure: true), "nondefault HTTP port remains rejected")

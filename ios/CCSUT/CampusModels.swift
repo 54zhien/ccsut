@@ -37,6 +37,14 @@ enum CampusPrivacy {
     }
 }
 
+/// Optional display metadata returned with an account-verified campus identity.
+/// Both fields bind the name to the session that produced it.
+struct CampusStudentDisplayName: Equatable, Sendable {
+    let account: String
+    let generation: UInt64
+    let value: String
+}
+
 struct CampusLeaveRecord: Decodable, Identifiable, Equatable, Sendable {
     let id: String
     let typeName: String?

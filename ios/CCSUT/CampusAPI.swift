@@ -238,6 +238,26 @@ actor CampusClient: CampusReading {
         return try CampusDecoder.travelRecords(data)
     }
 
+    /// Return the name attached to this campus identity without loading a form
+    /// or issuing a business request. The result is bound to the validated
+    /// account and the Cookie generation that authenticated it.
+    func authenticatedDisplayName(expectedAccount: String,
+                                  expectedGeneration: UInt64) async throws -> CampusStudentDisplayName? {
+        try checkState()
+        guard account == expectedAccount, generation == expectedGeneration else {
+            throw CampusError.identityMismatch
+        }
+        let identity = try await identity(for: .leave, callback: Self.leavePage, force: false)
+        try checkState()
+        guard identity.account == expectedAccount, generation == expectedGeneration else {
+            throw CampusError.identityMismatch
+        }
+        guard let rawName = identity.realName else { return nil }
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
+        return CampusStudentDisplayName(account: identity.account, generation: generation, value: name)
+    }
+
     private func query(_ subsystem: Subsystem, callback: URL, path: String,
                        body: (String) -> [String: Any]) async throws -> Data {
         for attempt in 0...1 {

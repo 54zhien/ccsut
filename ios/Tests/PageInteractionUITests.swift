@@ -532,6 +532,21 @@ final class PageInteractionUITests: XCTestCase {
         }
     }
 
+    func testWebLoginControlsUseMatchingNativeGeometry() {
+        let app = launch("web-login")
+        let close = app.buttons["关闭网页登录"]
+        let refresh = app.buttons["刷新网页"]
+        XCTAssertTrue(close.waitForExistence(timeout: 8))
+        XCTAssertTrue(refresh.isHittable)
+        XCTAssertGreaterThanOrEqual(refresh.frame.width, 44)
+        XCTAssertEqual(close.frame.width, refresh.frame.width, accuracy: 1)
+        XCTAssertEqual(close.frame.height, refresh.frame.height, accuracy: 1)
+        XCTAssertEqual(close.frame.midY, refresh.frame.midY, accuracy: 1)
+        refresh.tap()
+        XCTAssertTrue(close.isHittable)
+        capture(app, "web-login-native-controls")
+    }
+
     func testRecordInitialLoadingIsCentered() {
         for (page, title) in [("campus-leave", "正在读取请假记录…"), ("campus-travel", "正在读取离校记录…")] {
             let app = launch(page, arguments: ["--preview-record-loading"])
@@ -794,7 +809,7 @@ final class PageInteractionUITests: XCTestCase {
         let before = first.frame
         let account = app.buttons["账号"]
         XCTAssertGreaterThanOrEqual(before.minY - account.frame.maxY, 24)
-        XCTAssertGreaterThanOrEqual(before.height, 96, "Preserve the existing 96-point entry cards")
+        XCTAssertGreaterThanOrEqual(before.height, 88, "Grouped service rows keep a generous touch target")
         XCTAssertTrue(last.isHittable)
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.35))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.75))

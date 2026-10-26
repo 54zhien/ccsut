@@ -51,8 +51,8 @@ struct EcardPaymentView: View {
                 if let issue = model.recoveryIssue { recoveryCard(issue) }
                 else if let receipt = model.receipt { result(receipt) }
                 else {
-                    if let detail = model.detail { meterCard(detail) }
                     roomSelection
+                    if let detail = model.detail { meterCard(detail) }
                     amountSelection
                 }
                 if model.recoveryIssue == nil, let message = model.errorText {
@@ -78,7 +78,7 @@ struct EcardPaymentView: View {
                         .font(.subheadline.weight(.semibold)).padding(.horizontal, 4)
                 }
             }
-            .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 24)
+            .padding(.horizontal, AppLayout.pageInset).padding(.top, 20).padding(.bottom, 24)
             .frame(maxWidth: 720).frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
@@ -273,70 +273,65 @@ struct EcardPaymentView: View {
     private func balance(_ detail: MeterDetail) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(CampusPrivacy.redact(detail.show["剩余金额"] ?? "—"))
-                .font(.largeTitle.weight(.semibold).monospacedDigit()).lineLimit(1)
+                .font(.system(.largeTitle, design: .rounded, weight: .semibold).monospacedDigit()).lineLimit(1)
                 .foregroundStyle((detail.remainingAmount ?? 0) < 0 ? Color.red : Color.primary)
             Text("元").font(.subheadline).foregroundStyle(.secondary)
         }.accessibilityElement(children: .combine)
     }
 
     private var amountSelection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("缴费金额").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(spacing: 10) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "bolt.fill").font(.caption2)
-                        Text("充值金额").font(.caption.weight(.medium))
-                        Spacer(minLength: 0)
-                        Text("人民币 · 元").font(.caption2)
-                    }
-                    .foregroundStyle(meterIsDark ? .white.opacity(0.58) : .black.opacity(0.56))
-                    .padding(.horizontal, 4)
-                    HStack(spacing: 6) {
-                        Text("¥").font(.title3.weight(.medium)).foregroundStyle(meterIsDark ? .white.opacity(0.7) : .black.opacity(0.68))
-                            .padding(.trailing, 4).accessibilityHidden(true)
-                        amountDrum(place: 100, label: "百位")
-                        amountDrum(place: 10, label: "十位")
-                        amountDrum(place: 1, label: "个位")
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(meterIsDark ? .black.opacity(0.55) : Color(red: 0.75, green: 0.78, blue: 0.82), in: .rect(cornerRadius: 16))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16).strokeBorder(meterIsDark ? .white.opacity(0.08) : .black.opacity(0.1), lineWidth: 0.5)
-                            .allowsHitTesting(false)
-                    }
+        VStack(alignment: .leading, spacing: 12) {
+            AppSectionHeading("充值金额")
+            VStack(alignment: .leading, spacing: 20) {
+                HStack {
+                    Text("上下滑动选择金额").font(.subheadline).foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text("人民币 · 元").font(.caption).foregroundStyle(.secondary)
                 }
-                .padding(14)
-                .background {
-                    RoundedRectangle(cornerRadius: 24)
-                        .fill(LinearGradient(colors: meterIsDark
-                            ? [Color(white: 0.19), Color(white: 0.09)]
-                            : [Color(red: 0.95, green: 0.96, blue: 0.98), Color(red: 0.83, green: 0.86, blue: 0.9)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 24)
-                                .strokeBorder(LinearGradient(colors: meterIsDark
-                                    ? [.white.opacity(0.3), .white.opacity(0.04)]
-                                    : [.white.opacity(0.95), .black.opacity(0.12)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
-                        }
+                HStack(spacing: 0) {
+                    Text("¥").font(.title2.weight(.medium)).foregroundStyle(.secondary)
+                        .padding(.leading, 20).padding(.trailing, 8).accessibilityHidden(true)
+                    amountDrum(place: 100, label: "百位")
+                    amountDrum(place: 10, label: "十位")
+                    amountDrum(place: 1, label: "个位")
                 }
+                .padding(.trailing, 12)
+                .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 24))
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("缴费金额，\(amountValue)元，上下滑动数字调整")
-                Text(amountMaximum > 0 ? "上下滑动调整 · \(MeterAmount.minimum)–\(amountMaximum) 元" : "正在获取可充值金额范围")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { amountPresets }
+                    VStack(spacing: 8) { amountPresets }
+                }
+                Text(amountMaximum > 0 ? "可充值 \(MeterAmount.minimum)–\(amountMaximum) 元" : "正在获取可充值金额范围")
                     .font(.footnote).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 if let hint = model.amountHint {
-                    Text(hint).font(.footnote).foregroundStyle(.red)
+                    Label(hint, systemImage: "exclamationmark.circle")
+                        .font(.footnote).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(amountContentInset).frame(maxWidth: .infinity, alignment: .leading)
-            // Match the meter's 24pt corner plus this section's actual 20pt inset.
-            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24 + amountContentInset))
+            .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+            .appContentCard()
         }
     }
-    private var amountContentInset: CGFloat { 20 }
-    private var meterIsDark: Bool { colorScheme == .dark }
+
+    @ViewBuilder private var amountPresets: some View {
+        ForEach([50, 100, 200], id: \.self) { amount in
+            Button {
+                model.amountText = String(amount)
+            } label: {
+                Text("\(amount) 元").font(.subheadline.weight(.semibold)).monospacedDigit()
+                    .frame(maxWidth: .infinity, minHeight: 32)
+            }
+            .buttonStyle(.bordered).buttonBorderShape(.capsule)
+            .tint(amountValue == amount ? Color.accentColor : Color.secondary)
+            .disabled(amountMaximum < amount || model.isSubmitting)
+            .accessibilityLabel("充值\(amount)元")
+            .accessibilityAddTraits(amountValue == amount ? [.isSelected] : [])
+        }
+    }
     private var amountMaximum: Int {
         MeterAmount.maximum(perPayment: model.fee?.maxAmount, perDay: model.fee?.dayMaxAmount)
     }
@@ -359,22 +354,14 @@ struct EcardPaymentView: View {
             }
         )) {
             ForEach(MeterAmount.digits(amount: amountValue, place: place, maximum: amountMaximum), id: \.self) { digit in
-                Text(String(digit)).font(.system(size: textSize.isAccessibilitySize ? 40 : 34, weight: .medium, design: .monospaced))
-                    .foregroundStyle(meterIsDark ? Color.white : Color(.label))
+                Text(String(digit)).font(.system(size: textSize.isAccessibilitySize ? 44 : 40, weight: .regular, design: .rounded))
+                    .foregroundStyle(.primary)
                     .tag(digit)
             }
         }
         .pickerStyle(.wheel).labelsHidden()
-        .frame(minWidth: 44, maxWidth: .infinity).frame(height: textSize.isAccessibilitySize ? 160 : 132)
+        .frame(minWidth: 44, maxWidth: .infinity).frame(height: textSize.isAccessibilitySize ? 180 : 156)
         .clipped()
-        .background(LinearGradient(colors: meterIsDark
-            ? [.black.opacity(0.65), Color(white: 0.13), .black.opacity(0.65)]
-            : [Color(red: 0.78, green: 0.81, blue: 0.85), Color(red: 0.95, green: 0.96, blue: 0.97), Color(red: 0.78, green: 0.81, blue: 0.85)],
-            startPoint: .top, endPoint: .bottom), in: .rect(cornerRadius: 10))
-        .overlay {
-            LinearGradient(colors: [Color.black.opacity(meterIsDark ? 0.65 : 0.08), .clear, Color.black.opacity(meterIsDark ? 0.65 : 0.08)], startPoint: .top, endPoint: .bottom)
-                .clipShape(.rect(cornerRadius: 10)).allowsHitTesting(false)
-        }
         .disabled(amountMaximum == 0 || model.isSubmitting)
         .accessibilityLabel("金额\(label)")
     }

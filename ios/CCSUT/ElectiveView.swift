@@ -133,14 +133,14 @@ struct ElectiveView: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
             if selectedFilter == .selected {
                 if isLoading && enrolledModel.context == nil {
-                    ProgressView("读取完整已选结果…")
-                        .frame(maxWidth: .infinity, minHeight: 160)
+                    PageLoadingState("读取完整已选结果…")
+                        .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
                 } else {
                     enrolledList(viewportHeight: viewportHeight)
                 }
             } else if isLoading && classes.isEmpty {
-                ProgressView("拉取教学班…")
-                    .frame(maxWidth: .infinity, minHeight: 160)
+                PageLoadingState("拉取教学班…")
+                    .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
             } else if electiveState.isChannelClosed {
                 ContentUnavailableView("选课通道暂未开启", systemImage: "calendar.badge.clock",
                     description: Text("可前往“已选”查看当前或历史选课记录。"))
@@ -169,9 +169,10 @@ struct ElectiveView: View {
                 .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, AppLayout.pageInset)
         .padding(.top, 12)
         .padding(.bottom, 24)
+        .frame(maxWidth: 720).frame(maxWidth: .infinity)
         .background(Color(.systemGroupedBackground))
         .confirmationDialog(
             pending.map { $0.enrolling ? "确认选课？" : "确认退课？" } ?? "",
@@ -201,7 +202,7 @@ struct ElectiveView: View {
             Label(SchedulePresentation.termTitle(data.xkxnxq ?? "—"), systemImage: "calendar")
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
-                Label(data.xsxm ?? "—", systemImage: "person")
+                Label(session.studentName ?? data.xsxm ?? "已登录", systemImage: "person")
                 Spacer(minLength: 8)
                 if let summary = enrolledModel.currentSummary, summary.term == data.xkxnxq {
                     Label("\(summary.count) 已选", systemImage: "checkmark.circle.fill")

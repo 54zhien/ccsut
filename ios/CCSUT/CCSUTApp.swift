@@ -10,7 +10,12 @@ import WebKit
 
 @main
 struct CCSUTApp: App {
-    @State private var session = SessionStore()
+    @State private var session = SessionStore(studentNameResolver: { account, generation in
+        let client = CampusClient(account: account, credentials: CampusCookieCredentials())
+        guard let name = try? await client.authenticatedDisplayName(expectedAccount: account,
+                                                                    expectedGeneration: generation) else { return nil }
+        return SessionStudentName(account: name.account, generation: name.generation, value: name.value)
+    })
     @State private var deviceCornerRadius: CGFloat = 0
 
     var body: some Scene {
@@ -21,6 +26,7 @@ struct CCSUTApp: App {
                     case "login": LoginView()
                     case "launch": LaunchView()
                     #if DEBUG
+                    case "web-login": WebLoginPreviewHost()
                     case "campus-privacy": CampusPrivacyPreview()
                     case "campus-form-leave": CampusFormPreviewHost(kind: .leave)
                     case "campus-form-departure": CampusFormPreviewHost(kind: .departure)
@@ -58,6 +64,16 @@ struct CCSUTApp: App {
 // MARK: - 根视图
 
 #if DEBUG
+private struct WebLoginPreviewHost: View {
+    @State private var presented = true
+    var body: some View {
+        Color(.systemGroupedBackground).ignoresSafeArea()
+            .sheet(isPresented: $presented) {
+                WebLoginSheet(request: .init(mode: .sms, account: "", code: "", autoSend: false))
+            }
+    }
+}
+
 private struct CampusFormPreviewHost: View {
     let kind: CampusFormKind
     @State private var showingForm = true
@@ -211,7 +227,13 @@ struct StudentAvatar: View {
 
     var body: some View {
         let name = session.studentName ?? (InterfacePreview.enabled ? "预览同学" : "")
-        Text(name.first.map(String.init) ?? "同")
+        Group {
+            if let first = name.trimmingCharacters(in: .whitespacesAndNewlines).first {
+                Text(String(first))
+            } else {
+                Image(systemName: "person.fill")
+            }
+        }
             .font(.system(size: size * 0.4, weight: .semibold))
             .foregroundStyle(Color.accentColor)
             .frame(width: size, height: size)
@@ -236,7 +258,7 @@ struct AccountButton: View {
         .accessibilityLabel("账号")
         .sheet(isPresented: $isPresented) {
             ProfileView()
-                .presentationDetents([.height(profileSheetHeight)])
+                .presentationDetents([.height(profileSheetHeight), .large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(SheetLayout.cornerRadius(deviceCornerRadius))
         }
@@ -249,52 +271,51 @@ struct AccountButton: View {
 struct ProfileView: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.deviceCornerRadius) private var deviceCornerRadius
     @State private var showLogoutAlert = false
 
     var body: some View {
-        GeometryReader { viewport in
-            let edgeInset = max(20, SheetLayout.cornerRadius(deviceCornerRadius) - 25)
-            let reservedHeight = max(96, SheetLayout.cornerRadius(deviceCornerRadius) + 30)
+        NavigationStack {
             ScrollView {
-                VStack(spacing: 14) {
-                    StudentAvatar(size: 76)
+                VStack(spacing: 16) {
+                    StudentAvatar(size: 72)
 
                     VStack(spacing: 6) {
                         Text(session.studentName ?? (InterfacePreview.enabled ? "预览同学" : "已登录"))
-                            .font(.title3.weight(.semibold))
+                            .font(.title2.weight(.bold))
                             .multilineTextAlignment(.center)
                         Text(session.studentId ?? (InterfacePreview.enabled ? "示例账号" : "—"))
-                            .font(.subheadline.monospaced())
+                            .font(.subheadline.monospacedDigit())
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, reservedHeight)
-                .frame(maxWidth: .infinity, minHeight: viewport.size.height)
+                .padding(24)
+                .frame(maxWidth: .infinity)
             }
             .scrollBounceBehavior(.basedOnSize)
-            .overlay(alignment: .top) {
-                SheetHeader(title: "账号") { dismiss() }
-            }
-            .overlay(alignment: .bottom) {
+            .safeAreaInset(edge: .bottom) {
                 Button(role: .destructive) { showLogoutAlert = true } label: {
                     Text("退出登录")
-                        .font(.body.weight(.medium))
-                        .frame(maxWidth: .infinity)
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 28)
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.capsule)
                 .controlSize(.large)
                 .tint(.red)
-                .padding(.horizontal, edgeInset)
-                .padding(.bottom, max(edgeInset, viewport.safeAreaInsets.bottom))
+                .padding(.horizontal, 24)
+                .padding(.bottom, 12)
+            }
+            .navigationTitle("账号").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(role: .close) { dismiss() }
+                        .foregroundStyle(.primary).tint(nil).accessibilityLabel("关闭账号")
+                }
             }
         }
-        .ignoresSafeArea(.container)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .alert("退出登录", isPresented: $showLogoutAlert) {
             Button("取消", role: .cancel) {}
             Button("退出", role: .destructive) {

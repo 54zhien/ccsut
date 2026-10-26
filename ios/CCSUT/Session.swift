@@ -163,6 +163,14 @@ extension WKHTTPCookieStore {
 
 // MARK: - SessionStore
 
+struct SessionStudentName: Equatable, Sendable {
+    let account: String
+    let generation: UInt64
+    let value: String
+}
+
+typealias StudentNameResolver = @MainActor (String, UInt64) async -> SessionStudentName?
+
 @Observable
 @MainActor
 final class SessionStore {
@@ -219,6 +227,7 @@ final class SessionStore {
 
     private let api: APIClient
     private let prepareEcardSession: @MainActor (String, WKWebsiteDataStore) -> Void
+    private let studentNameResolver: StudentNameResolver?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var adoptionTask: Task<Bool, Never>?
     @ObservationIgnored private var isLoggingOut = false
@@ -227,9 +236,11 @@ final class SessionStore {
     init(api: APIClient = .shared,
          prepareEcardSession: @escaping @MainActor (String, WKWebsiteDataStore) -> Void = {
              EcardTokenBridge.prepareSession(forAccount: $0, dataStore: $1)
-         }) {
+         },
+         studentNameResolver: StudentNameResolver? = nil) {
         self.api = api
         self.prepareEcardSession = prepareEcardSession
+        self.studentNameResolver = studentNameResolver
     }
 
     private let cookieKey = "ccsut.cookies.v2"
@@ -478,7 +489,8 @@ final class SessionStore {
     }
 
     /// Publish independently verified identity first. Elective metadata is only
-    /// optional name enrichment and cannot invalidate a closed-channel login.
+    /// optional name enrichment; campus identity supplies a read-only fallback
+    /// when the elective channel is closed or omits the name.
     func loadProfile() async {
         guard !isLoggingOut, phase == .loggedIn || phase == .refreshing,
               !CookieJar.shared.isEmpty else { return }
@@ -486,18 +498,41 @@ final class SessionStore {
         do {
             if verifiedIdentity?.generation != generation { try await verifySession() }
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
-            guard publishVerifiedIdentity(generation: generation), let studentId else { return }
-            prepareEcardSession(studentId, WebStore.dataStore)
-            // This optional display metadata belongs to the already verified
-            // request generation. Some responses omit the repeated account field;
-            // reject an explicit mismatch without requiring that optional field.
-            guard let initData = try? await api.electiveInit(),
-                  CookieJar.generation == generation, !Task.isCancelled,
-                  initData.xsxh == nil || initData.xsxh == studentId else { return }
-            if let name = initData.xsxm?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            guard publishVerifiedIdentity(generation: generation), let account = studentId else { return }
+            prepareEcardSession(account, WebStore.dataStore)
+
+            var electiveName: String?
+            if let initData = try? await api.electiveInit() {
+                guard CookieJar.generation == generation, !Task.isCancelled else { return }
+                // A repeated account is optional, but an explicit mismatch is
+                // never allowed to enrich the currently authenticated account.
+                guard initData.xsxh == nil || initData.xsxh == account else { return }
+                if let name = initData.xsxm?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !name.isEmpty {
+                    electiveName = name
+                }
+            }
+
+            guard CookieJar.generation == generation, !Task.isCancelled, studentId == account else { return }
+            if let name = electiveName {
                 studentName = name
                 UserDefaults.standard.set(name, forKey: nameKey)
+                return
             }
+
+            // Preserve a same-account name already in memory or on disk. The
+            // resolver is only needed when no usable optional name is known.
+            guard studentName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+                  let studentNameResolver else { return }
+            guard let resolved = await studentNameResolver(account, generation),
+                  CookieJar.generation == generation, !Task.isCancelled,
+                  studentId == account,
+                  resolved.account == account, resolved.generation == generation,
+                  studentName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else { return }
+            let name = resolved.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, name.rangeOfCharacter(from: .controlCharacters) == nil else { return }
+            studentName = name
+            UserDefaults.standard.set(name, forKey: nameKey)
         } catch {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             lastError = "拉取学生信息失败：\(error.localizedDescription)"
@@ -542,6 +577,7 @@ final class SessionStore {
         Keychain.delete(cookieKey)
         UserDefaults.standard.removeObject(forKey: nameKey)
         UserDefaults.standard.removeObject(forKey: sidKey)
+        UserDefaults.standard.removeObject(forKey: "ccsut.teachingWeek.v1")
         studentName = nil
         studentId = nil
         verifiedIdentity = nil

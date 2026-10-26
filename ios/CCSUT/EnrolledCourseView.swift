@@ -47,9 +47,9 @@ struct EnrolledCourseCard: View {
             }
             .font(.caption)
         }
-        .padding(16)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
+        .appContentCard()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("enrolled-course-\(record.id)")
     }
@@ -62,8 +62,8 @@ struct EnrolledCourseDetail: View {
         NavigationStack {
             List {
                 Section {
-                    Text(record.kcmc ?? "—").font(.title3.weight(.semibold))
-                    Text(record.jxbmc ?? "").font(.caption).foregroundStyle(.secondary)
+                    AppDetailHeading(title: record.kcmc ?? "—", subtitle: record.jxbmc ?? "", symbol: "checkmark.seal")
+                        .padding(.vertical, 8)
                 }
                 Section("修读记录") {
                     row("学年学期",SchedulePresentation.termTitle(record.xnxq))
@@ -83,7 +83,12 @@ struct EnrolledCourseDetail: View {
                 }
             }
             .navigationTitle("课程详情").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement:.confirmationAction) { Button("完成") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(role: .close) { dismiss() }
+                        .foregroundStyle(.primary).tint(nil).accessibilityLabel("关闭课程详情")
+                }
+            }
         }
     }
     @ViewBuilder private func row(_ title: String, _ value: String?) -> some View {

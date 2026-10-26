@@ -26,7 +26,6 @@ struct CourseDetailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     header
-                    Divider()
                     if let actionBlockReason {
                         section("操作状态") {
                             Label(actionBlockReason, systemImage: "info.circle")
@@ -37,7 +36,7 @@ struct CourseDetailSheet: View {
                                 .accessibilityLabel("操作不可用：\(actionBlockReason)")
                         }
                     }
-                    infoGrid
+                    infoGrid.padding(20).appContentCard()
                     if !item.sksjddText.isEmpty {
                         section("上课时间地点") {
                             Text(item.sksjddText)
@@ -67,7 +66,9 @@ struct CourseDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
+                    Button(role: .close) { dismiss() }
+                        .foregroundStyle(.primary).tint(nil)
+                        .accessibilityLabel("关闭课程详情")
                 }
             }
         }
@@ -77,11 +78,9 @@ struct CourseDetailSheet: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(item.kcmc ?? "—")
-                .font(.title3.weight(.semibold))
-                .fixedSize(horizontal: false, vertical: true)
+            AppDetailHeading(title: item.kcmc ?? "—", subtitle: "", symbol: "book.closed")
 
-            HStack(spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), alignment: .leading)], alignment: .leading, spacing: 8) {
                 tag("\(item.xf ?? "—") 学分", tint: .accentColor)
                 if let lx = item.kclx, !lx.isEmpty { tag(lx, tint: .secondary) }
                 if let ks = item.ksxs, !ks.isEmpty { tag(ks, tint: .secondary) }
@@ -145,10 +144,9 @@ struct CourseDetailSheet: View {
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            AppSectionHeading(title)
             content()
+                .padding(20).frame(maxWidth: .infinity, alignment: .leading).appContentCard()
         }
     }
 

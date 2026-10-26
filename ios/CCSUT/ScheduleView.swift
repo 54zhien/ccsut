@@ -7,7 +7,7 @@ struct ScheduleView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @ScaledMetric(relativeTo: .caption) private var courseFont: CGFloat = 12
+    @ScaledMetric(relativeTo: .caption) private var courseFont: CGFloat = 13
     @ScaledMetric(relativeTo: .caption2) private var timeFont: CGFloat = 11
     @ScaledMetric(relativeTo: .caption) private var dayFont: CGFloat = 12
     @ScaledMetric(relativeTo: .subheadline) private var dateFont: CGFloat = 14
@@ -47,9 +47,9 @@ struct ScheduleView: View {
                                     if let errorText {
                                         PageStatusNotice(message: errorText) { Task { await load(force: true) } }
                                     }
-                                    weekBar().id("page-top")
+                                    scheduleHeading.id("page-top")
+                                    weekBar()
                                     VStack(spacing: 8) {
-                                        termSummary
                                         timetable(viewport: viewport.size)
                                     }
                                     .padding(.top, 12)
@@ -66,7 +66,7 @@ struct ScheduleView: View {
                             } else {
                                 Group {
                                     if isLoading {
-                                        ProgressView("加载课表…")
+                                        PageLoadingState("加载课表…")
                                     } else if errorText != nil {
                                         ContentUnavailableView {
                                             Label(AppMessages.loadFailure, systemImage: "wifi.exclamationmark")
@@ -136,7 +136,7 @@ struct ScheduleView: View {
             }
             .sheet(item: $detail) { slot in
                 ScheduleDetailSheet(slot: slot)
-                    .presentationDetents([.medium])
+                    .presentationDetents([.medium, .large])
                     .presentationContentInteraction(.scrolls)
                     .presentationDragIndicator(.visible)
                     .presentationCornerRadius(SheetLayout.cornerRadius(deviceCornerRadius))
@@ -177,8 +177,19 @@ struct ScheduleView: View {
         }
     }
 
-    private var termSummary: some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private var scheduleHeading: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("第 \(selectedWeek) 周")
+                    .font(.system(.title, design: .rounded, weight: .bold))
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                if let monday = date(for: 1), let sunday = date(for: 7) {
+                    Text("\(calendar.component(.month, from: monday))月\(calendar.component(.day, from: monday))日 – \(calendar.component(.month, from: sunday))月\(calendar.component(.day, from: sunday))日")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(SchedulePresentation.termTitle(bundle?.title ?? ""))
                     .font(.footnote).foregroundStyle(.secondary)
@@ -195,7 +206,7 @@ struct ScheduleView: View {
             }
         }
         .frame(minHeight: 28)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, AppLayout.pageInset)
     }
 
     private var maxWeek: Int { max(18, bundle?.slots.flatMap(\.weeks).max() ?? 18, currentWeek ?? 1) }
@@ -301,8 +312,7 @@ struct ScheduleView: View {
     private func timetableCell(day: Int, section: Int, width: CGFloat, height: CGFloat) -> some View {
         ZStack(alignment: .top) {
             RoundedRectangle(cornerRadius: 12)
-                .fill(isToday(day) ? Color.accentColor.opacity(0.025) :
-                        (colorScheme == .dark ? Color.white.opacity(0.025) : Color(.systemGroupedBackground).opacity(0.7)))
+                .fill(isToday(day) ? Color.accentColor.opacity(0.045) : Color(.tertiarySystemGroupedBackground))
             if let cell = cells.first(where: { $0.weekday == day && $0.section == section }), let slot = cell.courses.first {
                 courseCard(slot, count: cell.courses.count) {
                     if cell.courses.count == 1 { detail = slot } else { choosing = cell }
@@ -318,7 +328,7 @@ struct ScheduleView: View {
         return Button(action: action) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(slot.course).font(.system(size: courseFont, weight: .semibold))
-                    .foregroundStyle(colorScheme == .dark ? Color.primary : tint)
+                    .foregroundStyle(.primary)
                     .lineLimit(4).frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 4)
                 if count > 1 {
@@ -326,13 +336,13 @@ struct ScheduleView: View {
                 }
                 if !slot.room.isEmpty {
                     Text(slot.room).font(.system(size: max(10, courseFont - 2), weight: .medium))
-                        .foregroundStyle(colorScheme == .dark ? Color.secondary : tint.opacity(0.9))
+                        .foregroundStyle(.secondary)
                         .lineLimit(slot.room.unicodeScalars.allSatisfy { $0.isASCII } ? 1 : 3)
                         .minimumScaleFactor(0.82)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding(.horizontal, 6).padding(.vertical, 8)
+            .padding(.horizontal, 7).padding(.vertical, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(tint.opacity(colorScheme == .dark ? 0.23 : 0.10), in: .rect(cornerRadius: 12))
             .overlay(alignment: .leading) {

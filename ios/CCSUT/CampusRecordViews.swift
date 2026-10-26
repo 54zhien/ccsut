@@ -22,7 +22,7 @@ struct CampusRecordsView: View {
                     Label("暂时无法读取校园记录", systemImage: "person.crop.circle.badge.exclamationmark")
                 } description: { Text("请先确认当前登录账号，再重新打开此页面。") }
             } else {
-                ProgressView("正在连接校园服务…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                PageLoadingState("正在连接校园服务…").frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .background(Color(.systemGroupedBackground))
@@ -86,8 +86,7 @@ private struct CampusRecordContent: View {
                             .pickerStyle(.segmented)
                             .accessibilityIdentifier("campus-travel-kind")
                         }
-                        Text(mode == .leave ? "申请记录" : selected.title).font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary).padding(.horizontal, 4).padding(.top, 8).accessibilityAddTraits(.isHeader)
+                        AppSectionHeading(mode == .leave ? "申请记录" : selected.title).padding(.top, 8)
                     }
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
                     if mode == .leave {
@@ -96,7 +95,7 @@ private struct CampusRecordContent: View {
                         travelContent(viewportHeight: contentViewport.height)
                     }
                 }
-                .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 28)
+                .padding(.horizontal, AppLayout.pageInset).padding(.top, 24).padding(.bottom, 28)
                 .frame(maxWidth: 720).frame(maxWidth: .infinity)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -158,7 +157,8 @@ private struct CampusRecordContent: View {
             notice(error) { Task { await model.loadLeave(reset: model.leaveFailureWasRefresh) } }
         }
         if model.isLoadingLeave && model.leave.items.isEmpty {
-            ProgressView("正在读取请假记录…").frame(maxWidth: .infinity).padding(.vertical, 32)
+            PageLoadingState("正在读取请假记录…")
+                .modifier(CampusRecordEmptyStateLayout(viewportHeight: viewportHeight, headerHeight: headerHeight))
         } else if model.leave.items.isEmpty && model.leaveError == nil {
             ContentUnavailableView("暂无请假记录", systemImage: "doc.text.magnifyingglass")
                 .accessibilityIdentifier("campus-leave-empty")
@@ -194,7 +194,8 @@ private struct CampusRecordContent: View {
         }
         let records = model.travel[selected] ?? []
         if model.loadingTravel.contains(selected) && records.isEmpty {
-            ProgressView("正在读取\(selected.title)…").frame(maxWidth: .infinity).padding(.vertical, 32)
+            PageLoadingState("正在读取\(selected.title)…")
+                .modifier(CampusRecordEmptyStateLayout(viewportHeight: viewportHeight, headerHeight: headerHeight))
         } else if records.isEmpty && model.travelErrors[selected] == nil {
             ContentUnavailableView("暂无\(selected.title)", systemImage: "calendar.badge.checkmark")
                 .accessibilityIdentifier("campus-travel-empty")

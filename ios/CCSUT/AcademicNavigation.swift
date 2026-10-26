@@ -72,7 +72,9 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
             if hidden { visibleTabAppearance = (bar.transform, bar.alpha) }
             let originalTransform = visibleTabAppearance?.transform ?? .identity
             let originalAlpha = visibleTabAppearance?.alpha ?? 1
-            let loweredTransform = originalTransform.translatedBy(x: 0, y: max(bar.bounds.height, 1))
+            // A short visual recession; UIKit still owns the safe-area geometry.
+            // This is an app motion choice, not a system bar-height translation.
+            let loweredTransform = originalTransform.translatedBy(x: 0, y: 20)
             let shouldAnimate = (coordinator?.isAnimated ?? animated) && !UIAccessibility.isReduceMotionEnabled
             let previousHidden = tabs.isTabBarHidden
             #if DEBUG

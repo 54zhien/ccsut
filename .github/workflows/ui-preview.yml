@@ -182,6 +182,8 @@ jobs:
           VIDEO_PID=$!
           trap 'kill -INT "$VIDEO_PID"; wait "$VIDEO_PID" || true' EXIT
           TEST_SELECTION=(
+            -only-testing:CCSUTUITests/PageInteractionUITests/testRecordInitialLoadingIsCentered
+            -only-testing:CCSUTUITests/PageInteractionUITests/testWebLoginControlsUseMatchingNativeGeometry
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeLeaveForm
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeDepartureForm
             -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeFormLargeText

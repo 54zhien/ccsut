@@ -56,7 +56,7 @@ import ImageIO
                                 VStack(alignment: presentsStatus ? .center : .leading, spacing: 24) {
                                     content
                                 }
-                                .padding(.horizontal, 16).padding(.vertical, 24)
+                                .padding(.horizontal, AppLayout.pageInset).padding(.vertical, 24)
                                 .frame(maxWidth: 720, minHeight: presentsStatus ? scrollViewport.size.height : 0)
                                 .frame(maxWidth: .infinity)
                             }

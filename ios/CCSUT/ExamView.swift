@@ -33,7 +33,7 @@ struct ExamView: View {
         PageScrollSurface(refresh: { await load(force: true) }, refreshHaptics: true) { viewport, proxy in
             VStack(spacing: 0) {
                 if isLoading && items.isEmpty {
-                    ProgressView("加载考试安排…")
+                    PageLoadingState("加载考试安排…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if errorText != nil, items.isEmpty {
                     ContentUnavailableView {
@@ -131,6 +131,7 @@ struct ExamView: View {
             }
         }
         .padding(.vertical, 12)
+        .frame(maxWidth: 720).frame(maxWidth: .infinity)
     }
 
     private var termFilter: some View {
@@ -197,19 +198,19 @@ struct ExamView: View {
             HStack {
                 Label("即将开始", systemImage: "alarm.fill")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color("AccentForeground").opacity(0.9))
+                    .foregroundStyle(.tint)
                 Spacer()
                 if let d = exam.startDate {
                     Text(d, format: .relative(presentation: .named))
                         .environment(\.locale, Locale(identifier: "zh_CN"))
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(Color("AccentForeground").opacity(0.85))
+                        .foregroundStyle(.secondary)
                 }
             }
 
             Text(exam.kcmc ?? "—")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(Color("AccentForeground"))
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -219,21 +220,21 @@ struct ExamView: View {
                     Label("考场：\(locationText(exam))", systemImage: "mappin.and.ellipse")
                 }
             }
-            .font(.caption)
-            .foregroundStyle(Color("AccentForeground").opacity(0.92))
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
 
             if let seat = exam.zwh, !seat.isEmpty, seat != "0" {
                 Text("座位 \(seat)")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 9)
                     .padding(.vertical, 3)
-                    .background(Color("AccentForeground").opacity(0.12), in: .capsule)
-                    .foregroundStyle(Color("AccentForeground"))
+                    .background(Color.accentColor.opacity(0.1), in: .capsule)
+                    .foregroundStyle(.tint)
             }
         }
-        .padding(20)
+        .padding(24)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.accentColor, in: .rect(cornerRadius: 28))
+        .appContentCard()
         .padding(.horizontal, 16)
     }
 

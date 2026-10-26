@@ -693,9 +693,21 @@ struct SessionRegressionTests {
               "late response cannot restore logged-out credentials")
 
         let loggedOut = sessionStore()
+        let teachingWeekCacheKey = "ccsut.teachingWeek.v1"
+        let previousTeachingWeekCache = UserDefaults.standard.object(forKey: teachingWeekCacheKey)
+        UserDefaults.standard.set(Data("fixture-account-cache".utf8), forKey: teachingWeekCacheKey)
+        defer {
+            if let previousTeachingWeekCache {
+                UserDefaults.standard.set(previousTeachingWeekCache, forKey: teachingWeekCacheKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: teachingWeekCacheKey)
+            }
+        }
         await loggedOut.logout()
         check(CookieJar.shared.isEmpty, "logout clears the authoritative Cookie jar")
         check(Keychain.load("ccsut.cookies.v2") == nil, "logout removes persisted credentials")
+        check(UserDefaults.standard.object(forKey: teachingWeekCacheKey) == nil,
+              "logout removes the prior account teaching-week snapshot")
         await loggedOut.loadProfile()
         check(loggedOut.lastError == nil && loggedOut.studentName == nil && loggedOut.studentId == nil,
               "late profile work cannot repopulate logged-out state")

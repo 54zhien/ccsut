@@ -118,6 +118,9 @@ jobs:
       - name: Run selected-course load ownership regressions
         if: always()
         run: python3 ios/Tests/run-elective-load-tests.py
+      - name: Run optional student name and logout cache regressions
+        if: always()
+        run: python3 ios/Tests/run-student-name-tests.py
       - name: Run retained material top blur regressions
         if: always()
         run: |

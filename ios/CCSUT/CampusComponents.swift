@@ -45,8 +45,7 @@ struct CampusSection<Content: View>: View {
     init(_ title: String, @ViewBuilder content: () -> Content) { self.title = title; self.content = content() }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+            AppSectionHeading(title)
             VStack(alignment: .leading, spacing: 16) { content }
                 .padding(20).frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))

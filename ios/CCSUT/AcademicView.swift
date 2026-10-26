@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Stable, independently spaced entry cards; optional reminders follow the entries.
+/// Upcoming commitments first, followed by grouped academic services.
 struct AcademicView: View {
     private enum Destination: Hashable { case scores, exams, electives }
     @Environment(\.scenePhase) private var scenePhase
@@ -18,31 +18,40 @@ struct AcademicView: View {
     var body: some View {
         NavigationStack(path: $path) {
             PageScrollSurface(onOffsetChange: { headerScrollOffset = $0 }) { _, _ in
-                let cardHeight: CGFloat = 96
-                VStack(spacing: 12) {
-                    NavigationLink(value: Destination.scores) {
-                        service("成绩查询", symbol: "chart.bar.doc.horizontal", tint: .accentColor, height: cardHeight)
-                    }
-                    .accessibilityIdentifier("academic-scores")
-                    NavigationLink(value: Destination.exams) {
-                        service("考试安排", symbol: "calendar.badge.clock", tint: .accentColor, height: cardHeight)
-                    }
-                    .accessibilityIdentifier("academic-exams")
-                    NavigationLink(value: Destination.electives) {
-                        service("选课", symbol: "list.bullet.rectangle.portrait", tint: .accentColor, height: cardHeight)
-                    }
-                    .accessibilityIdentifier("academic-electives")
+                VStack(alignment: .leading, spacing: AppLayout.sectionSpacing) {
                     if let nextExam {
-                        if let upcomingError {
-                            PageStatusNotice(message: upcomingError) { Task { await loadUpcomingExam() } }
+                        VStack(spacing: 12) {
+                            AppSectionHeading("接下来的考试")
+                            if let upcomingError {
+                                PageStatusNotice(message: upcomingError) { Task { await loadUpcomingExam() } }
+                            }
+                            NavigationLink(value: Destination.exams) { upcomingCard(nextExam) }
                         }
-                        NavigationLink(value: Destination.exams) { upcomingCard(nextExam) }
-                            .padding(.top, 8)
+                    }
+                    VStack(spacing: 12) {
+                        AppSectionHeading("学习与课程")
+                        VStack(spacing: 0) {
+                            NavigationLink(value: Destination.scores) {
+                                AppServiceRow(title: "成绩查询", symbol: "chart.bar.doc.horizontal")
+                            }
+                            .accessibilityIdentifier("academic-scores")
+                            Divider().padding(.leading, 80)
+                            NavigationLink(value: Destination.exams) {
+                                AppServiceRow(title: "考试安排", symbol: "calendar.badge.clock")
+                            }
+                            .accessibilityIdentifier("academic-exams")
+                            Divider().padding(.leading, 80)
+                            NavigationLink(value: Destination.electives) {
+                                AppServiceRow(title: "选课", symbol: "list.bullet.rectangle.portrait")
+                            }
+                            .accessibilityIdentifier("academic-electives")
+                        }
+                        .appContentCard()
                     }
                 }
                 .buttonStyle(.plain)
-                .padding(.horizontal, 16)
-                .padding(.top, 24)
+                .padding(.horizontal, AppLayout.pageInset)
+                .padding(.top, 20)
                 .padding(.bottom, 28)
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
@@ -86,30 +95,18 @@ struct AcademicView: View {
         }
     }
 
-    private func service(_ title: String, symbol: String, tint: Color, height: CGFloat) -> some View {
-        HStack(spacing: 16) {
-            Image(systemName: symbol)
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(tint)
-                .frame(width: 46, height: 46)
-                .background(tint.opacity(0.09), in: .rect(cornerRadius: 14))
-            Text(title).font(.headline).foregroundStyle(.primary)
-            Spacer(minLength: 4)
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
-        .contentShape(.rect(cornerRadius: 28))
-        .accessibilityElement(children: .combine)
-    }
+
 
     private func upcomingCard(_ exam: ExamItem) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("近期考试", systemImage: "calendar.badge.clock")
-                .font(.caption.weight(.medium)).foregroundStyle(Color.accentColor)
-            Text(exam.kcmc ?? "考试安排").font(.headline).foregroundStyle(.primary)
+            HStack {
+                Image(systemName: "calendar.badge.clock").font(.title2).foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+            Text(exam.kcmc ?? "考试安排").font(.title2.weight(.bold)).foregroundStyle(.primary)
             if let date = exam.startDate {
                 Text(date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened,
                                                     locale: Locale(identifier: "zh_CN"),
@@ -117,11 +114,11 @@ struct AcademicView: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             if !exam.location.isEmpty {
-                Text(exam.location).font(.caption).foregroundStyle(.secondary)
+                Label(exam.location, systemImage: "mappin.and.ellipse").font(.subheadline).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
+        .padding(24)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
     }
 

@@ -33,7 +33,7 @@ struct ScoreView: View {
         PageScrollSurface(refresh: { await load(force: true) }, refreshHaptics: true) { viewport, proxy in
             VStack(spacing: 0) {
                 if isLoading && items.isEmpty {
-                    ProgressView("加载成绩…")
+                    PageLoadingState("加载成绩…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if errorText != nil, items.isEmpty {
                     ContentUnavailableView {
@@ -162,13 +162,12 @@ struct ScoreView: View {
             }
         }
         .padding(.vertical, 12)
+        .frame(maxWidth: 720).frame(maxWidth: .infinity)
     }
 
     private var summaryCard: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Label("学业概览", systemImage: "chart.bar.doc.horizontal")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+            AppSectionHeading("学业概览")
             if let selectedTerm {
                 Text("筛选学期：\(SchedulePresentation.termTitle(selectedTerm))")
                     .font(.caption)
@@ -186,27 +185,29 @@ struct ScoreView: View {
                 HStack(spacing: 0) {
                     statBlock(value: String(format: "%.2f", overallGPA), label: "加权绩点", tint: .accentColor)
                     Divider().frame(height: 34)
-                    statBlock(value: String(format: "%.1f", overallCredits), label: "总学分", tint: .accentColor)
+                    statBlock(value: String(format: "%.1f", overallCredits), label: "总学分", tint: .primary)
                     Divider().frame(height: 34)
-                    statBlock(value: "\(displayedItems.count)", label: "门课程", tint: .accentColor)
+                    statBlock(value: "\(displayedItems.count)", label: "门课程", tint: .primary)
                 }
             }
         }
-        .padding(20)
+        .padding(24)
         .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
         .padding(.horizontal, 16)
     }
 
     private func statBlock(value: String, label: String, tint: Color) -> some View {
-        VStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(value)
-                .font(.title2.weight(.bold).monospacedDigit())
+                .font(.system(label == "加权绩点" ? .largeTitle : .title2, design: .rounded, weight: .semibold).monospacedDigit())
+                .lineLimit(1).minimumScaleFactor(0.8)
                 .foregroundStyle(tint)
             Text(label)
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
     }
 
     private func summaryRow(value: String, label: String) -> some View {
@@ -338,7 +339,7 @@ private struct ScoreRow: View {
 
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(item.scoreText)
-                        .font(.title3.weight(.bold).monospacedDigit())
+                        .font(.system(.title2, design: .rounded, weight: .semibold).monospacedDigit())
                         .foregroundStyle(item.failed ? Color.red : Color.primary)
                     Text("总评")
                         .font(.caption)
@@ -413,8 +414,8 @@ private struct ScoreRow: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
         .contentShape(.rect)
     }
 

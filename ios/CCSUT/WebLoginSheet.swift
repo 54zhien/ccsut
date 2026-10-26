@@ -88,6 +88,9 @@ struct WebLoginSheet: View {
         .ignoresSafeArea(.container)
         .tint(nil)
         .onAppear {
+            #if DEBUG
+            if InterfacePreview.enabled { loadPreview(); return }
+            #endif
             if ownsNavigation { start() }
             else { nav.recoverLoginPageIfNeeded(in: webView) }
         }
@@ -142,10 +145,24 @@ struct WebLoginSheet: View {
     }
 
     private func refresh() {
+        #if DEBUG
+        if InterfacePreview.enabled { loadPreview(); return }
+        #endif
         status = "加载认证页…"
         didPrepare = false
         nav.refresh(in: webView)
     }
+
+    #if DEBUG
+    private func loadPreview() {
+        webView.loadHTMLString("""
+        <!doctype html><html lang="zh"><head><meta name="viewport" content="width=device-width,initial-scale=1">
+        <style>:root{color-scheme:light dark}body{font-family:system-ui;margin:0;padding:140px 28px;background:Canvas;color:CanvasText}
+        h1{font-size:28px}p{font-size:16px;line-height:1.7;opacity:.65}</style></head>
+        <body><h1>统一身份认证</h1><p>此页面用于检查网页登录控件的布局。<br>未连接学校服务器。</p></body></html>
+        """, baseURL: nil)
+    }
+    #endif
 
     private func openCurrentURLInSafari() {
         guard let url = currentURL else { return }
