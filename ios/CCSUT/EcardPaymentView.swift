@@ -270,12 +270,12 @@ struct EcardPaymentView: View {
     private var amountSelection: some View {
         CampusSection("缴费金额") {
                 HStack(spacing: 6) {
-                    Text("¥").font(.title2.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
+                    Text("¥").font(.system(size: 22, weight: .semibold)).foregroundStyle(.white.opacity(0.7))
                         .padding(.trailing, 4).accessibilityHidden(true)
                     amountDrum(place: 100, label: "百位")
                     amountDrum(place: 10, label: "十位")
                     amountDrum(place: 1, label: "个位")
-                    Text("元").font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.7))
+                    Text("元").font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.7))
                         .padding(.leading, 4).accessibilityHidden(true)
                 }
                 .padding(12)
@@ -316,7 +316,7 @@ struct EcardPaymentView: View {
             }
         }
         .pickerStyle(.wheel).labelsHidden()
-        .frame(maxWidth: .infinity).frame(height: textSize.isAccessibilitySize ? 160 : 132)
+        .frame(minWidth: 44, maxWidth: .infinity).frame(height: textSize.isAccessibilitySize ? 160 : 132)
         .clipped().environment(\.colorScheme, .dark)
         .background(.white.opacity(0.04), in: .rect(cornerRadius: 12))
         .overlay {

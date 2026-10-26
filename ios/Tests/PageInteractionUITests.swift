@@ -313,13 +313,39 @@ final class PageInteractionUITests: XCTestCase {
 
     func testCampusElectricityAmountSelection() {
         let app = launch("campus-electricity")
-        let amount = app.textFields["缴费金额，单位元"]
-        XCTAssertTrue(amount.waitForExistence(timeout: 8))
+        let hundreds = app.pickerWheels.element(boundBy: 0)
+        XCTAssertTrue(hundreds.waitForExistence(timeout: 8))
+        if !hundreds.isHittable { app.swipeUp() }
+        XCTAssertEqual(app.pickerWheels.count, 3)
         XCTAssertTrue(app.staticTexts["剩余金额"].exists)
-        app.buttons["50 元"].tap()
-        XCTAssertEqual(amount.value as? String, "50")
+        hundreds.adjust(toPickerWheelValue: "4")
+        let tens = app.pickerWheels.element(boundBy: 1)
+        let ones = app.pickerWheels.element(boundBy: 2)
+        XCTAssertEqual(hundreds.value as? String, "4")
+        XCTAssertEqual(tens.value as? String, "0")
+        XCTAssertEqual(ones.value as? String, "0")
+        hundreds.adjust(toPickerWheelValue: "3")
+        tens.adjust(toPickerWheelValue: "9")
+        ones.adjust(toPickerWheelValue: "9")
+        XCTAssertEqual(hundreds.value as? String, "3")
+        XCTAssertEqual(tens.value as? String, "9")
+        XCTAssertEqual(ones.value as? String, "9")
         XCTAssertFalse(app.buttons["立即缴费"].isEnabled, "Synthetic previews must never enable a real payment")
         capture(app, "campus-electricity-amount")
+    }
+
+    func testDetailTabsHideAndReturnWithHome() {
+        let app = launch("academic")
+        let scores = app.buttons["academic-scores"]
+        XCTAssertTrue(scores.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.firstMatch.exists)
+        scores.tap()
+        let back = app.buttons["返回"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.tabBars.firstMatch.isHittable)
+        back.tap()
+        XCTAssertTrue(scores.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.firstMatch.exists)
     }
 
     func testPaymentRecoveryEntry() {
@@ -464,7 +490,7 @@ final class PageInteractionUITests: XCTestCase {
             var referenceScroll = CGRect.zero
             for legacy in [true, false] {
                 let app = launch(page, legacyBlur: legacy)
-                let control = app.buttons[page == "schedule" || page == "academic" ? "账号" : "返回教务"]
+                let control = app.buttons[page == "schedule" || page == "academic" ? "账号" : "返回"]
                 XCTAssertTrue(control.waitForExistence(timeout: 5))
                 XCTAssertTrue(control.isHittable, "The blur must not block the top control")
                 let scroll = app.scrollViews.firstMatch
@@ -564,7 +590,7 @@ final class PageInteractionUITests: XCTestCase {
             let entry = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
             XCTAssertTrue(entry.waitForExistence(timeout: 5))
             entry.tap()
-            let back = app.buttons["返回教务"]
+            let back = app.buttons["返回"]
             XCTAssertTrue(back.waitForExistence(timeout: 5))
             XCTAssertLessThan(back.frame.midX, app.frame.width * 0.25)
             capture(app, "academic-\(title)")
@@ -581,7 +607,7 @@ final class PageInteractionUITests: XCTestCase {
             let entry = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
             XCTAssertTrue(entry.waitForExistence(timeout: 5))
             entry.tap()
-            XCTAssertTrue(app.buttons["返回教务"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["返回"].waitForExistence(timeout: 5))
             let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.45))
             let destination = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.45))
             edge.press(forDuration: 0.05, thenDragTo: destination)
@@ -600,7 +626,7 @@ final class PageInteractionUITests: XCTestCase {
             let entry = app.buttons["academic-\(page)"]
             XCTAssertTrue(entry.waitForExistence(timeout: 5))
             entry.tap()
-            let back = app.buttons["返回教务"]
+            let back = app.buttons["返回"]
             XCTAssertTrue(back.waitForExistence(timeout: 5))
             // The cold simulator can expose the back button before the page's
             // loading branch and native appearance transition have settled.
@@ -646,13 +672,13 @@ final class PageInteractionUITests: XCTestCase {
 
     func testAcademicDetailSupportsContentSwipeBack() {
         let app = launch("scores", longList: true)
-        XCTAssertTrue(app.buttons["返回教务"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["返回"].waitForExistence(timeout: 5))
         let header = app.descendants(matching: .any).matching(identifier: "term-header-2026-2027-1").firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 5))
         app.swipeUp()
         XCTAssertTrue(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value == 'floating'"), evaluatedWith: header)], timeout: 5) == .completed,
                       "Native content-pop recognition must not steal a vertical scroll")
-        XCTAssertTrue(app.buttons["返回教务"].isHittable)
+        XCTAssertTrue(app.buttons["返回"].isHittable)
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: 0.45))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.45))
         start.press(forDuration: 0.1, thenDragTo: end)
@@ -903,7 +929,7 @@ final class PageInteractionUITests: XCTestCase {
         capture(app, "score-breakdown-expanded")
         disclosure.tap()
         XCTAssertFalse(app.staticTexts["平时(40%)"].exists)
-        app.buttons["返回教务"].tap()
+        app.buttons["返回"].tap()
         XCTAssertEqual(app.buttons["academic-scores"].label, "成绩查询")
         XCTAssertEqual(app.buttons["academic-exams"].label, "考试安排")
         XCTAssertEqual(app.buttons["academic-electives"].label, "选课")
@@ -912,16 +938,16 @@ final class PageInteractionUITests: XCTestCase {
     func testSemesterMenusReachHistoricalContent() {
         for (page, course) in [("scores", "历史学期课程"), ("exams", "历史学期考试")] {
             let app = launch(page, longList: true)
-            let menu = app.buttons.matching(identifier: "academic-term-jump-menu").firstMatch
+            let menu = app.buttons[page == "scores" ? "score-term-filter" : "exam-term-filter"]
             XCTAssertTrue(menu.waitForExistence(timeout: 5))
             menu.tap()
-            let target = app.buttons["academic-term-jump-2025-2026-2"]
+            let target = app.buttons["2025–2026 学年 · 第二学期"]
             XCTAssertTrue(target.waitForExistence(timeout: 3))
             target.tap()
             let historical = app.staticTexts[course]
             XCTAssertTrue(historical.waitForExistence(timeout: 3))
             XCTAssertTrue(historical.isHittable)
-            XCTAssertTrue(app.buttons["返回教务"].isHittable)
+            XCTAssertTrue(app.buttons["返回"].isHittable)
             capture(app, "semester-jump-\(page)")
             app.terminate()
         }
@@ -962,7 +988,7 @@ final class PageInteractionUITests: XCTestCase {
 
         for page in ["schedule", "scores", "exams"] {
             let app = launch(page, longList: page == "exams", largeText: true)
-            let control = page == "schedule" ? app.buttons["本周"] : app.buttons["返回教务"]
+            let control = page == "schedule" ? app.buttons["本周"] : app.buttons["返回"]
             XCTAssertTrue(control.waitForExistence(timeout: 5))
             XCTAssertTrue(control.isHittable)
             capture(app, "large-text-\(page)")
@@ -978,10 +1004,10 @@ final class PageInteractionUITests: XCTestCase {
                 XCTAssertTrue(detail.waitForExistence(timeout: 3))
                 capture(app, "large-text-score-details")
 
-                let menu = app.buttons.matching(identifier: "academic-term-jump-menu").firstMatch
+                let menu = app.buttons[page == "scores" ? "score-term-filter" : "exam-term-filter"]
                 XCTAssertTrue(reveal(menu, in: app, movingForward: false), "Large-text semester menu must be reachable")
                 menu.tap()
-                let target = app.buttons["academic-term-jump-2025-2026-2"]
+                let target = app.buttons["2025–2026 学年 · 第二学期"]
                 XCTAssertTrue(target.waitForExistence(timeout: 5))
                 XCTAssertTrue(target.isHittable)
                 target.tap()
@@ -990,17 +1016,17 @@ final class PageInteractionUITests: XCTestCase {
                 XCTAssertTrue(historical.isHittable, "Historical score must be visible after the large-text jump")
                 capture(app, "large-text-scores-historical-term")
             } else if page == "exams" {
-                let menu = app.buttons.matching(identifier: "academic-term-jump-menu").firstMatch
+                let menu = app.buttons[page == "scores" ? "score-term-filter" : "exam-term-filter"]
                 XCTAssertTrue(reveal(menu, in: app, movingForward: true), "Large-text exam semester menu must be reachable")
                 menu.tap()
-                let target = app.buttons["academic-term-jump-2025-2026-2"]
+                let target = app.buttons["2025–2026 学年 · 第二学期"]
                 XCTAssertTrue(target.waitForExistence(timeout: 5))
                 XCTAssertTrue(target.isHittable)
                 target.tap()
                 let historical = app.staticTexts["历史学期考试"]
                 XCTAssertTrue(historical.waitForExistence(timeout: 5))
                 XCTAssertTrue(historical.isHittable, "Historical exam must be visible after the large-text jump")
-                let examDay = app.staticTexts.matching(NSPredicate(format: "label == %@ OR label == %@", "20", "20日")).firstMatch
+                let examDay = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "考试日期", "6月20日")).firstMatch
                 XCTAssertTrue(examDay.waitForExistence(timeout: 5))
                 XCTAssertTrue(examDay.isHittable, "Historical ExamRow date rail must be visible at large text")
                 capture(app, "large-text-exams-historical-date-rail")
