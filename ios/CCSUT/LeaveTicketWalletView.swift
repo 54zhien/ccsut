@@ -156,10 +156,13 @@ struct LeaveTicketWalletView: View {
         }
         if let id = pending.consume(candidates) {
             receipt = nil
-            if !reduceMotion { printing = model.leave.items.first { $0.id == id } }
-            #if DEBUG
-            else { previewPrints += 1 }
-            #endif
+            if !reduceMotion {
+                printing = model.leave.items.first { $0.id == id }
+            } else {
+                #if DEBUG
+                previewPrints += 1
+                #endif
+            }
         }
     }
 }
