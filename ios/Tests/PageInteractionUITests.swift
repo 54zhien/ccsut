@@ -68,7 +68,16 @@ private struct RefreshObservationPoll {
 }
 
 final class PageInteractionUITests: XCTestCase {
-    override func setUp() { continueAfterFailure = false }
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+    }
+
+    override func tearDown() {
+        XCUIDevice.shared.orientation = .portrait
+        super.tearDown()
+    }
 
     func testCompleteSelectedIncludesClosedBatch() {
         let app = launch("electives", arguments:["--preview-complete-selected"])
@@ -398,20 +407,35 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     private func revealMeterControl(_ control: XCUIElement, in app: XCUIApplication, upwards: Bool = true) {
-        for _ in 0..<8 where !control.isHittable {
+        func visibleBounds() -> CGRect {
+            var bounds = app.windows.firstMatch.frame.insetBy(dx: 4, dy: 4)
+            let back = app.buttons["返回"]
+            if back.exists && back.isHittable {
+                let top = max(bounds.minY, back.frame.maxY + 4)
+                bounds = CGRect(x: bounds.minX, y: top, width: bounds.width, height: max(0, bounds.maxY - top))
+            }
+            return bounds
+        }
+        func fullyVisible() -> Bool {
+            control.isHittable && visibleBounds().contains(control.frame)
+        }
+        for _ in 0..<8 where !fullyVisible() {
             // Scroll on the housing edge, away from the adjustable thumbwheels.
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: upwards ? 0.75 : 0.25))
-            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: upwards ? 0.25 : 0.75))
+            let bounds = visibleBounds()
+            let moveUp = control.frame.maxY > bounds.maxY ? true : control.frame.minY < bounds.minY ? false : upwards
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: moveUp ? 0.75 : 0.25))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: moveUp ? 0.25 : 0.75))
             start.press(forDuration: 0.05, thenDragTo: end)
         }
-        XCTAssertTrue(control.isHittable)
+        XCTAssertTrue(fullyVisible(), "The complete control must be visible before tapping: control=\(control.frame), visible=\(visibleBounds())")
     }
 
     func testPhysicalMeterAdaptiveControls() {
         defer { XCUIDevice.shared.orientation = .portrait }
         for large in [false, true] {
             XCUIDevice.shared.orientation = .portrait
-            let app = launch("campus-electricity", largeText: large)
+            let app = launch("campus-electricity", largeText: large,
+                             arguments: large ? ["--preview-long-balance"] : [])
             if !large {
                 XCUIDevice.shared.orientation = .landscapeLeft
                 let landscape = NSPredicate { _, _ in app.windows.firstMatch.frame.width > app.windows.firstMatch.frame.height }
@@ -425,6 +449,14 @@ final class PageInteractionUITests: XCTestCase {
             XCTAssertTrue(building.waitForExistence(timeout: 8))
             revealMeterControl(building, in: app)
             screen("physical-meter-top-\(large ? "large" : "landscape")")
+            if large {
+                let balance = app.descendants(matching: .any).matching(
+                    NSPredicate(format: "label == %@ AND value == %@", "剩余金额", "123456.78 元")).firstMatch
+                revealMeterControl(balance, in: app)
+                XCTAssertGreaterThanOrEqual(balance.frame.minX, app.windows.firstMatch.frame.minX)
+                XCTAssertLessThanOrEqual(balance.frame.maxX, app.windows.firstMatch.frame.maxX)
+                screen("physical-meter-long-balance-large")
+            }
             let increase = app.buttons["meter-digit-1-increase"]
             revealMeterControl(increase, in: app)
             XCTAssertGreaterThanOrEqual(increase.frame.height, 44)
@@ -461,8 +493,9 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertEqual(building.value as? String, beforeTurn, "A single-option selector stops at its boundary")
         let pay = app.buttons["立即缴费"]
         XCTAssertTrue(pay.isHittable, "The standard meter opens with its embedded payment key visible")
-        XCTAssertLessThanOrEqual(pay.frame.maxY, app.windows.firstMatch.frame.maxY,
-                                "The initial viewport must show the whole payment key")
+        XCTAssertGreaterThanOrEqual(pay.frame.height, 44)
+        XCTAssertTrue(app.windows.firstMatch.frame.insetBy(dx: 4, dy: 4).contains(pay.frame),
+                      "The initial viewport must show the whole payment key before scrolling")
         capture(app, "physical-meter-initial-viewport")
         revealMeterControl(app.buttons["立即缴费"], in: app)
         XCTAssertTrue(back.isHittable)

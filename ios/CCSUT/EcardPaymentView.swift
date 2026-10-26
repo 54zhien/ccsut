@@ -25,7 +25,8 @@ struct EcardPaymentView: View {
             value.rooms = [option("101 室", "preview-room")]; value.room = "preview-room"
             value.amountText = "50"
             let context = MeterContext()
-            value.detail = MeterDetail(context: context, show: ["房间信息": "示例宿舍 1 栋 · 101 室", "表类型": "电表", "剩余金额": "36.80"], dataType: nil)
+            let previewBalance = ProcessInfo.processInfo.arguments.contains("--preview-long-balance") ? "123456.78" : "36.80"
+            value.detail = MeterDetail(context: context, show: ["房间信息": "示例宿舍 1 栋 · 101 室", "表类型": "电表", "剩余金额": previewBalance], dataType: nil)
             if InterfacePreview.page.hasPrefix("campus-electricity-recovery") {
                 switch InterfacePreview.page {
                 case "campus-electricity-recovery-read": value.recoveryIssue = .readUnavailable
@@ -678,16 +679,17 @@ struct EcardPaymentView: View {
     private func balance(_ detail: MeterDetail) -> some View {
         let rawValue = detail.show["剩余金额"] ?? "—"
         let valueInk = (detail.remainingAmount ?? 0) < 0 ? Color(red: 0.98, green: 0.48, blue: 0.38) : counterInk
-        return HStack(alignment: .firstTextBaseline, spacing: 5) {
+        return ViewThatFits(in: .horizontal) {
             if MechanicalBalanceCounter.canRender(rawValue) {
-                MechanicalBalanceCounter(value: rawValue, ink: valueInk)
-                Text("元").font(.caption.weight(.medium)).foregroundStyle(counterInk.opacity(0.78))
-            } else {
-                Text(rawValue)
-                    .font(.system(.title2, design: .rounded, weight: .semibold).monospacedDigit())
-                    .lineLimit(1).minimumScaleFactor(0.45).foregroundStyle(valueInk)
-                Text("元").font(.caption.weight(.medium)).foregroundStyle(counterInk.opacity(0.78))
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    MechanicalBalanceCounter(value: rawValue, ink: valueInk)
+                    Text("元").font(.caption.weight(.medium)).foregroundStyle(counterInk.opacity(0.78))
+                }
+                .fixedSize(horizontal: true, vertical: false)
             }
+            Text("\(rawValue) 元")
+                .font(.system(.title2, design: .rounded, weight: .semibold).monospacedDigit())
+                .lineLimit(1).minimumScaleFactor(0.45).foregroundStyle(valueInk)
         }
         .frame(maxWidth: .infinity, minHeight: 43, alignment: .center)
         .padding(.horizontal, 6).padding(.vertical, 3)
