@@ -815,12 +815,12 @@ final class PageInteractionUITests: XCTestCase {
             case "exams": anchor = app.staticTexts.matching(identifier: "机械设计基础").firstMatch
             case "electives": anchor = app.textFields["课程名 / 教师"]
             case "academic": anchor = app.buttons["academic-scores"]
-            case "campus-leave": anchor = app.buttons["申请请假"]
+            case "campus-leave": anchor = app.buttons["leave-wallet-toggle"]
             default: anchor = app.segmentedControls.firstMatch
             }
             XCTAssertTrue(anchor.waitForExistence(timeout: 8), page)
             if page == "campus-leave" {
-                XCTAssertTrue(app.staticTexts["示例请假记录"].waitForExistence(timeout: 8))
+                XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value == %@", "1 张请假条"), evaluatedWith: anchor)], timeout: 8), .completed)
             } else if page == "campus-travel" {
                 XCTAssertTrue(app.staticTexts["示例区县"].waitForExistence(timeout: 8))
             }
