@@ -9,6 +9,10 @@ on:
         description: '构建备注'
         required: false
         default: ''
+      login_probe_only:
+        description: 'Run only the focused production login independence regression'
+        type: boolean
+        default: false
 
 concurrency:
   group: ios-build-${{ github.ref }}
@@ -41,11 +45,32 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version || echo "仍无 iOS SDK"
 
       - name: Show project
+        if: ${{ !inputs.login_probe_only }}
         working-directory: ios
         run: |
           xcodebuild -project CCSUT.xcodeproj -list || true
 
+      - name: Verify login independently of elective availability
+        if: ${{ inputs.login_probe_only }}
+        run: |
+          set -o pipefail
+          xcrun swiftc -parse-as-library \
+            ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift \
+            ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift \
+            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift \
+            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift \
+            ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift \
+            ios/Tests/LoginSelectionClosureTests.swift -o "$RUNNER_TEMP/login-tests"
+          "$RUNNER_TEMP/login-tests" 2>&1 | tee "$RUNNER_TEMP/login-tests.log"
+      - name: Upload focused login evidence
+        if: ${{ always() && inputs.login_probe_only }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: login-independence-evidence
+          path: ${{ runner.temp }}/login-tests.log
+          if-no-files-found: ignore
       - name: Build (unsigned)
+        if: ${{ !inputs.login_probe_only }}
         working-directory: ios
         run: |
           set -o pipefail
@@ -65,7 +90,7 @@ jobs:
         continue-on-error: false
 
       - name: Package unsigned IPA
-        if: success()
+        if: ${{ success() && !inputs.login_probe_only }}
         run: |
           APP="$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos/CCSUT.app"
           if [ ! -d "$APP" ]; then
@@ -90,7 +115,7 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist"
 
       - name: Upload IPA
-        if: success()
+        if: ${{ success() && !inputs.login_probe_only }}
         uses: actions/upload-artifact@v4
         with:
           name: CCSUT-ipa
@@ -99,7 +124,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload build log on failure
-        if: failure()
+        if: ${{ failure() && !inputs.login_probe_only }}
         uses: actions/upload-artifact@v4
         with:
           name: build-log
