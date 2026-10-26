@@ -19,12 +19,14 @@ import ImageIO
     @State private var reviewControlHeight: CGFloat = 0
     @State private var confirmationCornerRadius: CGFloat = 0
     @State private var confirmationControlHeight: CGFloat = 0
+    @State private var leaveReceipt: LeaveTicketReceipt?
     @FocusState private var focusedPhone: String?
     @ScaledMetric private var editorHeight: CGFloat = 108
     @ScaledMetric private var shortEditorHeight: CGFloat = 44
     private let onSubmitted: () -> Void
+    private let onLeaveSubmitted: ((LeaveTicketReceipt) -> Void)?
 
-    init(kind: CampusFormKind, account: String, onSubmitted: @escaping () -> Void = {}) {
+    init(kind: CampusFormKind, account: String, onSubmitted: @escaping () -> Void = {}, onLeaveSubmitted: ((LeaveTicketReceipt) -> Void)? = nil) {
         let api: any CampusFormServing
         let formAccount: String
         #if DEBUG
@@ -37,6 +39,7 @@ import ImageIO
         #endif
         _model = State(initialValue: CampusFormModel(kind: kind, account: formAccount, api: api, currentGeneration: { CookieJar.generation }))
         self.onSubmitted = onSubmitted
+        self.onLeaveSubmitted = onLeaveSubmitted
     }
 
     var body: some View {
@@ -115,6 +118,11 @@ import ImageIO
     }
 
     private var presentsStatus: Bool { model.state == .submitted || model.configuration == nil }
+    private func reportLeaveSuccess() {
+        guard model.state == .submitted, let receipt = leaveReceipt else { return }
+        leaveReceipt = nil
+        onLeaveSubmitted?(receipt)
+    }
 
     @ViewBuilder private var content: some View {
         if model.state == .submitted {
@@ -319,7 +327,7 @@ import ImageIO
         // Fit only action labels; retain Dynamic Type throughout the form.
         // https://developer.apple.com/documentation/swiftui/view/minimumscalefactor(_:)
         if model.state == .unknown {
-            Button { Task { await model.checkResult() } } label: {
+            Button { Task { await model.checkResult(); reportLeaveSuccess() } } label: {
                 HStack {
                     if model.isChecking { ProgressView() }
                     Text("查询提交结果").lineLimit(1).minimumScaleFactor(0.5)
@@ -407,7 +415,17 @@ import ImageIO
                 }
                 .scrollEdgeEffectHidden(true, for: .top)
                 .safeAreaInset(edge: .bottom, alignment: .leading, spacing: 0) {
-                    Button { Task { await model.submit(snapshot) } } label: {
+                    Button {
+                        if model.kind == .leave {
+                            // Preserve the redacted receipt before submission clears the draft.
+                            leaveReceipt = LeaveTicketReceipt(
+                                baseline: snapshot.configuration.baselineRecordIDs,
+                                reason: CampusPrivacy.redact(snapshot.draft.reason),
+                                begin: LeaveTicketReceipt.timestamp(snapshot.draft.begin),
+                                end: LeaveTicketReceipt.timestamp(snapshot.draft.end))
+                        }
+                        Task { await model.submit(snapshot); reportLeaveSuccess() }
+                    } label: {
                         HStack {
                             if model.state == .submitting { ProgressView() }
                             Text(model.state == .submitting ? "正在提交…" : "确认提交")

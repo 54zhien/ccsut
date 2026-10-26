@@ -215,8 +215,10 @@ final class PageInteractionUITests: XCTestCase {
         }
         capture(app, "campus-home")
         app.buttons["campus-leave"].tap()
-        XCTAssertTrue(app.staticTexts["示例请假记录"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["申请请假"].exists)
+        XCTAssertTrue(app.buttons["leave-wallet-toggle"].waitForExistence(timeout: 5))
+        app.buttons["leave-wallet-toggle"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["leave-ticket-preview-leave"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["campus-record-add"].exists)
         capture(app, "campus-leave-records")
         app.terminate()
         app = launch("campus")
@@ -754,14 +756,86 @@ final class PageInteractionUITests: XCTestCase {
         }
     }
 
+    func testLeaveWalletOpenCloseAndCancel() {
+        let app = launch("campus-leave")
+        let toggle = app.buttons["leave-wallet-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        XCTAssertEqual(toggle.label, "打开票夹")
+        capture(app, "wallet-closed")
+        toggle.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["leave-ticket-preview-leave"].waitForExistence(timeout: 5))
+        capture(app, "wallet-open")
+        app.buttons["campus-record-add"].tap()
+        let close = app.buttons["关闭申请请假"]
+        XCTAssertTrue(close.waitForExistence(timeout: 8))
+        close.tap()
+        XCTAssertTrue(toggle.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.otherElements["leave-wallet-printing"].exists)
+        XCTAssertEqual(toggle.label, "收起票夹")
+        toggle.tap()
+        XCTAssertEqual(toggle.label, "打开票夹")
+        capture(app, "wallet-reclosed")
+    }
+
+    func testLeaveWalletPrintOnce() {
+        let app = launch("campus-leave", arguments: ["--preview-wallet-print"])
+        let submit = app.buttons["wallet-fixture-submit"]
+        XCTAssertTrue(submit.waitForExistence(timeout: 10))
+        if !submit.isHittable { app.swipeUp() }
+        submit.tap()
+        let completed = app.staticTexts["wallet-fixture-completions"]
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == %@", "完成 1"), evaluatedWith: completed)], timeout: 8), .completed)
+        capture(app, "wallet-after-print")
+        app.buttons["wallet-fixture-refresh"].tap()
+        XCTAssertEqual(completed.label, "完成 1")
+    }
+
+    func testLeaveWalletLargeText() {
+        let app = launch("campus-leave", largeText: true)
+        let toggle = app.buttons["leave-wallet-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        toggle.tap()
+        app.swipeUp()
+        XCTAssertTrue(app.buttons["campus-record-add"].isHittable)
+        capture(app, "wallet-large-text")
+    }
+
+    func testLeaveWalletManyAndEmpty() {
+        var app = launch("campus-leave", arguments: ["--preview-wallet-many"])
+        var toggle = app.buttons["leave-wallet-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        XCTAssertEqual(toggle.value as? String, "8 张请假条")
+        capture(app, "wallet-eight-closed")
+        toggle.tap()
+        app.swipeUp()
+        capture(app, "wallet-eight-expanded")
+        let last = app.descendants(matching: .any)["leave-ticket-wallet-7"]
+        for _ in 0..<10 {
+            if last.exists && last.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(last.exists)
+        app.terminate()
+        app = launch("campus-leave", empty: true)
+        toggle = app.buttons["leave-wallet-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        XCTAssertEqual(toggle.value as? String, "0 张请假条")
+        XCTAssertTrue(app.buttons["campus-record-add"].isEnabled)
+        capture(app, "wallet-empty")
+    }
+
     func testCampusRecordsSurviveFormDismissal() {
         for page in ["campus-leave", "campus-travel"] {
             let app = launch(page)
             let isLeave = page == "campus-leave"
-            let record = app.staticTexts[isLeave ? "示例请假记录" : "示例区县"]
+            if isLeave {
+                XCTAssertTrue(app.buttons["leave-wallet-toggle"].waitForExistence(timeout: 8))
+                app.buttons["leave-wallet-toggle"].tap()
+            }
+            let record = isLeave ? app.descendants(matching: .any)["leave-ticket-preview-leave"] : app.staticTexts["示例区县"]
             XCTAssertTrue(record.waitForExistence(timeout: 8))
             for _ in 0..<2 {
-                app.buttons[isLeave ? "申请请假" : "办理离校登记"].tap()
+                app.buttons[isLeave ? "campus-record-add" : "办理离校登记"].tap()
                 let close = app.buttons[isLeave ? "关闭申请请假" : "关闭离校登记"]
                 XCTAssertTrue(close.waitForExistence(timeout: 5))
                 close.tap()
@@ -1280,12 +1354,12 @@ final class PageInteractionUITests: XCTestCase {
             case "exams": anchor = app.staticTexts.matching(identifier: "机械设计基础").firstMatch
             case "electives": anchor = app.textFields["课程名 / 教师"]
             case "academic": anchor = app.buttons["academic-scores"]
-            case "campus-leave": anchor = app.buttons["申请请假"]
+            case "campus-leave": anchor = app.buttons["leave-wallet-toggle"]
             default: anchor = app.segmentedControls.firstMatch
             }
             XCTAssertTrue(anchor.waitForExistence(timeout: 8), page)
             if page == "campus-leave" {
-                XCTAssertTrue(app.staticTexts["示例请假记录"].waitForExistence(timeout: 8))
+                XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value == %@", "1 张请假条"), evaluatedWith: anchor)], timeout: 8), .completed)
             } else if page == "campus-travel" {
                 XCTAssertTrue(app.staticTexts["示例区县"].waitForExistence(timeout: 8))
             }

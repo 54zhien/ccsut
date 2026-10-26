@@ -15,8 +15,13 @@ struct CampusRecordsView: View {
     var body: some View {
         Group {
             if let model {
-                CampusRecordContent(model: model, mode: mode, account: session.studentId ?? "",
-                                    selected: $selectedKind) { reconnectRevision &+= 1 }
+                if mode == .leave {
+                    LeaveTicketWalletView(model: model, account: session.studentId ?? "")
+                        .id(Connection(account: session.studentId, generation: CookieJar.generation))
+                } else {
+                    CampusRecordContent(model: model, mode: mode, account: session.studentId ?? "",
+                                        selected: $selectedKind) { reconnectRevision &+= 1 }
+                }
             } else if accountError {
                 ContentUnavailableView {
                     Label("暂时无法读取校园记录", systemImage: "person.crop.circle.badge.exclamationmark")
@@ -25,8 +30,10 @@ struct CampusRecordsView: View {
                 PageLoadingState("正在连接校园服务…").frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(Color(.systemGroupedBackground))
-        .academicDetailChrome(title: mode == .leave ? "请假" : "节假日离返校")
+        .background { if mode == .leave { LeaveWalletBackground() } else { Color(.systemGroupedBackground) } }
+        .academicDetailChrome(title: mode == .leave ? "请假条票夹" : "节假日离返校",
+                              backgroundColor: mode == .leave ? .clear : Color(.systemGroupedBackground))
+        .background { if mode == .leave { LeaveWalletBackground() } }
         .task(id: ConnectionTask(connection: Connection(account: session.studentId, generation: CookieJar.generation), revision: reconnectRevision)) {
             let connection = Connection(account: session.studentId, generation: CookieJar.generation)
             // A dismissed form resumes the same account/session. Refresh its existing model
@@ -268,10 +275,15 @@ private actor CampusPreviewReader: CampusReading {
         if leaveReads > 1 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
             await PreviewRefreshCompletionGate.shared.waitForRelease()
         }
-        if InterfacePreview.emptyPage {
-            return try CampusDecoder.leavePage(Data("""
-            {"data":{"list":[],"pageNum":1,"pageSize":20,"total":0,"hasNextPage":false}}
-            """.utf8))
+        if ProcessInfo.processInfo.arguments.contains("--preview-wallet-many") || ProcessInfo.processInfo.arguments.contains("--preview-empty") {
+            let count = ProcessInfo.processInfo.arguments.contains("--preview-empty") ? 0 : 8
+            let list: [[String: Any]] = (0..<count).map { index in
+                ["id": "wallet-\(index)", "leaveTypeName": index % 2 == 0 ? "事假" : "病假",
+                 "beginTime": "2026-10-01 08:00", "endTime": "2026-10-02 18:00", "leaveDay": 2,
+                 "status": 0, "reason": "示例请假条 \(index + 1) · 用于确认票夹展开后的排列与长文字换行，不包含真实学生信息。"]
+            }
+            let payload: [String: Any] = ["data": ["list": list, "pageNum": 1, "pageSize": 20, "total": count, "hasNextPage": false]]
+            return try CampusDecoder.leavePage(JSONSerialization.data(withJSONObject: payload))
         }
         return try CampusDecoder.leavePage(Data("""
         {"data":{"list":[{"id":"preview-leave","leaveTypeName":"事假","beginTime":"2026-10-01 08:00",

@@ -170,6 +170,7 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
 private struct AcademicDetailChrome<Actions: View>: ViewModifier {
     let title: String
     @ViewBuilder let actions: () -> Actions
+    var backgroundColor: Color = Color(.systemGroupedBackground)
     #if DEBUG
     @State private var transitionDrift: CGFloat = 0
     @State private var transitionSamples = 0
@@ -204,7 +205,7 @@ private struct AcademicDetailChrome<Actions: View>: ViewModifier {
                     .padding(.horizontal, 16)
                     .padding(.vertical, NagiPageHeaderMetrics.verticalPadding)
                 }
-            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .background(backgroundColor.ignoresSafeArea())
             .navigationTitle(title)
             .background { AcademicPopSupport() }
             .background {
@@ -240,8 +241,8 @@ extension View {
         modifier(NagiTopBar(bar: content()))
     }
 
-    func academicDetailChrome(title: String) -> some View {
-        modifier(AcademicDetailChrome(title: title, actions: { EmptyView() }))
+    func academicDetailChrome(title: String, backgroundColor: Color = Color(.systemGroupedBackground)) -> some View {
+        modifier(AcademicDetailChrome(title: title, actions: { EmptyView() }, backgroundColor: backgroundColor))
     }
 
     func academicDetailChrome<Actions: View>(title: String, @ViewBuilder actions: @escaping () -> Actions) -> some View {
