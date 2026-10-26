@@ -5,27 +5,52 @@ struct EnrolledCourseCard: View {
     let record: EnrolledCourse
 
     var body: some View {
-        VStack(alignment:.leading,spacing:12) {
-            HStack(alignment:.top,spacing:8) {
-                Text(record.kcmc ?? "—").font(.headline).lineLimit(2)
-                Spacer(minLength:4)
-                Text("\(record.xf ?? "—") 学分").font(.caption).foregroundStyle(.tint)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Text(record.kcmc ?? "—")
+                    .font(.headline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Text("\(record.xf ?? "—") 学分")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color.accentColor.opacity(0.1), in: .capsule)
             }
             if let teacher = record.rkjs, !teacher.isEmpty {
-                Label(teacher,systemImage:"person.fill").font(.caption).foregroundStyle(.secondary)
+                Label(teacher, systemImage: "person.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let schedule = record.sksjdd, !schedule.isEmpty {
-                Label(schedule,systemImage:"clock.fill").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Label(schedule, systemImage: "clock.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            HStack {
-                Text(record.xkfs == "选课" ? "自主选课" : record.xkfs ?? "来源待核实")
-                Spacer(minLength:8)
-                Text(record.studyStatus).foregroundStyle(record.xdfs == "1" ? Color.green : Color.secondary)
-            }.font(.caption)
+            Divider()
+            HStack(alignment: .center, spacing: 10) {
+                Label(record.xkfs == "选课" ? "自主选课" : record.xkfs ?? "来源待核实",
+                      systemImage: record.xkfs == "选课" ? "checkmark.circle" : "info.circle")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Text(record.studyStatus)
+                    .fontWeight(.medium)
+                    .foregroundStyle(record.xdfs == "1" ? Color.green : Color.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background((record.xdfs == "1" ? Color.green : Color.secondary).opacity(0.1),
+                                in: .capsule)
+            }
+            .font(.caption)
         }
-        .padding(16).frame(maxWidth:.infinity,alignment:.leading)
-        .background(Color(.secondarySystemGroupedBackground),in:.rect(cornerRadius:26))
-        .accessibilityElement(children:.contain)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("enrolled-course-\(record.id)")
     }
 }

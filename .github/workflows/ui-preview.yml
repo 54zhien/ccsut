@@ -21,6 +21,10 @@ on:
         description: 'Optional source revision for the focused appearance comparison'
         type: string
         default: ''
+      appearance_pages:
+        description: 'Space-separated preview pages for appearance-screens only'
+        type: string
+        default: 'schedule academic campus scores'
       blur_diagnostics:
         description: 'Run the three failed checks in legacy mode and render both blur versions'
         type: boolean
@@ -167,19 +171,31 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/legacy-blur-test.log"
       - name: Render focused appearance comparison
         if: ${{ inputs.test_scope == 'appearance-screens' && steps.simulator.conclusion == 'success' }}
+        env:
+          APPEARANCE_PAGES: ${{ inputs.appearance_pages || 'schedule academic campus scores' }}
         run: |
           set -euo pipefail
           OUT="$RUNNER_TEMP/ui-screenshots"
           git rev-parse HEAD > "$OUT/source-revision.txt"
-          for PAGE in schedule academic campus scores; do
+          read -r -a PAGES <<< "$APPEARANCE_PAGES"
+          for PAGE in "${PAGES[@]}"; do
+            case "$PAGE" in
+              *[!a-z-]*|'') echo "Invalid preview page"; exit 1 ;;
+            esac
+            LAUNCH_PAGE="$PAGE"
+            EXTRA_ARGS=()
+            if [ "$PAGE" = 'electives-selected' ]; then
+              LAUNCH_PAGE='electives'
+              EXTRA_ARGS=(--preview-complete-selected --preview-selected-tab)
+            fi
             xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
-            xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$PAGE"
+            xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$LAUNCH_PAGE" "${EXTRA_ARGS[@]}"
             sleep 3
             xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$OUT/$PAGE-light.png"
             xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance dark
             sleep 3
             xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$OUT/$PAGE-dark-live.png"
-            xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$PAGE"
+            xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut --preview-ui --preview-page "$LAUNCH_PAGE" "${EXTRA_ARGS[@]}"
             sleep 3
             xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$OUT/$PAGE-dark.png"
           done

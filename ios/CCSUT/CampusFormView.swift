@@ -37,8 +37,6 @@ import ImageIO
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                SheetHeader(title: model.kind.title) { dismiss() }
-                    .disabled(model.state == .submitting)
                 if model.state == .loading {
                     VStack(spacing: 14) {
                         ProgressView().accessibilityIdentifier("campus-form-loading-indicator")
@@ -55,7 +53,7 @@ import ImageIO
                             .frame(maxWidth: 720).frame(maxWidth: .infinity)
                         }
                         .scrollDismissesKeyboard(.interactively)
-                        .scrollEdgeEffectStyle(.soft, for: .top)
+                        .scrollEdgeEffectHidden(true, for: .top)
                         .disabled(model.state == .submitting || model.state == .unknown)
                         .onChange(of: activeEditor) { _, value in
                             if let value { proxy.scrollTo(value, anchor: .center) }
@@ -70,15 +68,25 @@ import ImageIO
                 }
             }
             .background(Color(.systemGroupedBackground))
+            .overlay(alignment: .top) { topBarMaterial }
             .safeAreaInset(edge: .bottom, spacing: 0) { if model.state != .loading { footer } }
-            .toolbar(.hidden, for: .navigationBar)
+            .navigationTitle(model.kind.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(role: .close) { dismiss() }
+                    .accessibilityLabel("关闭\(model.kind.title)")
+                    .accessibilityIdentifier("campus-form-close")
+                    .disabled(model.state == .submitting)
+                }
                 ToolbarItemGroup(placement: .keyboard) { Spacer(); Button("完成") { endEditing() } }
             }
         }
         .environment(\.timeZone, TimeZone(identifier: "Asia/Shanghai")!)
         .environment(\.locale, Locale(identifier: "zh_CN"))
         .presentationDetents([.large])
+        .presentationSizing(.page)
         .interactiveDismissDisabled(model.state == .submitting)
         .sheet(item: $model.confirmation) { confirmation($0) }
         .fileImporter(isPresented: $importingFile, allowedContentTypes: [.item]) { importFile($0) }
@@ -245,39 +253,36 @@ import ImageIO
     }
 
     @ViewBuilder private var footer: some View {
-        CampusActionDock {
-            VStack(alignment: .leading, spacing: 10) {
-                if let error = model.error {
-                    Text(error).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("campus-form-error")
-                    if error == CampusError.authentication.localizedDescription {
-                        Button("重新认证") { Task { await session.refresh(); await model.load() } }
-                    }
-                }
-                if model.needsReload && model.state == .editing {
-                    Button("刷新配置并保留填写内容") { Task { await model.load(preservingDraft: true) } }
-                        .accessibilityIdentifier("campus-form-reload")
-                }
-                if model.state == .unknown {
-                    Button { Task { await model.checkResult() } } label: {
-                        HStack { if model.isChecking { ProgressView() }; Text("查询提交结果") }.frame(maxWidth: .infinity, minHeight: 44)
-                    }.buttonStyle(.glassProminent).campusActionControl().disabled(model.isChecking)
-                } else if model.state == .submitted {
-                    Button("完成") { onSubmitted(); dismiss() }.frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.glassProminent).campusActionControl()
-                } else if model.configuration != nil {
-                    Button { endEditing(); model.prepareConfirmation() } label: {
-                        Text("核对并提交").frame(maxWidth: .infinity, minHeight: 44)
-                    }.buttonStyle(.glassProminent).campusActionControl().disabled(!model.canReview || isImporting || isLocating)
-                        .accessibilityIdentifier("campus-form-review")
+        VStack(alignment: .leading, spacing: 10) {
+            if let error = model.error {
+                Text(error).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("campus-form-error")
+                if error == CampusError.authentication.localizedDescription {
+                    Button("重新认证") { Task { await session.refresh(); await model.load() } }
                 }
             }
-            .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
+            if model.needsReload && model.state == .editing {
+                Button("刷新配置并保留填写内容") { Task { await model.load(preservingDraft: true) } }
+                    .accessibilityIdentifier("campus-form-reload")
+            }
+            if model.state == .unknown {
+                Button { Task { await model.checkResult() } } label: {
+                    HStack { if model.isChecking { ProgressView() }; Text("查询提交结果") }.frame(maxWidth: .infinity, minHeight: 44)
+                }.buttonStyle(.glassProminent).campusActionControl().disabled(model.isChecking)
+            } else if model.state == .submitted {
+                Button("完成") { onSubmitted(); dismiss() }.frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.glassProminent).campusActionControl()
+            } else if model.configuration != nil {
+                Button { endEditing(); model.prepareConfirmation() } label: {
+                    Text("核对并提交").frame(maxWidth: .infinity, minHeight: 44)
+                }.buttonStyle(.glassProminent).campusActionControl().disabled(!model.canReview || isImporting || isLocating)
+                    .accessibilityIdentifier("campus-form-review")
+            }
         }
+        .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
     }
 
     private func confirmation(_ snapshot: CampusSubmission) -> some View {
-        VStack(spacing: 0) {
-            SheetHeader(title: "核对申请") { model.confirmation = nil }.disabled(model.state == .submitting)
+        NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     CampusSection("申请内容") {
@@ -341,16 +346,39 @@ import ImageIO
                     Text("确认后将提交学校审核。").font(.footnote).foregroundStyle(.secondary)
                 }.padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
             }
-            CampusActionDock {
+            .scrollEdgeEffectHidden(true, for: .top)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 Button { Task { await model.submit(snapshot) } } label: {
                     HStack { if model.state == .submitting { ProgressView() }; Text(model.state == .submitting ? "正在提交…" : "确认提交") }
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }.buttonStyle(.glassProminent).campusActionControl().padding(16).disabled(model.state == .submitting)
                     .accessibilityIdentifier("campus-form-confirm")
             }
+            .background(Color(.systemGroupedBackground))
+            .overlay(alignment: .top) { topBarMaterial }
+            .navigationTitle("核对申请")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(role: .close) { model.confirmation = nil }
+                    .accessibilityLabel("关闭核对申请")
+                    .accessibilityIdentifier("campus-form-confirm-close")
+                    .disabled(model.state == .submitting)
+                }
+            }
         }
         .background(Color(.systemGroupedBackground))
-        .presentationDetents([.large]).interactiveDismissDisabled(model.state == .submitting)
+        .presentationDetents([.large]).presentationSizing(.page)
+        .interactiveDismissDisabled(model.state == .submitting)
+    }
+
+    private var topBarMaterial: some View {
+        TopBarMaterialBackground()
+            .frame(height: 44)
+            .offset(y: -44)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     private var selectedType: CampusFormChoice? { model.configuration?.choices.first { $0.id == model.draft.typeID } }

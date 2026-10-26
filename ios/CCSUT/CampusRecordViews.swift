@@ -81,19 +81,33 @@ private struct CampusRecordContent: View {
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("campus-travel-kind")
                 }
-                CampusServiceAction(title: mode == .leave ? "申请请假" : "办理\(selected == .departure ? "离校" : "返校")登记",
-                                    subtitle: mode == .leave ? "填写请假信息，提交学校审核" : "登记假期安排，查看办理进度",
-                                    symbol: mode == .leave ? "doc.text" : "figure.walk.departure") {
-                    if mode == .leave { nativeForm = .leave }
-                    else if selected == .departure { nativeForm = .departure }
-                    else { officialPage = .returning }
-                }
                 Text(mode == .leave ? "申请记录" : selected.title).font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary).padding(.horizontal, 4).padding(.top, 8).accessibilityAddTraits(.isHeader)
                 if mode == .leave { leaveContent } else { travelContent }
             }
             .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 28)
             .frame(maxWidth: 720).frame(maxWidth: .infinity)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack {
+                Spacer(minLength: 0)
+                Button(action: addRecord) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(Color.accentColor, in: Circle())
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(addRecordTitle)
+                .accessibilityHint(addRecordHint)
+                .accessibilityIdentifier("campus-record-add")
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .frame(maxWidth: 720)
+            .frame(maxWidth: .infinity)
         }
         // A real account/session replacement must start reads even when the selected kind
         // did not change; SwiftUI may retain this content view's identity across model swaps.
@@ -107,6 +121,20 @@ private struct CampusRecordContent: View {
         .sheet(item: $nativeForm, onDismiss: reconnect) { kind in
             CampusFormView(kind: kind, account: account)
         }
+    }
+
+    private var addRecordTitle: String {
+        mode == .leave ? "申请请假" : "办理\(selected == .departure ? "离校" : "返校")登记"
+    }
+
+    private var addRecordHint: String {
+        mode == .leave ? "打开请假申请表单" : "打开\(selected == .departure ? "离校" : "返校")登记页面"
+    }
+
+    private func addRecord() {
+        if mode == .leave { nativeForm = .leave }
+        else if selected == .departure { nativeForm = .departure }
+        else { officialPage = .returning }
     }
 
     @ViewBuilder private var leaveContent: some View {

@@ -98,6 +98,20 @@ struct AcademicReliabilityTests {
         }
         let complete = try await ExamSnapshotLoader.load(terms: ["2026-2027-2"]) { _ in [oldExam] }
         check(complete.first?.term == "2026-2027-2", "exam grouping belongs to the queried term")
+        check(ExamLocationPresentation.concise(building: "9号栋 南区 第3层", room: "9-112") == "9号栋 南区 9-112",
+              "exam location keeps building, south area and room while omitting an explicit floor")
+        check(ExamLocationPresentation.concise(building: "9号栋 北区三楼", room: "9-112 第四层") == "9号栋 北区 9-112",
+              "exam location removes common numeric and Chinese floor details from either field")
+        check(ExamLocationPresentation.concise(building: "9号楼", room: nil) == "9号楼",
+              "exam location does not mistake a building number for a floor")
+        check(ExamLocationPresentation.concise(building: "西侧综合实验室", room: nil) == "西侧综合实验室",
+              "unrecognized exam locations remain intact")
+        check(ExamLocationPresentation.concise(building: "B1/2区", room: nil) == "B1/2区",
+              "unknown building codes keep meaningful punctuation")
+        check(ExamLocationPresentation.concise(building: nil, room: "考场待现场通知") == "考场待现场通知",
+              "an unknown room is preserved when building data is absent")
+        check(ExamLocationPresentation.concise(building: "4层", room: nil) == "4层",
+              "a location containing only a floor marker is retained rather than erased")
         print("Academic reliability failures: \(failures)")
         exit(failures == 0 ? 0 : 1)
     }

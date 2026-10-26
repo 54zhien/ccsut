@@ -607,6 +607,6 @@ struct NagiBackButton: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: Circle())
-        .accessibilityLabel("返回教务")
+        .accessibilityLabel("返回")
     }
 }

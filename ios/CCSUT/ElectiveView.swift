@@ -66,7 +66,15 @@ struct ElectiveView: View {
         }
 #endif
         .task {
+#if DEBUG
+            let isSelectedTabPreview = InterfacePreview.enabled
+                && ProcessInfo.processInfo.arguments.contains("--preview-selected-tab")
+            if isSelectedTabPreview { selectedFilter = .selected }
+#endif
             if classes.isEmpty { await load() }
+#if DEBUG
+            if isSelectedTabPreview { selectedFilter = .selected }
+#endif
         }
         .onChange(of: enrolledModel.currentSummary) { _, summary in
             if let summary { onLoaded(summary.count, summary.term) }
@@ -199,6 +207,7 @@ struct ElectiveView: View {
     private var enrolledHeader: some View {
         VStack(alignment:.leading,spacing:8) {
             if let context = enrolledModel.context {
+                let selectedTerm = enrolledModel.selectedTerm ?? context.defaultTerm
                 Menu {
                     ForEach(context.terms,id:\.self) { term in
                         Button(SchedulePresentation.termTitle(term)) {
@@ -208,19 +217,53 @@ struct ElectiveView: View {
                         .accessibilityIdentifier("enrolled-term-\(term)")
                     }
                 } label: {
-                    Label(SchedulePresentation.termTitle(enrolledModel.selectedTerm ?? context.defaultTerm),systemImage:"calendar")
-                        .fixedSize(horizontal:false,vertical:true)
+                    HStack(spacing: 10) {
+                        Image(systemName: "calendar")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 32, height: 32)
+                            .background(Color.accentColor.opacity(0.1), in: .circle)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("已选课程学期")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(SchedulePresentation.termTitle(selectedTerm))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                    .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 18))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18)
+                            .strokeBorder(Color.accentColor.opacity(0.2), lineWidth: 1)
+                    }
+                    .contentShape(.rect(cornerRadius: 18))
                 }
                 .accessibilityIdentifier("enrolled-term-menu")
+                .accessibilityLabel("已选课程学期")
+                .accessibilityValue(SchedulePresentation.termTitle(selectedTerm))
+                .accessibilityHint("点按切换显示的学期")
                 .disabled(electiveState.isActionInProgress)
             }
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Text("线上、线下选课记录")
+                    .font(.subheadline.weight(.medium))
                 Spacer(minLength:8)
-                if let snapshot = enrolledModel.snapshot { Text("\(snapshot.count) 门").monospacedDigit() }
+                if let snapshot = enrolledModel.snapshot {
+                    Text("\(snapshot.count) 门")
+                        .font(.caption.monospacedDigit())
+                }
             }
+            .foregroundStyle(.secondary)
         }
-        .font(.caption).foregroundStyle(.secondary)
         .frame(maxWidth:.infinity,alignment:.leading)
     }
 
@@ -689,44 +732,51 @@ struct ClassCard: View {
     var actionBlockReason: String? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 8) {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .top, spacing: 10) {
                 Text(item.kcmc ?? "—")
-                    .font(.headline)
+                    .font(.headline.weight(.semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Spacer(minLength: 4)
-
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(item.xf ?? "—")
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(.tint)
-                    Text("学分")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                Text("\(item.xf ?? "—") 学分")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color.accentColor.opacity(0.1), in: .capsule)
             }
 
-            HStack {
+            if (item.teacher?.isEmpty == false) || item.isSelected {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if let teacher = item.teacher, !teacher.isEmpty {
                     Label(teacher, systemImage: "person.fill")
-                        .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 if item.isSelected {
                     Label("已选", systemImage: "checkmark.circle.fill")
-                        .font(.caption.weight(.medium))
+                            .font(.caption.weight(.medium))
                         .foregroundStyle(.green)
                 }
             }
+            }
 
             if let place = item.sksjdd, !place.isEmpty {
-                Label(place, systemImage: "clock.fill")
+                Label {
+                    Text(place)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "clock.fill")
+                }
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
             }
+
+            Divider()
 
             HStack(spacing: 10) {
                 CapacityBar(item: item)
@@ -766,7 +816,7 @@ struct ClassCard: View {
                     .accessibilityHint(Text(actionBlockReason ?? (item.isSelected ? "点按后确认退课" : "点按后确认选课")))
                 }
             }
-            .padding(.top, 2)
+            .padding(.top, 1)
 
             if let actionBlockReason {
                 Label(actionBlockReason, systemImage: "info.circle")
@@ -777,7 +827,7 @@ struct ClassCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
     }
 }
 
@@ -789,18 +839,45 @@ struct CapacityBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color(.tertiarySystemFill))
-                    Capsule()
-                        .fill(fillColor.gradient)
-                        .frame(width: max(4, geo.size.width * item.fillRatio))
-                }
+                segments(width: geo.size.width)
             }
-            .frame(height: 5)
+            .frame(height: 8)
 
-            Text("\(item.enrolled)/\(item.capacity)")
+            Text(capacitySummary)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("选课名额")
+        .accessibilityValue(capacitySummary)
+    }
+
+    private var capacitySummary: String {
+        guard item.capacity > 0 else { return "\(item.enrolled)/\(item.capacity)" }
+        return "已选 \(item.enrolled) · 余量 \(max(0, item.capacity - item.enrolled))"
+    }
+
+    @ViewBuilder
+    private func segments(width: CGFloat) -> some View {
+        if item.capacity <= 0 {
+            Capsule().fill(Color(.tertiarySystemFill))
+        } else {
+            let ratio = min(max(item.fillRatio, 0), 1)
+            let gap: CGFloat = ratio > 0 && ratio < 1 ? 4 : 0
+            let availableWidth = max(0, width - gap)
+            HStack(spacing: gap) {
+                Capsule()
+                    .fill(fillColor.gradient)
+                    .frame(width: availableWidth * ratio)
+                if ratio < 1 {
+                    Capsule()
+                        .fill(Color(.tertiarySystemFill))
+                        .frame(width: availableWidth * (1 - ratio))
+                }
+            }
+            .frame(width: width, alignment: .leading)
+            .background(Color.white, in: .capsule)
         }
     }
 

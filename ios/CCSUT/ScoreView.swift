@@ -24,6 +24,7 @@ struct ScoreView: View {
     @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
     @State private var termHeaderTracker = AcademicTermHeaderTracker()
+    @State private var selectedTerm: String?
 #if DEBUG
     @State private var previewPublicationCount = 0
 #endif
@@ -52,21 +53,29 @@ struct ScoreView: View {
                     if let errorText {
                         PageStatusNotice(message: errorText) { Task { await load(force: true) } }
                     }
-                    content { term in
-                        if reduceMotion {
-                            proxy.scrollTo(term, anchor: .top)
-                        } else {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                proxy.scrollTo(term, anchor: .top)
-                            }
-                        }
-                    }
+                    content()
                 }
             }
             .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.height : 0)
+            .onChange(of: selectedTerm) { _, term in
+                guard let term else { return }
+                if reduceMotion {
+                    proxy.scrollTo(term, anchor: .top)
+                } else {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(term, anchor: .top)
+                    }
+                }
+            }
+            .onChange(of: terms.map(\.name)) { _, availableTerms in
+                guard let selectedTerm, !availableTerms.contains(selectedTerm) else { return }
+                self.selectedTerm = nil
+            }
         }
         .coordinateSpace(name: "academic-scroll")
-        .academicDetailChrome(title: "成绩单")
+        .academicDetailChrome(title: "成绩单") {
+            if !terms.isEmpty { termFilter }
+        }
 #if DEBUG
         .overlay(alignment: .topTrailing) {
             PageRefreshPublicationDiagnostics(count: previewPublicationCount)
@@ -84,22 +93,55 @@ struct ScoreView: View {
             .sorted { $0.name > $1.name }        // 新学期在前
     }
 
+    private var displayedTerms: [ScoreTerm] {
+        guard let selectedTerm else { return terms }
+        return terms.filter { $0.name == selectedTerm }
+    }
+
+    private var displayedItems: [ScoreItem] {
+        displayedTerms.flatMap(\.items)
+    }
+
+    private var termFilter: some View {
+        Menu {
+            Picker("学期", selection: $selectedTerm) {
+                Text("全部学期").tag(nil as String?)
+                ForEach(terms) { term in
+                    Text(SchedulePresentation.termTitle(term.name)).tag(Optional(term.name))
+                }
+            }
+        } label: {
+            Image(systemName: selectedTerm == nil
+                  ? "line.3.horizontal.decrease.circle"
+                  : "line.3.horizontal.decrease.circle.fill")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(selectedTerm == nil ? Color.secondary : Color.accentColor)
+                .frame(width: 44, height: 44)
+                .background(selectedTerm == nil ? Color.clear : Color.accentColor.opacity(0.1), in: .circle)
+                .contentShape(.circle)
+        }
+        .accessibilityLabel("学期筛选")
+        .accessibilityValue(selectedTerm.map(SchedulePresentation.termTitle) ?? "全部学期")
+        .accessibilityHint("选择学期后筛选并跳转到对应内容")
+        .accessibilityIdentifier("score-term-filter")
+    }
+
     private var overallGPA: Double {
-        let graded = items.filter(\.hasGrade)
+        let graded = displayedItems.filter(\.hasGrade)
         let weighted = graded.reduce(0.0) { $0 + $1.point * $1.credit }
         let credits = graded.reduce(0.0) { $0 + $1.credit }
         return credits > 0 ? weighted / credits : 0
     }
 
     private var overallCredits: Double {
-        items.reduce(0) { $0 + $1.credit }
+        displayedItems.reduce(0) { $0 + $1.credit }
     }
 
-    private func content(onSelectTerm: @escaping (String) -> Void) -> some View {
+    private func content() -> some View {
         LazyVStack(spacing: 0, pinnedViews: dynamicTypeSize.isAccessibilitySize ? [] : [.sectionHeaders]) {
             summaryCard.padding(.bottom, 12)
 
-            ForEach(terms) { term in
+            ForEach(displayedTerms) { term in
                 Section {
                     VStack(spacing: 0) {
                         ForEach(Array(term.items.enumerated()), id: \.element.id) { idx, item in
@@ -114,7 +156,7 @@ struct ScoreView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 16)
                 } header: {
-                    termHeader(term, onSelectTerm: onSelectTerm)
+                    termHeader(term)
                         .id(term.name)
                 }
             }
@@ -127,13 +169,18 @@ struct ScoreView: View {
             Label("学业概览", systemImage: "chart.bar.doc.horizontal")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
+            if let selectedTerm {
+                Text("筛选学期：\(SchedulePresentation.termTitle(selectedTerm))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(spacing: 10) {
                     summaryRow(value: String(format: "%.2f", overallGPA), label: "加权绩点")
                     Divider()
                     summaryRow(value: String(format: "%.1f", overallCredits), label: "总学分")
                     Divider()
-                    summaryRow(value: "\(items.count)", label: "门课程")
+                    summaryRow(value: "\(displayedItems.count)", label: "门课程")
                 }
             } else {
                 HStack(spacing: 0) {
@@ -141,7 +188,7 @@ struct ScoreView: View {
                     Divider().frame(height: 34)
                     statBlock(value: String(format: "%.1f", overallCredits), label: "总学分", tint: .accentColor)
                     Divider().frame(height: 34)
-                    statBlock(value: "\(items.count)", label: "门课程", tint: .accentColor)
+                    statBlock(value: "\(displayedItems.count)", label: "门课程", tint: .accentColor)
                 }
             }
         }
@@ -178,8 +225,7 @@ struct ScoreView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func termHeader(_ term: ScoreTerm, onSelectTerm: @escaping (String) -> Void) -> some View {
-        let termNames = terms.map(\.name)
+    private func termHeader(_ term: ScoreTerm) -> some View {
         let stats = "GPA \(String(format: "%.2f", term.gpa)) · \(String(format: "%.1f", term.credits)) 学分 · \(term.items.count) 门课程"
         return AcademicTermStrip(term: term.name, tracker: termHeaderTracker) {
             if dynamicTypeSize.isAccessibilitySize {
@@ -195,12 +241,6 @@ struct ScoreView: View {
                         Text("\(term.failedCount) 门未通过")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.red)
-                    }
-                    if termNames.count > 1 {
-                        HStack {
-                            Spacer(minLength: 0)
-                            AcademicTermJumpMenu(terms: termNames, onSelect: onSelectTerm)
-                        }
                     }
                 }
             } else {
@@ -219,9 +259,6 @@ struct ScoreView: View {
                         }
                     }
                     Spacer(minLength: 4)
-                    if termNames.count > 1 {
-                        AcademicTermJumpMenu(terms: termNames, onSelect: onSelectTerm)
-                    }
                 }
             }
         }

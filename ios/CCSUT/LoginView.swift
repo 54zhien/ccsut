@@ -186,11 +186,7 @@ struct LoginView: View {
                     .onSubmit { submit() }
 
                 Button(action: sendCode) {
-                    ZStack {
-                        Text(cooldown > 0 ? "\(cooldown)s" : "获取验证码")
-                            .font(.subheadline.weight(.medium))
-                            .monospacedDigit()
-                            .hidden()
+                    Group {
                         if busy == .sending {
                             ProgressView().controlSize(.mini)
                         } else {
@@ -199,7 +195,7 @@ struct LoginView: View {
                                 .monospacedDigit()
                         }
                     }
-                    .frame(minWidth: 84, minHeight: 44, alignment: .center)
+                    .frame(minWidth: 84, minHeight: 44, alignment: .trailing)
                     .foregroundStyle(canSend || busy == .sending ? Color.accentColor : Color.secondary)
                     .transaction { transaction in
                         transaction.animation = nil

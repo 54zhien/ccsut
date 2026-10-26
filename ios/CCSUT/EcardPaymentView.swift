@@ -7,7 +7,6 @@ struct EcardPaymentView: View {
     @Environment(\.dynamicTypeSize) private var textSize
     @State private var model = EcardPaymentModel()
     @State private var showingRecoveryHelp = false
-    @FocusState private var amountFocused: Bool
 
     init() {
         let value = EcardPaymentModel()
@@ -23,6 +22,7 @@ struct EcardPaymentView: View {
             value.campuses = [option("示例校区", "preview-campus")]; value.campus = "preview-campus"
             value.buildings = [option("示例宿舍 1 栋", "preview-building")]; value.building = "preview-building"
             value.rooms = [option("101 室", "preview-room")]; value.room = "preview-room"
+            value.amountText = "50"
             let context = MeterContext()
             value.detail = MeterDetail(context: context, show: ["房间信息": "示例宿舍 1 栋 · 101 室", "表类型": "电表", "剩余金额": "36.80"], dataType: nil)
             if InterfacePreview.page.hasPrefix("campus-electricity-recovery") {
@@ -100,6 +100,11 @@ struct EcardPaymentView: View {
         .onChange(of: model.recoveryIssue) { _, issue in
             if issue == nil { showingRecoveryHelp = false }
         }
+        .onChange(of: amountMaximum) { _, limit in
+            if !model.amountText.isEmpty {
+                model.amountText = String(MeterAmount.clamp(amountValue, maximum: limit))
+            }
+        }
         .task {
             #if DEBUG
             // No client, account or network preparation exists in these synthetic fixtures.
@@ -164,11 +169,10 @@ struct EcardPaymentView: View {
                                  value: model.campus, action: model.selectCampus)
                     Divider()
                 }
-                selectionRow("楼栋", placeholder: "请选择楼栋", options: model.buildings,
-                             value: model.building, action: model.selectBuilding)
-                Divider()
-                selectionRow("房间", placeholder: "请选择房间", options: model.rooms,
-                             value: model.room, action: model.selectRoom)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { buildingChoice; roomChoice }
+                    VStack(spacing: 12) { buildingChoice; roomChoice }
+                }
             }
             if model.isStarting || model.loadingText != nil {
                 HStack(spacing: 8) {
@@ -177,6 +181,40 @@ struct EcardPaymentView: View {
                 }.padding(.horizontal, 4)
             }
         }
+    }
+    private var buildingChoice: some View {
+        roomChoice("楼栋", symbol: "building.2", placeholder: "选择楼栋", options: model.buildings,
+                   value: model.building, action: model.selectBuilding)
+    }
+    private var roomChoice: some View {
+        roomChoice("房间", symbol: "door.left.hand.closed", placeholder: "选择房间", options: model.rooms,
+                   value: model.room, action: model.selectRoom)
+    }
+    private func roomChoice(_ title: String, symbol: String, placeholder: String, options: [ThirdOption],
+                            value: String?, action: @escaping (String?) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(title, systemImage: symbol).font(.caption).foregroundStyle(.secondary)
+            Menu {
+                Picker(title, selection: Binding(get: { value }, set: action)) {
+                    Text(placeholder).tag(nil as String?)
+                    ForEach(options, id: \.value) { option in
+                        Text(CampusPrivacy.redact(option.name)).tag(Optional(option.value))
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(CampusPrivacy.redact(options.first(where: { $0.value == value })?.name ?? placeholder))
+                        .font(.subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold))
+                }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }
+            .disabled(options.isEmpty || model.isSubmitting)
+            .accessibilityLabel("选择\(title)")
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 18))
     }
     private func selectionRow(_ title: String, placeholder: String, options: [ThirdOption],
                               value: String?, action: @escaping (String?) -> Void) -> some View {
@@ -231,62 +269,79 @@ struct EcardPaymentView: View {
 
     private var amountSelection: some View {
         CampusSection("缴费金额") {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("¥").font(.title2.weight(.medium)).foregroundStyle(.secondary)
-                    TextField("输入金额", text: $model.amountText)
-                        .font(.largeTitle.weight(.semibold).monospacedDigit())
-                        .keyboardType(.decimalPad).focused($amountFocused)
-                        .accessibilityLabel("缴费金额，单位元")
-                    if amountFocused {
-                        Button { amountFocused = false } label: { Image(systemName: "keyboard.chevron.compact.down") }
-                            .buttonStyle(.plain).frame(minWidth: 44, minHeight: 44)
-                            .accessibilityLabel("收起键盘")
-                    }
+                HStack(spacing: 6) {
+                    Text("¥").font(.title2.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
+                        .padding(.trailing, 4).accessibilityHidden(true)
+                    amountDrum(place: 100, label: "百位")
+                    amountDrum(place: 10, label: "十位")
+                    amountDrum(place: 1, label: "个位")
+                    Text("元").font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.7))
+                        .padding(.leading, 4).accessibilityHidden(true)
                 }
-                if !model.quickAmounts.isEmpty {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: textSize.isAccessibilitySize ? 140 : 80))], spacing: 10) {
-                        ForEach(model.quickAmounts, id: \.self) { amount in
-                            Button { model.amountText = amount.ecardAmountText; amountFocused = false } label: {
-                                Text("\(amount.ecardAmountText) 元")
-                                    .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 46)
-                                    .foregroundStyle(model.amount == amount ? Color("AccentForeground") : Color.accentColor)
-                                    .background(model.amount == amount ? Color.accentColor : Color.accentColor.opacity(0.08),
-                                                in: .rect(cornerRadius: 16))
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(model.amount == amount ? .isSelected : [])
-                        }
-                    }
+                .padding(12)
+                .background(Color(white: 0.10), in: .rect(cornerRadius: 24))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                        .allowsHitTesting(false)
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("缴费金额，\(amountValue)元，上下滑动数字调整")
+                Text("上下滑动调整 · 最高 \(amountMaximum) 元")
+                    .font(.footnote).foregroundStyle(.secondary)
                 if let hint = model.amountHint {
                     Text(hint).font(.footnote).foregroundStyle(.red)
-                } else {
-                    Text(limitDescription).font(.footnote).foregroundStyle(.secondary)
                 }
         }
     }
-    private var limitDescription: String {
-        guard let fee = model.fee, let max = fee.maxAmount else { return "金额以元为单位，请先完成房间查询" }
-        var text = "单笔最高 \(max.ecardAmountText) 元"
-        if let dayMax = fee.dayMaxAmount { text += " · 单日最高 \(dayMax.ecardAmountText) 元" }
-        return text
+    private var amountMaximum: Int {
+        MeterAmount.maximum(perPayment: model.fee?.maxAmount, perDay: model.fee?.dayMaxAmount)
+    }
+    private var amountValue: Int {
+        MeterAmount.clamp(model.amount.map { NSDecimalNumber(decimal: $0).intValue } ?? 0, maximum: amountMaximum)
+    }
+    private var canPayDisplayedAmount: Bool {
+        model.canPay && amountValue > 0 && model.amount == Decimal(amountValue)
+    }
+    private func amountDrum(place: Int, label: String) -> some View {
+        Picker(label, selection: Binding(
+            get: { amountValue / place % 10 },
+            set: { digit in
+                model.amountText = String(MeterAmount.replacing(amount: amountValue, place: place,
+                                                              digit: digit, maximum: amountMaximum))
+            }
+        )) {
+            ForEach(MeterAmount.digits(amount: amountValue, place: place, maximum: amountMaximum), id: \.self) { digit in
+                Text(String(digit)).font(.system(size: textSize.isAccessibilitySize ? 38 : 32, weight: .semibold, design: .monospaced))
+                    .tag(digit)
+            }
+        }
+        .pickerStyle(.wheel).labelsHidden()
+        .frame(maxWidth: .infinity).frame(height: textSize.isAccessibilitySize ? 160 : 132)
+        .clipped().environment(\.colorScheme, .dark)
+        .background(.white.opacity(0.04), in: .rect(cornerRadius: 12))
+        .overlay {
+            LinearGradient(colors: [.black.opacity(0.65), .clear, .black.opacity(0.65)], startPoint: .top, endPoint: .bottom)
+                .clipShape(.rect(cornerRadius: 12)).allowsHitTesting(false)
+        }
+        .disabled(amountMaximum == 0 || model.isSubmitting)
+        .accessibilityLabel("金额\(label)")
     }
     private var payBar: some View {
-        CampusActionDock {
+        CampusActionDock(controlInset: 20) {
             VStack(spacing: 10) {
                 Button {
-                    amountFocused = false
+                    guard canPayDisplayedAmount else { return }
                     model.prepareConfirmation()
                 } label: {
                     Text("立即缴费").font(.headline).frame(maxWidth: .infinity, minHeight: 32)
                 }
                 .buttonStyle(.glassProminent).buttonBorderShape(.capsule).controlSize(.large)
                 .campusActionControl()
-                .disabled(!model.canPay)
+                .disabled(!canPayDisplayedAmount)
                 Text("从一卡通余额扣款，确认后即支付")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 12)
+            .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 4)
         }
     }
     private func confirmation(_ confirmed: EcardPaymentModel.Confirmation) -> some View {

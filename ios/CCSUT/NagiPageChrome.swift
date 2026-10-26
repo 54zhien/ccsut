@@ -130,7 +130,7 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
     let title: String
     let scrollOffset: CGFloat
     let showsBackButton: Bool
-    @ViewBuilder let actions: () -> Actions
+    let actions: () -> Actions
 
     func body(content: Content) -> some View {
         content
@@ -167,8 +167,9 @@ private struct NagiPageChrome<Actions: View>: ViewModifier {
 
 /// Inline chrome belongs to the child, so a cancelled pop cannot interpolate its
 /// title/buttons independently of the moving page. UIKit still owns the gesture.
-private struct AcademicDetailChrome: ViewModifier {
+private struct AcademicDetailChrome<Actions: View>: ViewModifier {
     let title: String
+    @ViewBuilder let actions: () -> Actions
     #if DEBUG
     @State private var transitionDrift: CGFloat = 0
     @State private var transitionSamples = 0
@@ -183,12 +184,14 @@ private struct AcademicDetailChrome: ViewModifier {
                     HStack {
                         NagiBackButton()
                         Spacer(minLength: 12)
+                        actions()
                     }
                     .overlay {
                         Text(title)
                             .font(.headline)
                             .lineLimit(1)
                             .accessibilityIdentifier("academic-detail-title")
+                            .allowsHitTesting(false)
                             .background {
                                 #if DEBUG
                                 if InterfacePreview.enabled && ProcessInfo.processInfo.arguments.contains("--preview-transition") {
@@ -203,6 +206,7 @@ private struct AcademicDetailChrome: ViewModifier {
                 }
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle(title)
+            .toolbar(.hidden, for: .tabBar)
             .background { AcademicPopSupport() }
             .background {
                 #if DEBUG
@@ -238,7 +242,11 @@ extension View {
     }
 
     func academicDetailChrome(title: String) -> some View {
-        modifier(AcademicDetailChrome(title: title))
+        modifier(AcademicDetailChrome(title: title, actions: { EmptyView() }))
+    }
+
+    func academicDetailChrome<Actions: View>(title: String, @ViewBuilder actions: @escaping () -> Actions) -> some View {
+        modifier(AcademicDetailChrome(title: title, actions: actions))
     }
 
     func nagiPageChrome<Actions: View>(title: String, scrollOffset: CGFloat, showsBackButton: Bool = false, @ViewBuilder actions: @escaping () -> Actions) -> some View {

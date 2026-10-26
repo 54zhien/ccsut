@@ -3,16 +3,20 @@ import SwiftUI
 /// The dock's upper corners follow the rendered capsule control, including Dynamic Type.
 struct CampusActionDock<Content: View>: View {
     @State private var controlHeight: CGFloat = 52
+    var controlInset: CGFloat = 0
     private let content: Content
-    init(@ViewBuilder content: () -> Content) { self.content = content() }
+    init(controlInset: CGFloat = 0, @ViewBuilder content: () -> Content) {
+        self.controlInset = controlInset
+        self.content = content()
+    }
     var body: some View {
         content
             .onPreferenceChange(CampusActionHeight.self) { if $0 > 0 { controlHeight = $0 } }
             .background {
                 Color.clear
                     .glassEffect(.regular, in: UnevenRoundedRectangle(
-                        topLeadingRadius: controlHeight / 2, bottomLeadingRadius: 0,
-                        bottomTrailingRadius: 0, topTrailingRadius: controlHeight / 2))
+                        topLeadingRadius: controlHeight / 2 + controlInset, bottomLeadingRadius: 0,
+                        bottomTrailingRadius: 0, topTrailingRadius: controlHeight / 2 + controlInset))
                     .ignoresSafeArea(.container, edges: .bottom)
                     .allowsHitTesting(false)
             }

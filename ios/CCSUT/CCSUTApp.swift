@@ -22,8 +22,8 @@ struct CCSUTApp: App {
                     case "launch": LaunchView()
                     #if DEBUG
                     case "campus-privacy": CampusPrivacyPreview()
-                    case "campus-form-leave": CampusFormView(kind: .leave, account: "preview-account")
-                    case "campus-form-departure": CampusFormView(kind: .departure, account: "preview-account")
+                    case "campus-form-leave": CampusFormPreviewHost(kind: .leave)
+                    case "campus-form-departure": CampusFormPreviewHost(kind: .departure)
                     case "campus-electricity", "campus-electricity-confirmation", "campus-electricity-result", "campus-electricity-pending",
                          "campus-electricity-recovery-read", "campus-electricity-recovery-version",
                          "campus-electricity-recovery-corrupt", "campus-electricity-recovery-missing":
@@ -58,6 +58,15 @@ struct CCSUTApp: App {
 // MARK: - 根视图
 
 #if DEBUG
+private struct CampusFormPreviewHost: View {
+    let kind: CampusFormKind
+    @State private var showingForm = true
+    var body: some View {
+        Color(.systemGroupedBackground).ignoresSafeArea()
+            .sheet(isPresented: $showingForm) { CampusFormView(kind: kind, account: "preview-account") }
+    }
+}
+
 private struct CampusMotionPreviewProbe: View {
     @Environment(\.accessibilityReduceMotion) private var reduced
     var body: some View {
