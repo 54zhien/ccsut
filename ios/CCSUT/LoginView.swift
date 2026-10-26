@@ -129,7 +129,7 @@ struct LoginView: View {
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                                 .frame(maxWidth: .infinity)
-                                .transition(.opacity)
+                                .transition(.identity)
                         }
                     }
                     .padding(.horizontal, 28)
@@ -186,24 +186,24 @@ struct LoginView: View {
                     .onSubmit { submit() }
 
                 Button(action: sendCode) {
-                    Group {
-                        if busy == .sending {
-                            ProgressView().controlSize(.mini)
-                        } else {
-                            Text(cooldown > 0 ? "\(cooldown)s" : "获取验证码")
-                                .font(.subheadline.weight(.medium))
-                                .monospacedDigit()
-                        }
+                    ZStack(alignment: .trailing) {
+                        Text(cooldown > 0 ? "\(cooldown)s" : "获取验证码")
+                            .font(.subheadline.weight(.medium))
+                            .monospacedDigit()
+                            .contentTransition(.identity)
+                            .opacity(busy == .sending ? 0 : 1)
+                        ProgressView().controlSize(.mini)
+                            .opacity(busy == .sending ? 1 : 0)
                     }
                     .frame(minWidth: 84, minHeight: 44, alignment: .trailing)
                     .foregroundStyle(canSend || busy == .sending ? Color.accentColor : Color.secondary)
-                    .transaction { transaction in
-                        transaction.animation = nil
-                        transaction.disablesAnimations = true
-                    }
                 }
                 .buttonStyle(CodeSendButtonStyle())
                 .disabled(!canSend)
+                .transaction { transaction in
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                }
                 .accessibilityLabel(busy == .sending ? "正在发送验证码" : cooldown > 0 ? "\(cooldown)秒后重发" : "获取验证码")
             }
             .padding(.horizontal, fieldInset)
@@ -256,8 +256,8 @@ struct LoginView: View {
     // MARK: 状态
 
     private var trimmed: String { account.trimmingCharacters(in: .whitespaces) }
-    private var canSend: Bool { !trimmed.isEmpty && busy == .idle && cooldown == 0 }
-    private var canLogin: Bool { !trimmed.isEmpty && code.count >= 4 && busy == .idle }
+    private var canSend: Bool { !trimmed.isEmpty && busy == .idle && cooldown == 0 && !isFinishing }
+    private var canLogin: Bool { !trimmed.isEmpty && code.count >= 4 && busy == .idle && !isFinishing }
 
     // MARK: 流程
 
@@ -280,8 +280,7 @@ struct LoginView: View {
 
         // 到教务系统 → 接管
         if url.host == "tls.ccsut.cn",
-           !absolute.contains("/admin/login"),
-           !absolute.contains("loginFailPage") {
+           !APIClient.isAuthenticationURL(url) {
             Task { await finish() }
             return
         }
@@ -298,16 +297,28 @@ struct LoginView: View {
 
     /// 切页签 + 填账号，不动验证码
     private func prepare() async {
-        _ = try? await webView.callAsync(Self.script, arguments: [
+        let result = try? await webView.callAsync(Self.script, arguments: [
             "account": trimmed,
             "code": "",
             "action": "prepare",
         ])
+        if result as? String == "authenticated" { await finish() }
+    }
+
+    /// A portal page is a reason to verify cookies, never proof of authentication.
+    private func hasAcademicPage() -> Bool {
+        guard let url = webView.url, url.host == "tls.ccsut.cn" else { return false }
+        let path = url.path.lowercased()
+        return !path.hasPrefix("/admin/login") && path != "/admin/caslogin" && !path.contains("loginfailpage")
     }
 
     private func sendCode() {
         guard canSend else { return }
         guard !InterfacePreview.enabled else { return }
+        if hasAcademicPage() {
+            Task { await finish() }
+            return
+        }
         UserDefaults.standard.set(trimmed, forKey: "ccsut.lastAccount")
 
         busy = .sending
@@ -323,6 +334,7 @@ struct LoginView: View {
                 outcome = (r as? String) ?? "?"
             } catch {
                 guard operationID == id, busy != .done, !isFinishing else { return }
+                if hasAcademicPage() { await finish(); return }
                 loginTimeout?.cancel()
                 busy = .idle
                 hint = "认证页连接失败，请重试或使用网页登录"
@@ -330,6 +342,7 @@ struct LoginView: View {
             }
             guard operationID == id, busy != .done, !isFinishing else { return }
             loginTimeout?.cancel()
+            if outcome == "authenticated" || hasAcademicPage() { await finish(); return }
 
             await MainActor.run {
                 busy = .idle
@@ -372,6 +385,7 @@ struct LoginView: View {
                 guard operationID == id, busy != .done, !isFinishing else { return }
                 let outcome = (r as? String) ?? "?"
                 loginTimeout?.cancel()
+                if outcome == "authenticated" { await finish(); return }
                 busy = .idle
                 if outcome.hasPrefix("error:") {
                     hint = String(outcome.dropFirst(6))
@@ -444,7 +458,19 @@ struct LoginView: View {
     }
 
     private func showWebLogin() {
-        guard !isPreparingWebSheet, !webViewIsInSheet, !showWebSheet else { return }
+        guard !isFinishing, !isPreparingWebSheet, !webViewIsInSheet, !showWebSheet else { return }
+        if hasAcademicPage() {
+            Task {
+                await finish()
+                guard session.phase == .loggedOut else { return }
+                openWebSheet()
+            }
+            return
+        }
+        openWebSheet()
+    }
+
+    private func openWebSheet() {
         focused = nil
         // Manual web authentication has its own lifetime. A native SMS request
         // must not time out and cancel Cookie adoption while this sheet is open.
@@ -464,6 +490,11 @@ struct LoginView: View {
 
     /// action = prepare | send | submit
     private static let script = """
+        const reachedAcademicPage = () => location.hostname === 'tls.ccsut.cn' &&
+          !location.pathname.toLowerCase().startsWith('/admin/login') &&
+          location.pathname.toLowerCase() !== '/admin/caslogin' &&
+          !location.pathname.toLowerCase().includes('loginfailpage');
+        if (reachedAcademicPage()) return 'authenticated';
         const setVal = (el, v) => {
           const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
           setter.call(el, v);
@@ -482,6 +513,7 @@ struct LoginView: View {
         // 1. 等页签
         let tabs = [];
         for (let i = 0; i < 50; i++) {
+          if (reachedAcademicPage()) return 'authenticated';
           tabs = [...document.querySelectorAll('.ant-tabs-tab')];
           if (tabs.length) break;
           await sleep(200);
@@ -499,6 +531,7 @@ struct LoginView: View {
         // 3. 等表单
         let accountBox = null, codeBox = null;
         for (let i = 0; i < 40; i++) {
+          if (reachedAcademicPage()) return 'authenticated';
           const inputs = [...document.querySelectorAll('input')]
             .filter(el => el.offsetWidth > 0 && el.type === 'text');
           accountBox = inputs.find(el => /工号|学号|手机号/.test(el.placeholder || ''));
@@ -532,6 +565,7 @@ struct LoginView: View {
           sendBtn.click();
           for (let i = 0; i < 60; i++) {
             await sleep(200);
+            if (reachedAcademicPage()) return 'authenticated';
             const fresh = freshMessages(previous);
             const error = fresh.find(m => /失败|错误|无效|频繁|不存在|未绑定|限制|稍后|不正确|过期/.test(m));
             if (error) return 'error:' + error;
@@ -552,6 +586,7 @@ struct LoginView: View {
           loginBtn.click();
           for (let i = 0; i < 60; i++) {
             await sleep(200);
+            if (reachedAcademicPage()) return 'authenticated';
             const error = freshMessages(previous)[0];
             if (error) return 'error:' + error;
           }

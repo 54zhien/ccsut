@@ -54,6 +54,9 @@ jobs:
         if: ${{ inputs.login_probe_only }}
         run: |
           set -o pipefail
+          python3 ios/Tests/run-login-state-tests.py 2>&1 | tee "$RUNNER_TEMP/login-state-tests.log"
+          node --test ios/Tests/login-script.test.mjs ios/Tests/cas-script.test.mjs \
+            ios/Tests/campus-web-privacy.test.mjs 2>&1 | tee "$RUNNER_TEMP/login-script-tests.log"
           xcrun swiftc -parse-as-library \
             ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift \
             ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift \
@@ -74,6 +77,8 @@ jobs:
           path: |
             ${{ runner.temp }}/login-tests.log
             ${{ runner.temp }}/identity-tests.log
+            ${{ runner.temp }}/login-state-tests.log
+            ${{ runner.temp }}/login-script-tests.log
           if-no-files-found: ignore
       - name: Build (unsigned)
         if: ${{ !inputs.login_probe_only }}

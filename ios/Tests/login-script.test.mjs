@@ -8,7 +8,7 @@ const source = readFileSync(new URL('../CCSUT/LoginView.swift', import.meta.url)
 const script = source.match(/private static let script = """([\s\S]*?)"""/)[1]
   .replace(/\\\\/g, '\\').replace(/\\"/g, '"');
 
-async function action(mode, reply, initialReply = null) {
+async function action(mode, reply, initialReply = null, page = {}) {
   let alerts = initialReply ? [{ textContent: initialReply, offsetWidth: 100, offsetHeight: 20 }] : [];
   class Input {
     constructor(placeholder) { this.placeholder = placeholder; this.type = 'text'; this.offsetWidth = 100; }
@@ -23,11 +23,19 @@ async function action(mode, reply, initialReply = null) {
     if (reply === 'sent') { send.textContent = '60秒后重新获取'; send.disabled = true; }
     else if (reply) alerts = [{ textContent: reply, offsetWidth: 100, offsetHeight: 20 }];
   }
+  let waits = 0;
+  const location = { protocol: 'https:', hostname: 'auth.ccsut.cn', pathname: '/backstage/cas/login', ...page };
   const context = vm.createContext({
     account: 'fixture-student', code: '123456', action: mode,
+    location,
     HTMLInputElement: Input, Event: class {},
-    setTimeout(fn) { fn(); },
+    setTimeout(fn) {
+      waits += 1;
+      if (waits === page.navigateAtWait) { location.hostname = 'tls.ccsut.cn'; location.pathname = '/admin/index'; }
+      fn();
+    },
     document: { querySelectorAll(selector) {
+      if (selector === '.ant-tabs-tab' && page.hostname === 'tls.ccsut.cn') return [];
       if (selector === '.ant-tabs-tab') return [{ textContent: '验证码登录', classList: { contains: () => true } }];
       if (selector === 'input') return inputs;
       if (selector === 'button') return [send, login];
@@ -55,4 +63,25 @@ test('login without navigation or response terminates', async () => {
 });
 test('repeated identical login error in a new alert is still reported', async () => {
   assert.match(await action('submit', '验证码错误', '验证码错误'), /验证码错误/);
+});
+
+// Once CAS has returned to the portal there is no SMS form to wait for.
+for (const mode of ['prepare', 'send', 'submit']) {
+  test(`${mode} on an existing portal session requests native verification`, async () => {
+    assert.equal(await action(mode, null, null, {
+      hostname: 'tls.ccsut.cn', pathname: '/frontend/views/student/xkPage/index.html',
+    }), 'authenticated');
+  });
+}
+for (const pathname of ['/admin/login', '/admin/loginFailPage', '/admin/caslogin']) {
+  test(`does not call the authentication entry ${pathname} a completed session`, async () => {
+    assert.notEqual(await action('send', null, null, { hostname: 'tls.ccsut.cn', pathname }), 'authenticated');
+  });
+}
+
+test('portal navigation during SMS confirmation requests native verification', async () => {
+  assert.equal(await action('send', null, null, { navigateAtWait: 2 }), 'authenticated');
+});
+test('portal navigation during login confirmation requests native verification', async () => {
+  assert.equal(await action('submit', null, null, { navigateAtWait: 3 }), 'authenticated');
 });

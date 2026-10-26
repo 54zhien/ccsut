@@ -168,8 +168,7 @@ struct WebLoginSheet: View {
 
         // 到教务系统 → 接管
         if url.host == "tls.ccsut.cn",
-           !absolute.contains("/admin/login"),
-           !absolute.contains("loginFailPage") {
+           !APIClient.isAuthenticationURL(url) {
             Task { await finish() }
             return
         }

@@ -153,6 +153,17 @@ final class WebNavigator: NSObject, WKNavigationDelegate {
         }
     }
 
+    // The portal can keep loading resources or display a school notice. Start
+    // cookie verification when its main document commits instead of waiting for
+    // every resource to finish. SessionStore still verifies the server identity.
+    nonisolated func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        Task { @MainActor in
+            guard let url = webView.url else { return }
+            currentURL = url
+            onNavigate?(url)
+        }
+    }
+
     nonisolated func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         Task { @MainActor in
             isFinished = false
