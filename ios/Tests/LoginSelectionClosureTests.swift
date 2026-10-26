@@ -3,7 +3,7 @@ import WebKit
 
 /// Every request stays in this local protocol. No school login or network is used.
 final class LoginClosureProtocol: URLProtocol {
-    enum Mode { case authenticated, loggedOut, publicPage, foreignRedirect, otherAccount, replacedDuringRead }
+    enum Mode { case authenticated, authenticatedHTML, loggedOut, publicPage, foreignRedirect, otherAccount, replacedDuringRead }
     private static let lock = NSLock()
     nonisolated(unsafe) private static var mode: Mode = .authenticated
     nonisolated(unsafe) private static var paths: [String] = []
@@ -27,6 +27,18 @@ final class LoginClosureProtocol: URLProtocol {
         } else if path == "/admin/" || path == "/admin" {
             switch mode {
             case .authenticated, .replacedDuringRead: status = 303; headers["Location"] = Self.landing
+            case .authenticatedHTML:
+                // Sanitized structure observed on the protected student home,
+                // returned directly as HTTP 200 after the user's fresh login.
+                body = """
+                <!doctype html><html><body>
+                <input type="hidden" id="roleId" value="xs">
+                <input type="hidden" id="xhid" value="fixture-internal-id">
+                <input type="hidden" id="encodeId" value="fixture-server-proof">
+                <div class="userInfo"><p><span class="admin_name">fixture-student</span></p></div>
+                <div class="school-notice">学业预警</div>
+                </body></html>
+                """
             case .otherAccount: status = 303; headers["Location"] = Self.landing.replacingOccurrences(of: Self.number, with: "fixture-other")
             case .loggedOut: status = 303; headers["Location"] = "/admin/login"
             case .publicPage: break
@@ -82,6 +94,18 @@ final class LoginClosureProtocol: URLProtocol {
         await cold.bootstrap()
         check(cold.phase == .loggedIn && cold.studentId == LoginClosureProtocol.number,
               "cold launch also succeeds independently of elective availability")
+
+        LoginClosureProtocol.reset(.authenticatedHTML)
+        CookieJar.shared = [cookie]
+        check(await store().probe(), "direct HTTP 200 student home verifies without an elective redirect")
+        let htmlAdoption = store()
+        check(await htmlAdoption.adoptCookies(), "direct student home permits WebKit cookie adoption")
+        check(htmlAdoption.phase == .loggedIn && htmlAdoption.studentId == LoginClosureProtocol.number,
+              "student identity is read from the protected home before entering the app")
+        let htmlCold = store()
+        await htmlCold.bootstrap()
+        check(htmlCold.phase == .loggedIn && htmlCold.studentId == LoginClosureProtocol.number,
+              "direct student home also verifies restored credentials on cold launch")
 
         for (mode, label) in [(LoginClosureProtocol.Mode.loggedOut,"login redirect"), (.publicPage,"anonymous HTTP 200 page"), (.foreignRedirect,"foreign identity redirect")] {
             CookieJar.shared = [cookie]
