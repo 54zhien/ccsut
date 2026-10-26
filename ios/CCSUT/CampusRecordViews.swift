@@ -260,6 +260,9 @@ private actor CampusPreviewReader: CampusReading {
     private var travelReads: [CampusTravelKind: Int] = [:]
 
     func leaveRecords(page: Int, size: Int) async throws -> CampusLeavePage {
+        if ProcessInfo.processInfo.arguments.contains("--preview-record-loading") {
+            try await Task.sleep(for: .seconds(60))
+        }
         leaveReads += 1
         if leaveReads > 1 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
             await PreviewRefreshCompletionGate.shared.waitForRelease()
@@ -276,6 +279,9 @@ private actor CampusPreviewReader: CampusReading {
         """.utf8))
     }
     func travelRecords(kind: CampusTravelKind) async throws -> [CampusTravelRecord] {
+        if ProcessInfo.processInfo.arguments.contains("--preview-record-loading") {
+            try await Task.sleep(for: .seconds(60))
+        }
         travelReads[kind, default: 0] += 1
         if travelReads[kind, default: 0] > 1 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
             await PreviewRefreshCompletionGate.shared.waitForRelease()

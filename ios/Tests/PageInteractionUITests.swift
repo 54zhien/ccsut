@@ -532,6 +532,20 @@ final class PageInteractionUITests: XCTestCase {
         }
     }
 
+    func testRecordInitialLoadingIsCentered() {
+        for (page, title) in [("campus-leave", "正在读取请假记录…"), ("campus-travel", "正在读取离校记录…")] {
+            let app = launch(page, arguments: ["--preview-record-loading"])
+            let message = app.staticTexts[title]
+            XCTAssertTrue(message.waitForExistence(timeout: 8))
+            XCTAssertEqual(message.frame.midX, app.frame.midX, accuracy: 3)
+            XCTAssertGreaterThan(message.frame.midY, app.frame.height * 0.44)
+            XCTAssertLessThan(message.frame.midY, app.frame.height * 0.60)
+            XCTAssertTrue(app.buttons["campus-record-add"].isHittable)
+            capture(app, "initial-loading-\(page)")
+            app.terminate()
+        }
+    }
+
     func testCampusEmptyStatesStayCenteredWithLargerAddControl() {
         for (page, title) in [("campus-leave", "暂无请假记录"), ("campus-travel", "暂无离校记录")] {
             let app = launch(page, empty: true)
@@ -747,6 +761,10 @@ final class PageInteractionUITests: XCTestCase {
             let pushed = NSPredicate { _, _ in motionSamples("tabDown", in: diagnostic.label) > 0 }
             XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: pushed, evaluatedWith: diagnostic)], timeout: 5), .completed,
                            "Push must contain actual simultaneous tab-bar sinking and fading: \(diagnostic.label)")
+            let travel = diagnostic.label.split(separator: " ").first { $0.hasPrefix("tabYRange=") }
+                .flatMap { Double($0.dropFirst("tabYRange=".count)) } ?? 999
+            XCTAssertGreaterThan(travel, 5, "The tab bar must visibly sink")
+            XCTAssertLessThanOrEqual(travel, 24, "Use short 20pt travel, not a whole tab-bar height")
             let before = back.frame
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.45))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.45))
