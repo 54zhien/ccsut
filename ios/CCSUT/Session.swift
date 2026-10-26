@@ -222,6 +222,7 @@ final class SessionStore {
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var adoptionTask: Task<Bool, Never>?
     @ObservationIgnored private var isLoggingOut = false
+    @ObservationIgnored private var verifiedIdentity: (value: StudentIdentity, generation: UInt64)?
 
     init(api: APIClient = .shared,
          prepareEcardSession: @escaping @MainActor (String, WKWebsiteDataStore) -> Void = {
@@ -262,6 +263,7 @@ final class SessionStore {
             // Do this before exposing MainTabs or starting the ecard prefetch.
             await injectToWebKit(allCookies())
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            guard publishVerifiedIdentity(generation: generation) else { return }
             phase = .loggedIn
             await refreshIfNeeded()
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
@@ -309,8 +311,27 @@ final class SessionStore {
     }
 
     private func verifySession() async throws {
+        let generation = CookieJar.generation
         let profile = try await api.authenticatedProfile()
-        guard profile.xsxh?.isEmpty == false else { throw APIError.notLoggedIn }
+        guard CookieJar.generation == generation, !Task.isCancelled else { throw CancellationError() }
+        if phase == .loggedIn || phase == .refreshing, let studentId, studentId != profile.studentNumber {
+            throw APIError.notLoggedIn
+        }
+        verifiedIdentity = (profile, generation)
+    }
+
+    private func publishVerifiedIdentity(generation: UInt64) -> Bool {
+        guard !Task.isCancelled, CookieJar.generation == generation,
+              let verifiedIdentity, verifiedIdentity.generation == generation else { return false }
+        let number = verifiedIdentity.value.studentNumber
+        if studentId != number {
+            let savedNumber = UserDefaults.standard.string(forKey: sidKey)
+            studentName = savedNumber == number ? UserDefaults.standard.string(forKey: nameKey) : nil
+            if savedNumber != number { UserDefaults.standard.removeObject(forKey: nameKey) }
+        }
+        studentId = number
+        UserDefaults.standard.set(number, forKey: sidKey)
+        return true
     }
 
     // MARK: 静默续期
@@ -350,6 +371,7 @@ final class SessionStore {
                   !APIClient.isAuthenticationURL(final) else { throw APIError.notLoggedIn }
             try await verifySession()
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            guard publishVerifiedIdentity(generation: generation) else { return }
             phase = .loggedIn
             lastError = nil
             await injectToWebKit(allCookies())
@@ -445,6 +467,7 @@ final class SessionStore {
         }
         guard CookieJar.generation == generation, !Task.isCancelled else { return false }
         CookieJar.commit(generation: generation)
+        guard publishVerifiedIdentity(generation: generation) else { return false }
         phase = .loggedIn
         lastError = nil
         Task {
@@ -454,26 +477,24 @@ final class SessionStore {
         return CookieJar.generation == generation && !Task.isCancelled
     }
 
-    /// 顺手把姓名学号读出来（/admin/xsd/xk/listV2 里有）
+    /// Publish independently verified identity first. Elective metadata is only
+    /// optional name enrichment and cannot invalidate a closed-channel login.
     func loadProfile() async {
         guard !isLoggingOut, phase == .loggedIn || phase == .refreshing,
               !CookieJar.shared.isEmpty else { return }
         let generation = CookieJar.generation
-        // 先用缓存顶上，避免冷启动时「我的」页空白
-        if studentName == nil { studentName = UserDefaults.standard.string(forKey: nameKey) }
-        if studentId == nil { studentId = UserDefaults.standard.string(forKey: sidKey) }
-
         do {
-            let initData: ElectiveInit = try await api.electiveInit()
+            try await verifySession()
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            guard publishVerifiedIdentity(generation: generation), let studentId else { return }
+            prepareEcardSession(studentId, WebStore.dataStore)
+            // A missing name is preferable to coupling authentication to selection.
+            guard let initData = try? await api.electiveInit(),
+                  CookieJar.generation == generation, !Task.isCancelled,
+                  initData.xsxh == studentId else { return }
             if let name = initData.xsxm, !name.isEmpty {
                 studentName = name
                 UserDefaults.standard.set(name, forKey: nameKey)
-            }
-            if let sid = initData.xsxh, !sid.isEmpty {
-                studentId = sid
-                UserDefaults.standard.set(sid, forKey: sidKey)
-                prepareEcardSession(sid, WebStore.dataStore)
             }
         } catch {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
@@ -521,6 +542,7 @@ final class SessionStore {
         UserDefaults.standard.removeObject(forKey: sidKey)
         studentName = nil
         studentId = nil
+        verifiedIdentity = nil
         lastError = nil
         lastCookieCount = 0
         // 等待所有可能写 WebKit 的任务结束，再做最终清理。

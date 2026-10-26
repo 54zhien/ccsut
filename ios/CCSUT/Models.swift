@@ -7,6 +7,37 @@
 
 import Foundation
 
+/// Identity issued by the protected academic entry, independent of elective batches.
+/// Only a redirect from our fixed /admin/ request is evidence; a static page is not.
+struct StudentIdentity: Equatable, Sendable {
+    let studentNumber: String
+
+    static func portalRedirect(status: Int, responseURL: URL?, location: String?) throws -> StudentIdentity {
+        guard [301, 302, 303, 307, 308].contains(status), let responseURL,
+              trustedOrigin(responseURL), ["/admin/", "/admin"].contains(responseURL.path),
+              responseURL.query == nil, responseURL.fragment == nil,
+              let location, let target = URL(string: location, relativeTo: responseURL)?.absoluteURL,
+              trustedOrigin(target), target.fragment == nil,
+              target.path == "/frontend/views/student/xkPage/index.html",
+              let query = URLComponents(url: target, resolvingAgainstBaseURL: false)?.queryItems
+        else { throw APIError.notLoggedIn }
+        let numbers = query.filter { $0.name == "username" }
+        let proofs = query.filter { $0.name == "enc" }
+        guard numbers.count == 1, let number = numbers[0].value,
+              number.range(of: #"^[A-Za-z0-9._-]{1,64}$"#, options: .regularExpression) == (number.startIndex..<number.endIndex),
+              proofs.count == 1, let proof = proofs[0].value,
+              !proof.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              proof.rangeOfCharacter(from: .controlCharacters) == nil
+        else { throw APIError.notLoggedIn }
+        return StudentIdentity(studentNumber: number)
+    }
+
+    private static func trustedOrigin(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == "https" && url.host?.lowercased() == "tls.ccsut.cn" &&
+            (url.port == nil || url.port == 443) && url.user == nil && url.password == nil
+    }
+}
+
 // MARK: - 统一响应壳
 
 /// 所有 /admin/** 接口都返回 {"ret":0,"msg":"success","data":...}

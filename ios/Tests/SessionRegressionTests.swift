@@ -28,8 +28,11 @@ import WebKit
 final class SchoolProtocol: URLProtocol {
     nonisolated(unsafe) static var requestCount = 0
     nonisolated(unsafe) static var requestPaths: [String] = []
-    nonisolated(unsafe) static var response: (URLRequest) throws -> (Int, URL, [String: String], String) = {
-        (200, $0.url!, [:], "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\",\"xsxm\":\"Fixture\"}}")
+    nonisolated(unsafe) static var response: (URLRequest) throws -> (Int, URL, [String: String], String) = { request in
+        if request.url?.path == "/admin/" {
+            return try SchoolProtocol.verifiedPortalResponse(for: request)
+        }
+        return (200, request.url!, [:], "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\",\"xsxm\":\"Fixture\"}}")
     }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -60,6 +63,22 @@ final class SchoolProtocol: URLProtocol {
             data.append(contentsOf: buffer.prefix(count))
         }
         return String(data: data, encoding: .utf8)
+    }
+
+    static func verifiedPortalResponse(
+        for request: URLRequest,
+        studentNumber: String = "fixture-student",
+        headers: [String: String] = [:]
+    ) throws -> (Int, URL, [String: String], String) {
+        guard let url = request.url,
+              url.scheme == "https", url.host == "tls.ccsut.cn", url.path == "/admin/",
+              url.query == nil, url.fragment == nil,
+              studentNumber.range(of: #"^[A-Za-z0-9._-]{1,64}$"#, options: .regularExpression) != nil
+        else { throw URLError(.badServerResponse) }
+
+        var responseHeaders = headers
+        responseHeaders["Location"] = "/frontend/views/student/xkPage/index.html?username=\(studentNumber)&enc=fixture&dbname=fixture"
+        return (303, url, responseHeaders, "")
     }
 }
 
@@ -142,13 +161,16 @@ struct SessionRegressionTests {
 
         CookieJar.shared = [cookie("jw_uf", "cold-start"), restoredTGC]
         WebStore.dataStore = .nonPersistent()
-        var coldStartReads = 0
         SchoolProtocol.response = { request in
-            coldStartReads += 1
-            // Only the validation returns an identity. The follow-up profile
-            // is empty so this offline test never launches a real SSO prefetch.
-            let body = coldStartReads == 1 ? "{\"ret\":0,\"data\":{\"xsxh\":\"fixture\"}}" : "{\"ret\":0,\"data\":{}}"
-            return (200, request.url!, ["Set-Cookie": "jw_uf=cold-rotated; Path=/; Secure; HttpOnly"], body)
+            if request.url?.path == "/admin/" {
+                return try SchoolProtocol.verifiedPortalResponse(
+                    for: request,
+                    studentNumber: "fixture",
+                    headers: ["Set-Cookie": "jw_uf=cold-rotated; Path=/; Secure; HttpOnly"]
+                )
+            }
+            // Elective metadata is intentionally empty; it is optional enrichment only.
+            return (200, request.url!, [:], "{\"ret\":0,\"data\":{}}")
         }
         let restoredSession = sessionStore()
         await restoredSession.bootstrap()
@@ -459,8 +481,16 @@ struct SessionRegressionTests {
         check(afterFailure?.first(where: { $0.name == "jw_uf" })?.value == "previous",
               "unverified WebKit credentials do not overwrite Keychain")
 
-        SchoolProtocol.response = { (200, $0.url!, ["Set-Cookie": "jw_uf=verified; Path=/; Secure; HttpOnly"],
-                                     "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}") }
+        SchoolProtocol.response = { request in
+            if request.url?.path == "/admin/" {
+                return try SchoolProtocol.verifiedPortalResponse(
+                    for: request,
+                    headers: ["Set-Cookie": "jw_uf=verified; Path=/; Secure; HttpOnly"]
+                )
+            }
+            return (200, request.url!, ["Set-Cookie": "jw_uf=verified; Path=/; Secure; HttpOnly"],
+                    "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}")
+        }
         let validAdoption = sessionStore()
         check(await validAdoption.adoptCookies(), "verified WebKit adoption succeeds")
         check(CookieJar.header(for: "tls.ccsut.cn") == "jw_uf=verified",
@@ -494,6 +524,7 @@ struct SessionRegressionTests {
                 }
                 return (302, url, ["Location": "/frontend/student", "Set-Cookie": "jw_uf=renewed; Path=/; Secure; HttpOnly"], "")
             }
+            if url.path == "/admin/" { return try SchoolProtocol.verifiedPortalResponse(for: req) }
             return (200, url, [:], "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}")
         }
         let renewal = sessionStore()
@@ -559,6 +590,7 @@ struct SessionRegressionTests {
                     preservedTicket = url.query == "ticket=fixture%2Bticket%26part%3D2"
                     return (302, url, ["Location":"/frontend/student", "Set-Cookie":"jw_uf=http-renewed; Path=/; Secure"], "")
                 }
+                if url.path == "/admin/" { return try SchoolProtocol.verifiedPortalResponse(for: request) }
                 return (200, url, [:], "{\"ret\":0,\"data\":{\"xsxh\":\"fixture-student\"}}")
             }
             let store = sessionStore()

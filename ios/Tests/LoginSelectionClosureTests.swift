@@ -63,6 +63,8 @@ final class LoginClosureProtocol: URLProtocol {
         try? await WebStore.dataStore.httpCookieStore.set(cookie)
         let adopted = store()
         check(await adopted.adoptCookies(), "fresh WebKit login is adopted while the elective channel is closed")
+        check(adopted.studentId == LoginClosureProtocol.number,
+              "verified account is published before the logged-in UI is exposed")
         await adopted.loadProfile()
         check(adopted.phase == .loggedIn && adopted.studentId == LoginClosureProtocol.number,
               "verified account remains available to campus and electricity pages")
