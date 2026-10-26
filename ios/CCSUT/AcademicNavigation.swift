@@ -88,14 +88,19 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
                 bar.alpha = originalAlpha
                 return
             }
-            // Establish the real bar's start state before native visibility/layout changes.
+            // UIKit must calculate visibility geometry with an untransformed bar.
+            // Staging the lowered transform before this call shifts its restored
+            // layout by one bar height once that transform is removed.
+            UIView.performWithoutAnimation {
+                bar.transform = originalTransform
+                bar.alpha = hidden ? originalAlpha : 0
+            }
+            tabs.setTabBarHidden(hidden, animated: true)
+            // Stage presentation motion only after native visibility/layout work.
             let prepare = {
                 bar.transform = hidden ? originalTransform : loweredTransform
                 bar.alpha = hidden ? originalAlpha : 0
             }
-            UIView.performWithoutAnimation(prepare)
-            tabs.setTabBarHidden(hidden, animated: true)
-            // Native visibility must not overwrite the staged starting transform.
             UIView.performWithoutAnimation(prepare)
             let finish: (Bool) -> Void = { [weak self, weak tabs] cancelled in
                 #if DEBUG
@@ -103,9 +108,9 @@ struct AcademicPopSupport: UIViewControllerRepresentable {
                 #endif
                 guard let self, self.tabTransitionID == id, let tabs else { return }
                 self.tabTransitionCoordinator = nil
-                tabs.setTabBarHidden(cancelled ? previousHidden : hidden, animated: false)
                 UIView.performWithoutAnimation {
                     tabs.tabBar.transform = originalTransform
+                    tabs.setTabBarHidden(cancelled ? previousHidden : hidden, animated: false)
                     tabs.tabBar.alpha = originalAlpha
                 }
                 #if DEBUG

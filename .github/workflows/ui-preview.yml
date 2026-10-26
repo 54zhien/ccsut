@@ -204,6 +204,7 @@ jobs:
           fi
           if [ "$NAVIGATION_CHECKS_ONLY" = 'true' ]; then
             TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
               -only-testing:CCSUTUITests/PageInteractionUITests/testDetailTabsHideAndReturnWithHome
             )
           fi
