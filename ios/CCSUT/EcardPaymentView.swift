@@ -354,17 +354,20 @@ struct EcardPaymentView: View {
                 .minimumScaleFactor(0.65)
                 .frame(width: scale * 470, height: max(54, scale * 138))
                 .position(x: scale * 512, y: scale * 704)
-            Text("新缴费已锁定，勿重复缴费")
-                .font(.system(size: max(9, scale * 25), weight: .medium))
+            Button { showingRecoveryHelp = true } label: {
+                VStack(spacing: 1) {
+                    Text("核实原订单 ›").font(.system(size: max(11, scale * 30), weight: .semibold))
+                    Text("新缴费已锁定，勿重复缴费").font(.system(size: max(8, scale * 22)))
+                }
                 .foregroundStyle(Color(red: 0.15, green: 0.14, blue: 0.12))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
+                .lineLimit(1).minimumScaleFactor(0.8)
                 .frame(width: scale * 550, height: max(44, scale * 72))
+                .contentShape(Rectangle())
+            }
+                .buttonStyle(.plain)
                 .position(x: scale * 512, y: scale * 870)
-            Button("核实原订单") { showingRecoveryHelp = true }
-                .buttonStyle(MeterKeyButtonStyle())
-                .frame(width: scale * 410, height: max(44, scale * 100))
-                .position(x: scale * 512, y: scale * 1055)
+                .accessibilityLabel("核实原订单")
+                .accessibilityHint("新缴费已锁定，查看原订单处理说明")
                 .accessibilityIdentifier("payment-recovery-help")
             photographicActionButton(title: model.isStarting ? "正在读取" : "重试读取",
                                      accessibilityLabel: "重试读取", identifier: "payment-recovery-retry",
@@ -1164,6 +1167,7 @@ struct EcardPaymentView: View {
             guard movement != 0 else { return }
             adjustDigit(place: place, direction: movement > 0 ? 1 : -1, steps: abs(movement))
         }
+        .background(counterGlass)
         .accessibilityLabel("金额\(label)")
         .accessibilityValue("\(currentDigit)")
         .accessibilityIdentifier("meter-digit-\(place)")
@@ -1267,15 +1271,6 @@ struct EcardPaymentView: View {
                     meterHousing(width: width) {
                         VStack(alignment: .leading, spacing: 9) {
                             engravedPlate
-                            HStack(alignment: .center) {
-                                Text("确认缴费")
-                                    .font(.subheadline.weight(.bold)).foregroundStyle(enamelInk)
-                                Spacer(minLength: 4)
-                                if !model.isSubmitting {
-                                    Button("关闭确认缴费") { model.confirmation = nil }
-                                        .buttonStyle(MeterKeyButtonStyle())
-                                }
-                            }
                             Text("支付明细")
                                 .font(.caption.weight(.bold)).foregroundStyle(enamelInk.opacity(0.72))
                             Text("¥\(confirmed.amount.ecardAmountText) 元")
@@ -1315,7 +1310,7 @@ struct EcardPaymentView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
                 }
-                .background(Color(.systemGroupedBackground))
+                .background(meterStageSurface)
             } else {
                 ScrollView {
                     photographicConfirmation(confirmed, width: width)
@@ -1324,6 +1319,11 @@ struct EcardPaymentView: View {
                 .background(meterStageSurface)
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            SheetHeader(title: "确认缴费") { model.confirmation = nil }
+                .disabled(model.isSubmitting)
+        }
+        .background(meterStageSurface.ignoresSafeArea())
     }
 
     private func photographicConfirmation(_ confirmed: EcardPaymentModel.Confirmation, width: CGFloat) -> some View {
@@ -1341,7 +1341,7 @@ struct EcardPaymentView: View {
             photographicStaticLCD(label: "支付方式", value: "一卡通余额", scale: scale)
                 .frame(width: scale * 320, height: max(44, scale * 125))
                 .position(x: scale * 704, y: scale * 330)
-            Text("确认缴费")
+            Text("本次缴费 · 元")
                 .font(.system(size: max(10, scale * 31), weight: .semibold))
                 .foregroundStyle(Color(red: 0.13, green: 0.13, blue: 0.12))
                 .frame(width: scale * 550, height: max(20, scale * 48))
@@ -1370,13 +1370,6 @@ struct EcardPaymentView: View {
                 .lineLimit(1).minimumScaleFactor(0.68)
                 .frame(width: scale * 550, height: max(44, scale * 72))
                 .position(x: scale * 512, y: scale * 870)
-
-            if !model.isSubmitting {
-                Button("关闭确认缴费") { model.confirmation = nil }
-                    .buttonStyle(MeterKeyButtonStyle())
-                    .frame(width: scale * 410, height: max(44, scale * 100))
-                    .position(x: scale * 512, y: scale * 1055)
-            }
 
             if model.isSubmitting {
                 HStack(spacing: 8) {

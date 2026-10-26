@@ -508,6 +508,7 @@ final class PageInteractionUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(ones.frame.height, 44)
             turnMeterDrum(ones)
             XCTAssertEqual(ones.value as? String, "1")
+            screen("physical-meter-drums-\(large ? "large" : "landscape")")
             let pay = app.buttons["立即缴费"]
             revealMeterControl(pay, in: app)
             XCTAssertGreaterThanOrEqual(pay.frame.height, 44)
@@ -554,8 +555,26 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.firstMatch.isHittable)
         entry.tap()
         XCTAssertTrue(back.waitForExistence(timeout: 8))
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.30, dy: 0.84))
-            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.84)))
+        let ready = NSPredicate { _, _ in back.isHittable && pay.isHittable }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: ready, evaluatedWith: app)], timeout: 5), .completed)
+        let window = app.windows.firstMatch
+        print("METER_CONTENT_SWIPE app=\(app.frame) window=\(window.frame) state=\(app.state.rawValue)")
+        XCTAssertEqual(app.state, .runningForeground)
+        // Exercise both outcomes from the actual window's blank content area.
+        // A deliberately short, held gesture cancels; a long, fast gesture
+        // commits. UIKit, not the application, decides the completion threshold.
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: 0.84))
+            .press(forDuration: 0.05,
+                   thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.34, dy: 0.84)),
+                   withVelocity: .slow, thenHoldForDuration: 0.2)
+        let cancelled = NSPredicate { _, _ in app.state == .runningForeground && back.isHittable && pay.isHittable }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: cancelled, evaluatedWith: app)], timeout: 5), .completed,
+                       "Cancelling the meter's native content swipe must leave its controls usable")
+        capture(app, "physical-meter-cancelled-content-swipe")
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.84))
+            .press(forDuration: 0.05,
+                   thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.84)),
+                   withVelocity: .fast, thenHoldForDuration: 0)
         let returned = NSPredicate { _, _ in entry.exists && entry.isHittable && app.tabBars.firstMatch.isHittable }
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: returned, evaluatedWith: app)], timeout: 5), .completed,
                        "Content swipe outside embedded selectors still returns to Campus")

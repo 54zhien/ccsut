@@ -97,13 +97,19 @@ jobs:
         if: failure()
         run: xcrun simctl list devices > "$RUNNER_TEMP/ui-screenshots/simulator-state.txt"
       - name: Render physical meter before interaction checks
-        if: ${{ inputs.test_scope == 'meter-final' && steps.simulator.conclusion == 'success' }}
+        if: ${{ (inputs.test_scope == 'meter-final' || inputs.test_scope == 'meter-gestures') && steps.simulator.conclusion == 'success' }}
+        env:
+          TEST_SCOPE: ${{ inputs.test_scope }}
         run: |
           set -euo pipefail
           OUT="$RUNNER_TEMP/meter-screenshots"
           mkdir -p "$OUT"
           git rev-parse HEAD > "$OUT/source-revision.txt"
-          for PAGE in campus-electricity campus-electricity-large campus-electricity-confirmation campus-electricity-result campus-electricity-pending campus-electricity-recovery-corrupt course account elective-detail enrolled-detail; do
+          PAGES=(campus-electricity campus-electricity-large campus-electricity-confirmation campus-electricity-result campus-electricity-pending campus-electricity-recovery-corrupt course account elective-detail enrolled-detail)
+          if [ "$TEST_SCOPE" = 'meter-gestures' ]; then
+            PAGES=(campus-electricity-large campus-electricity-confirmation campus-electricity-recovery-corrupt)
+          fi
+          for PAGE in "${PAGES[@]}"; do
             LAUNCH_ARGS=(--preview-ui --preview-page "$PAGE")
             if [ "$PAGE" = 'campus-electricity-large' ]; then
               LAUNCH_ARGS=(--preview-ui --preview-page campus-electricity -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
@@ -122,7 +128,7 @@ jobs:
           xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
           xcrun simctl terminate "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut
       - name: Publish physical meter appearance
-        if: ${{ always() && inputs.test_scope == 'meter-final' }}
+        if: ${{ always() && (inputs.test_scope == 'meter-final' || inputs.test_scope == 'meter-gestures') }}
         uses: actions/upload-artifact@v4
         with:
           name: CCSUT-meter-appearance
@@ -193,6 +199,8 @@ jobs:
           fi
           if [ "$TEST_SCOPE" = 'meter-gestures' ]; then
             TEST_SELECTION=(
+                -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterConfirmationRemainsExplicit
+                -only-testing:CCSUTUITests/PageInteractionUITests/testPaymentRecoveryEntry
               -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
               -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterAdaptiveControls
               -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterReturnsToCampus
@@ -319,6 +327,17 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
             "${TEST_SELECTION[@]}" \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
+      - name: Verify dark cold-start payment confirmation
+        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' && (inputs.test_scope == 'meter-final' || inputs.test_scope == 'meter-gestures') }}
+        run: |
+          set -euo pipefail
+          xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance dark
+          trap 'xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light' EXIT
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-meter-dark-tests.xcresult" \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterConfirmationRemainsExplicit \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-meter-dark-test.log"
       - name: Verify actual reduced motion preference
         if: ${{ !cancelled() && steps.simulator.conclusion == 'success' && (inputs.test_scope == 'meter-final' || inputs.test_scope == 'meter-gestures' || inputs.test_scope == 'design-layout' || inputs.test_scope == 'design-motion' || inputs.test_scope == 'all' || github.event_name == 'push') }}
         run: |
@@ -344,6 +363,9 @@ jobs:
           if [ -d "$RUNNER_TEMP/ui-motion-tests.xcresult" ]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-motion-tests.xcresult" --output-path "$RUNNER_TEMP/ui-motion-attachments"
           fi
+          if [ -d "$RUNNER_TEMP/ui-meter-dark-tests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-meter-dark-tests.xcresult" --output-path "$RUNNER_TEMP/ui-meter-dark-attachments"
+          fi
       - name: Publish interaction evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -358,6 +380,10 @@ jobs:
             ${{ runner.temp }}/ui-motion-test.log
             ${{ runner.temp }}/ui-motion-attachments/*.png
             ${{ runner.temp }}/ui-motion-attachments/manifest.json
+            ${{ runner.temp }}/ui-meter-dark-test.log
+            ${{ runner.temp }}/ui-meter-dark-attachments/*.png
+            ${{ runner.temp }}/ui-meter-dark-attachments/*.txt
+            ${{ runner.temp }}/ui-meter-dark-attachments/manifest.json
           if-no-files-found: ignore
           retention-days: 14
       - name: Compare failed checks with legacy blur
