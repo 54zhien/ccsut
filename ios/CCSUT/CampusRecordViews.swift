@@ -15,25 +15,18 @@ struct CampusRecordsView: View {
     var body: some View {
         Group {
             if let model {
-                if mode == .leave {
-                    LeaveTicketWalletView(model: model, account: session.studentId ?? "")
-                        .id(Connection(account: session.studentId, generation: CookieJar.generation))
-                } else {
-                    CampusRecordContent(model: model, mode: mode, account: session.studentId ?? "",
-                                        selected: $selectedKind) { reconnectRevision &+= 1 }
-                }
+                CampusRecordContent(model: model, mode: mode, account: session.studentId ?? "",
+                                    selected: $selectedKind) { reconnectRevision &+= 1 }
             } else if accountError {
                 ContentUnavailableView {
                     Label("暂时无法读取校园记录", systemImage: "person.crop.circle.badge.exclamationmark")
                 } description: { Text("请先确认当前登录账号，再重新打开此页面。") }
             } else {
-                ProgressView("正在连接校园服务…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                PageLoadingState("正在连接校园服务…").frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background { if mode == .leave { LeaveWalletBackground() } else { Color(.systemGroupedBackground) } }
-        .academicDetailChrome(title: mode == .leave ? "请假条票夹" : "节假日离返校",
-                              backgroundColor: mode == .leave ? .clear : Color(.systemGroupedBackground))
-        .background { if mode == .leave { LeaveWalletBackground() } }
+        .background(Color(.systemGroupedBackground))
+        .academicDetailChrome(title: mode == .leave ? "请假" : "节假日离返校")
         .task(id: ConnectionTask(connection: Connection(account: session.studentId, generation: CookieJar.generation), revision: reconnectRevision)) {
             let connection = Connection(account: session.studentId, generation: CookieJar.generation)
             // A dismissed form resumes the same account/session. Refresh its existing model
@@ -66,6 +59,7 @@ struct CampusRecordsView: View {
 }
 
 private struct CampusRecordContent: View {
+    @Environment(\.deviceCornerRadius) private var deviceCornerRadius
     let model: CampusRecordsModel
     let mode: CampusRecordsView.Mode
     let account: String
@@ -73,35 +67,63 @@ private struct CampusRecordContent: View {
     let reconnect: () -> Void
     @State private var officialPage: CampusWebDestination?
     @State private var nativeForm: CampusFormKind?
+    @State private var addControlSize: CGSize = .zero
+    @State private var headerHeight: CGFloat = 0
     private struct ReadTask: Hashable { let model: ObjectIdentifier; let kind: CampusTravelKind }
 
     var body: some View {
-        PageScrollSurface(refresh: {
-            if mode == .leave { await model.loadLeave(reset: true) }
-            else { await model.loadTravel(kind: selected) }
-        }) { _, _ in
-            LazyVStack(alignment: .leading, spacing: 16) {
-                if mode == .travel {
-                    Picker("记录类型", selection: $selected) {
-                        ForEach(CampusTravelKind.allCases, id: \.self) { Text($0.title).tag($0) }
+        GeometryReader { viewport in
+            PageScrollSurface(refresh: {
+                if mode == .leave { await model.loadLeave(reset: true) }
+                else { await model.loadTravel(kind: selected) }
+            }, refreshHaptics: true) { contentViewport, _ in
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if mode == .travel {
+                            Picker("记录类型", selection: $selected) {
+                                ForEach(CampusTravelKind.allCases, id: \.self) { Text($0.title).tag($0) }
+                            }
+                            .pickerStyle(.segmented)
+                            .accessibilityIdentifier("campus-travel-kind")
+                        }
+                        AppSectionHeading(mode == .leave ? "申请记录" : selected.title).padding(.top, 8)
                     }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("campus-travel-kind")
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+                    if mode == .leave {
+                        leaveContent(viewportHeight: contentViewport.height)
+                    } else {
+                        travelContent(viewportHeight: contentViewport.height)
+                    }
                 }
-                CampusServiceAction(title: mode == .leave ? "申请请假" : "办理\(selected == .departure ? "离校" : "返校")登记",
-                                    subtitle: mode == .leave ? "填写请假信息，提交学校审核" : "登记假期安排，查看办理进度",
-                                    symbol: mode == .leave ? "doc.text" : "figure.walk.departure") {
-                    if mode == .leave { nativeForm = .leave }
-                    else if selected == .departure { nativeForm = .departure }
-                    else { officialPage = .returning }
-                }
-                Text(mode == .leave ? "申请记录" : selected.title).font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary).padding(.horizontal, 4).padding(.top, 8).accessibilityAddTraits(.isHeader)
-                if mode == .leave { leaveContent } else { travelContent }
+                .padding(.horizontal, AppLayout.pageInset).padding(.top, 24).padding(.bottom, 28)
+                .frame(maxWidth: 720).frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 28)
-            .frame(maxWidth: 720).frame(maxWidth: .infinity)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button(action: addRecord) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundStyle(.white)
+                            .frame(width: 64, height: 64)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.tint(.accentColor).interactive(), in: Circle())
+                    .onGeometryChange(for: CGSize.self) { $0.size } action: { addControlSize = $0 }
+                    .accessibilityLabel(addRecordTitle)
+                    .accessibilityHint(addRecordHint)
+                    .accessibilityIdentifier("campus-record-add")
+                }
+                // Convert the screen-edge inset into this horizontally safe viewport.
+                // The measured native circle and the physical corner share a center.
+                .padding(.trailing, SheetLayout.controlInset(deviceCornerRadius, diameter: addControlSize.width) - viewport.safeAreaInsets.trailing)
+                .padding(.bottom, SheetLayout.controlInset(deviceCornerRadius, diameter: addControlSize.height))
+                .padding(.top, 12)
+            }
         }
+        // Anchor to the physical bottom; retain SwiftUI's keyboard avoidance.
+        .ignoresSafeArea(.container, edges: .bottom)
         // A real account/session replacement must start reads even when the selected kind
         // did not change; SwiftUI may retain this content view's identity across model swaps.
         .task(id: ReadTask(model: ObjectIdentifier(model), kind: selected)) {
@@ -116,14 +138,31 @@ private struct CampusRecordContent: View {
         }
     }
 
-    @ViewBuilder private var leaveContent: some View {
+    private var addRecordTitle: String {
+        mode == .leave ? "申请请假" : "办理\(selected == .departure ? "离校" : "返校")登记"
+    }
+
+    private var addRecordHint: String {
+        mode == .leave ? "打开请假申请表单" : "打开\(selected == .departure ? "离校" : "返校")登记页面"
+    }
+
+    private func addRecord() {
+        if mode == .leave { nativeForm = .leave }
+        else if selected == .departure { nativeForm = .departure }
+        else { officialPage = .returning }
+    }
+
+    @ViewBuilder private func leaveContent(viewportHeight: CGFloat) -> some View {
         if let error = model.leaveError {
             notice(error) { Task { await model.loadLeave(reset: model.leaveFailureWasRefresh) } }
         }
         if model.isLoadingLeave && model.leave.items.isEmpty {
-            ProgressView("正在读取请假记录…").frame(maxWidth: .infinity).padding(.vertical, 32)
+            PageLoadingState("正在读取请假记录…")
+                .modifier(CampusRecordEmptyStateLayout(viewportHeight: viewportHeight, headerHeight: headerHeight))
         } else if model.leave.items.isEmpty && model.leaveError == nil {
             ContentUnavailableView("暂无请假记录", systemImage: "doc.text.magnifyingglass")
+                .accessibilityIdentifier("campus-leave-empty")
+                .modifier(CampusRecordEmptyStateLayout(viewportHeight: viewportHeight, headerHeight: headerHeight))
         }
         ForEach(model.leave.items) { record in
             recordCard(title: record.typeName ?? "请假记录", status: record.statusText, pending: record.status == 0) {
@@ -149,15 +188,18 @@ private struct CampusRecordContent: View {
         }
     }
 
-    @ViewBuilder private var travelContent: some View {
+    @ViewBuilder private func travelContent(viewportHeight: CGFloat) -> some View {
         if let error = model.travelErrors[selected] {
             notice(error) { Task { await model.loadTravel(kind: selected) } }
         }
         let records = model.travel[selected] ?? []
         if model.loadingTravel.contains(selected) && records.isEmpty {
-            ProgressView("正在读取\(selected.title)…").frame(maxWidth: .infinity).padding(.vertical, 32)
+            PageLoadingState("正在读取\(selected.title)…")
+                .modifier(CampusRecordEmptyStateLayout(viewportHeight: viewportHeight, headerHeight: headerHeight))
         } else if records.isEmpty && model.travelErrors[selected] == nil {
             ContentUnavailableView("暂无\(selected.title)", systemImage: "calendar.badge.checkmark")
+                .accessibilityIdentifier("campus-travel-empty")
+                .modifier(CampusRecordEmptyStateLayout(viewportHeight: viewportHeight, headerHeight: headerHeight))
         }
         ForEach(records) { record in
             recordCard(title: record.title, status: record.statusText, pending: record.statusText == "待审核") {
@@ -219,6 +261,9 @@ private actor CampusPreviewReader: CampusReading {
     private var travelReads: [CampusTravelKind: Int] = [:]
 
     func leaveRecords(page: Int, size: Int) async throws -> CampusLeavePage {
+        if ProcessInfo.processInfo.arguments.contains("--preview-record-loading") {
+            try await Task.sleep(for: .seconds(60))
+        }
         leaveReads += 1
         if leaveReads > 1 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
             await PreviewRefreshCompletionGate.shared.waitForRelease()
@@ -240,10 +285,14 @@ private actor CampusPreviewReader: CampusReading {
         """.utf8))
     }
     func travelRecords(kind: CampusTravelKind) async throws -> [CampusTravelRecord] {
+        if ProcessInfo.processInfo.arguments.contains("--preview-record-loading") {
+            try await Task.sleep(for: .seconds(60))
+        }
         travelReads[kind, default: 0] += 1
         if travelReads[kind, default: 0] > 1 && ProcessInfo.processInfo.arguments.contains("--preview-controlled-refresh") {
             await PreviewRefreshCompletionGate.shared.waitForRelease()
         }
+        if InterfacePreview.emptyPage { return [] }
         return try CampusDecoder.travelRecords(Data("""
         {"code":"2000","data":[{"openid":"preview-travel","typeName":"节假日登记","status":"待审核",
         "startDate":"2026-10-01","endDate":"2026-10-07","txdz":"示例区县","jtgj":"公共交通"}]}
@@ -251,3 +300,18 @@ private actor CampusPreviewReader: CampusReading {
     }
 }
 #endif
+
+private struct CampusRecordEmptyStateLayout: ViewModifier {
+    let viewportHeight: CGFloat
+    let headerHeight: CGFloat
+    @State private var contentHeight: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        let contentTop = 24 + headerHeight + 16
+        content
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+            .padding(.top, max(0, (viewportHeight - contentHeight) / 2 - contentTop))
+            .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - contentTop - 28), alignment: .top)
+    }
+}

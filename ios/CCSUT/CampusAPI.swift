@@ -38,6 +38,36 @@ struct CampusOfficialCookieHandoff: Sendable {
     }
 }
 
+enum CampusOfficialNavigationDecision: Equatable {
+    case allow
+    case upgrade(URL)
+    case blocked(reportFailure: Bool)
+}
+
+/// The browser is restricted to the school's official portal and CAS host.
+/// Kept Foundation-only so the boundary can be checked without WebKit.
+enum CampusOfficialNavigationPolicy {
+    static func decision(for url: URL?, targetIsMainFrame: Bool?) -> CampusOfficialNavigationDecision {
+        guard let targetIsMainFrame else { return .blocked(reportFailure: false) }
+        guard let url else { return .blocked(reportFailure: false) }
+        if url.absoluteString == "about:blank" { return .allow }
+        guard ["ehall.ccsut.cn", "auth.ccsut.cn"].contains(url.host?.lowercased() ?? ""),
+              url.user == nil, url.password == nil else { return .blocked(reportFailure: targetIsMainFrame) }
+        if url.scheme == "http" {
+            guard targetIsMainFrame, url.port == nil || url.port == 80 else {
+                return .blocked(reportFailure: targetIsMainFrame)
+            }
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            components?.scheme = "https"
+            components?.port = nil
+            guard let upgraded = components?.url else { return .blocked(reportFailure: targetIsMainFrame) }
+            return .upgrade(upgraded)
+        }
+        guard url.port == nil || url.port == 443 else { return .blocked(reportFailure: targetIsMainFrame) }
+        return url.scheme == "https" ? .allow : .blocked(reportFailure: targetIsMainFrame)
+    }
+}
+
 private final class CampusNoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
@@ -76,6 +106,22 @@ enum CampusTravelKind: String, CaseIterable, Sendable {
     }
 }
 
+enum CampusAuthenticationDiagnosticStage: String, Sendable {
+    case idle, initialValidation, casRedirect, renewedValidation, authenticated
+}
+
+enum CampusAuthenticationDiagnosticOutcome: String, Sendable {
+    case none, inProgress, accepted, rejected, failed
+}
+
+/// Fixed, in-memory state for diagnosing the native CAS flow. It contains no
+/// account, URL, response, token, or cookie material.
+struct CampusAuthenticationDiagnostic: Equatable, Sendable {
+    let stage: CampusAuthenticationDiagnosticStage
+    let outcome: CampusAuthenticationDiagnosticOutcome
+    let casCookiesChangedDuringAttempt: Bool
+}
+
 protocol CampusReading: Sendable {
     func leaveRecords(page: Int, size: Int) async throws -> CampusLeavePage
     func travelRecords(kind: CampusTravelKind) async throws -> [CampusTravelRecord]
@@ -109,6 +155,10 @@ actor CampusClient: CampusReading {
     let credentials: any CampusSessionCredentials
     let transport: any CampusTransport
     let generation: UInt64
+    private(set) var authenticationDiagnostic = CampusAuthenticationDiagnostic(
+        stage: .idle, outcome: .none, casCookiesChangedDuringAttempt: false
+    )
+    private var observedCASCookieRotation = false
     var formAttemptIDs: Set<UUID> = []
     private var identities: [Subsystem: Identity] = [:]
 
@@ -188,6 +238,26 @@ actor CampusClient: CampusReading {
         return try CampusDecoder.travelRecords(data)
     }
 
+    /// Return the name attached to this campus identity without loading a form
+    /// or issuing a business request. The result is bound to the validated
+    /// account and the Cookie generation that authenticated it.
+    func authenticatedDisplayName(expectedAccount: String,
+                                  expectedGeneration: UInt64) async throws -> CampusStudentDisplayName? {
+        try checkState()
+        guard account == expectedAccount, generation == expectedGeneration else {
+            throw CampusError.identityMismatch
+        }
+        let identity = try await identity(for: .leave, callback: Self.leavePage, force: false)
+        try checkState()
+        guard identity.account == expectedAccount, generation == expectedGeneration else {
+            throw CampusError.identityMismatch
+        }
+        guard let rawName = identity.realName else { return nil }
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
+        return CampusStudentDisplayName(account: identity.account, generation: generation, value: name)
+    }
+
     private func query(_ subsystem: Subsystem, callback: URL, path: String,
                        body: (String) -> [String: Any]) async throws -> Data {
         for attempt in 0...1 {
@@ -198,7 +268,7 @@ actor CampusClient: CampusReading {
             request.setValue("application/json;charset=UTF-8", forHTTPHeaderField: "Content-Type")
             request.setValue(callback.absoluteString, forHTTPHeaderField: "Referer")
             request.httpBody = try JSONSerialization.data(withJSONObject: body(identity.userId))
-            do { return try await send(request).0 }
+            do { return try await sendRead(request) }
             catch Failure.unauthorized {
                 identities[subsystem] = nil
                 if attempt == 1 { throw CampusError.authentication }
@@ -214,24 +284,93 @@ actor CampusClient: CampusReading {
         // A business 401 has already rejected this session's bearer. The proxy
         // can still return that same token from validate_full, so bypassing only
         // our dictionary is insufficient: renew CAS before validating again.
-        let cookies = AuthenticationCookies()
-        var result: Identity?
+        let initialCASCookieFingerprint = try casCookieFingerprint()
+        observedCASCookieRotation = false
         if force { identities[subsystem] = nil }
-        else { result = try await validate(callback: callback, cookies: cookies) }
-        if result == nil {
-            let redirect = request("/backstage/cas-proxy/app/redirect", query: [
-                URLQueryItem(name: "serverName", value: "https://ehall.ccsut.cn")
-            ])
-            do { _ = try await send(redirect, authenticationCookies: cookies) }
-            catch Failure.unauthorized { throw CampusError.authentication }
-            result = try await validate(callback: callback, cookies: cookies)
+        for transactionAttempt in 0...1 {
+            try checkState()
+            let cookies = AuthenticationCookies()
+            var result: Identity?
+            if !force {
+                recordAuthentication(stage: .initialValidation, outcome: .inProgress)
+                do {
+                    result = try await validate(callback: callback, cookies: cookies)
+                    recordAuthentication(stage: .initialValidation, outcome: result == nil ? .rejected : .accepted)
+                } catch {
+                    recordAuthentication(stage: .initialValidation, outcome: .failed)
+                    throw error
+                }
+            }
+            if result == nil {
+                recordAuthentication(stage: .casRedirect, outcome: .inProgress)
+                let redirect = request("/backstage/cas-proxy/app/redirect", query: [
+                    URLQueryItem(name: "serverName", value: "https://ehall.ccsut.cn")
+                ])
+                do {
+                    _ = try await send(redirect, authenticationCookies: cookies)
+                    recordAuthentication(stage: .casRedirect, outcome: .accepted)
+                } catch Failure.unauthorized {
+                    recordAuthentication(stage: .casRedirect, outcome: .rejected)
+                    throw CampusError.authentication
+                } catch {
+                    recordAuthentication(stage: .casRedirect, outcome: .failed)
+                    throw error
+                }
+                recordAuthentication(stage: .renewedValidation, outcome: .inProgress)
+                do {
+                    result = try await validate(callback: callback, cookies: cookies)
+                    recordAuthentication(stage: .renewedValidation, outcome: result == nil ? .rejected : .accepted)
+                } catch {
+                    recordAuthentication(stage: .renewedValidation, outcome: .failed)
+                    throw error
+                }
+            }
+            if let result {
+                try checkState()
+                credentials.accept(Array(cookies.updates.values), generation: generation)
+                try checkState()
+                identities[subsystem] = result
+                recordAuthentication(stage: .authenticated, outcome: .accepted)
+                return result
+            }
+            guard transactionAttempt == 0 else { throw CampusError.authentication }
+            try checkState()
+            guard try casCookieFingerprint() != initialCASCookieFingerprint else { throw CampusError.authentication }
+            observedCASCookieRotation = true
+            recordAuthentication(stage: .renewedValidation, outcome: .rejected)
         }
-        guard let result else { throw CampusError.authentication }
-        try checkState()
-        credentials.accept(Array(cookies.updates.values), generation: generation)
-        try checkState()
-        identities[subsystem] = result
-        return result
+        throw CampusError.authentication
+    }
+
+    private func recordAuthentication(stage: CampusAuthenticationDiagnosticStage,
+                                       outcome: CampusAuthenticationDiagnosticOutcome) {
+        authenticationDiagnostic = CampusAuthenticationDiagnostic(
+            stage: stage, outcome: outcome,
+            casCookiesChangedDuringAttempt: observedCASCookieRotation
+        )
+    }
+
+    private func casCookieFingerprint() throws -> Int {
+        let url = URL(string: "https://auth.ccsut.cn/backstage/cas/login")!
+        let cookies = try credentials.scopedCookies(for: url, expectedGeneration: generation).sorted {
+            let left = CookieKey($0)
+            let right = CookieKey($1)
+            if left.domain != right.domain { return left.domain < right.domain }
+            if left.name != right.name { return left.name < right.name }
+            return left.path < right.path
+        }
+        var hasher = Hasher()
+        for cookie in cookies {
+            let key = CookieKey(cookie)
+            hasher.combine(key.name)
+            hasher.combine(key.domain)
+            hasher.combine(key.path)
+            hasher.combine(cookie.value)
+            hasher.combine(cookie.expiresDate?.timeIntervalSince1970 ?? -1)
+            hasher.combine(cookie.isSecure)
+            hasher.combine(cookie.isHTTPOnly)
+        }
+        return hasher.finalize()
     }
 
     private func validate(callback: URL, cookies: AuthenticationCookies) async throws -> Identity? {
@@ -257,6 +396,27 @@ actor CampusClient: CampusReading {
         request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", forHTTPHeaderField: "User-Agent")
         return request
+    }
+
+    private struct ReadStatus: Decodable {
+        let code: String?
+        private enum CodingKeys: String, CodingKey { case code }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            if let text = try? c.decode(String.self, forKey: .code) { code = text }
+            else { code = try c.decodeIfPresent(Int.self, forKey: .code).map(String.init) }
+        }
+    }
+
+    /// Only read callers consume this signal with a bounded CAS recovery loop.
+    /// Mutation responses must retain their existing uncertain-outcome handling.
+    func sendRead(_ request: URLRequest) async throws -> Data {
+        let data = try await send(request).0
+        switch (try? JSONDecoder().decode(ReadStatus.self, from: data))?.code {
+        case "401": throw Failure.unauthorized
+        case "403": throw CampusError.forbidden
+        default: return data
+        }
     }
 
     /// Follow only the official CAS/ehall chain, with fresh Cookie matching per hop.
@@ -331,13 +491,16 @@ actor CampusClient: CampusReading {
     private static func trustedURL(_ url: URL) -> URL? {
         guard ["ehall.ccsut.cn", "auth.ccsut.cn"].contains(url.host?.lowercased() ?? ""),
               url.user == nil, url.password == nil,
-              url.fragment == nil,
               ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { return nil }
         let isHTTP = url.scheme?.lowercased() == "http"
         guard url.port == nil || url.port == (isHTTP ? 80 : 443) else { return nil }
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         components?.scheme = "https"
         components?.host = url.host?.lowercased()
+        // Official CAS completes with a redirect to a SPA route (#/leaveList,
+        // #/stu-leave-list, etc.). Fragments are client-side only: validate the
+        // host/authority above, then omit the fragment from the HTTP request.
+        components?.fragment = nil
         if isHTTP { components?.port = nil }
         return components?.url
     }

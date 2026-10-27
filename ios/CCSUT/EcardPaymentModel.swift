@@ -104,7 +104,7 @@ final class EcardPaymentModel {
     var amountHint: String? {
         guard !amountText.isEmpty else { return nil }
         guard let amount else { return "请输入金额，最多保留两位小数" }
-        guard amount > 0 else { return "缴费金额需大于 0" }
+        guard amount >= 10 else { return "最低充值金额为 10 元" }
         guard let maximum = fee?.maxAmount, maximum > 0 else { return "暂未获取到缴费限额，请重新加载" }
         if amount > maximum { return "单笔最多缴费 \(maximum.ecardAmountText) 元" }
         return nil
@@ -114,7 +114,7 @@ final class EcardPaymentModel {
         loadingText == nil && !isStarting && !isSubmitting && !isChecking && receipt == nil &&
         recoveryError == nil && boundGeneration == currentGeneration()
     }
-    var quickAmounts: [Decimal] { fee?.quickAmounts.filter { $0 > 0 && $0 <= (fee?.maxAmount ?? 0) } ?? [] }
+    var quickAmounts: [Decimal] { fee?.quickAmounts.filter { $0 >= 10 && $0 <= (fee?.maxAmount ?? 0) } ?? [] }
 
     func start(account: String?, force: Bool = false) {
         guard let account, !account.isEmpty else {
@@ -399,6 +399,34 @@ final class EcardPaymentModel {
             self.detail = meter
         }
     }
+
+    /// Pull-to-refresh performs reads only and joins their complete lifecycle.
+    /// A pending receipt or confirmation must never be reset by this gesture.
+    func refreshMeter(account: String?) async {
+        guard !isSubmitting, !isChecking, confirmation == nil else { return }
+        guard let account, !account.isEmpty else { return }
+        let generation = currentGeneration()
+        if self.account != account || boundGeneration != generation {
+            start(account: account, force: true)
+        } else if recoveryIssue != nil || receipt != nil {
+            return
+        } else if !isStarting && loadingText == nil {
+            if client == nil || fee == nil { start(account: account, force: true) }
+            else if let room { selectRoom(room) }
+            else if let building { selectBuilding(building) }
+            else if let campus { selectCampus(campus) }
+            else { start(account: account, force: true) }
+        }
+        // An expired read may replace its tasks with background authentication.
+        // Re-read task references until the current read chain has published.
+        while self.account == account && currentGeneration() == generation &&
+              (isStarting || loadingText != nil) && !Task.isCancelled {
+            await loginTask?.value
+            await initialTask?.value
+            await queryTask?.value
+        }
+    }
+
     private func query(_ label: String, action: @escaping @MainActor (EcardClient) async throws -> Void) {
         queryTask?.cancel()
         revision &+= 1

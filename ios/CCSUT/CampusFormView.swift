@@ -7,6 +7,7 @@ import ImageIO
     @Environment(\.dismiss) private var dismiss
     @Environment(SessionStore.self) private var session
     @Environment(\.dynamicTypeSize) private var textSize
+    @Environment(\.deviceCornerRadius) private var deviceCornerRadius
     @State private var model: CampusFormModel
     @State private var location = CampusLocation()
     @State private var photo: PhotosPickerItem?
@@ -14,6 +15,10 @@ import ImageIO
     @State private var isImporting = false
     @State private var isLocating = false
     @State private var activeEditor: String?
+    @State private var formCornerRadius: CGFloat = 0
+    @State private var reviewControlHeight: CGFloat = 0
+    @State private var confirmationCornerRadius: CGFloat = 0
+    @State private var confirmationControlHeight: CGFloat = 0
     @State private var leaveReceipt: LeaveTicketReceipt?
     @FocusState private var focusedPhone: String?
     @ScaledMetric private var editorHeight: CGFloat = 108
@@ -39,49 +44,70 @@ import ImageIO
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                SheetHeader(title: model.kind.title) { dismiss() }
-                    .disabled(model.state == .submitting)
-                if model.state == .loading {
-                    VStack(spacing: 14) {
-                        ProgressView().accessibilityIdentifier("campus-form-loading-indicator")
-                        Text("正在加载学校表单…").font(.subheadline).foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center).accessibilityIdentifier("campus-form-loading-message")
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 24) {
-                                content
+            GeometryReader { viewport in
+                VStack(spacing: 0) {
+                    if model.state == .loading {
+                        VStack(spacing: 14) {
+                            ProgressView().accessibilityIdentifier("campus-form-loading-indicator")
+                            Text("正在加载学校表单…").font(.subheadline).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center).accessibilityIdentifier("campus-form-loading-message")
+                        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ScrollViewReader { proxy in
+                            GeometryReader { scrollViewport in
+                            ScrollView {
+                                VStack(alignment: presentsStatus ? .center : .leading, spacing: 24) {
+                                    content
+                                }
+                                .padding(.horizontal, AppLayout.pageInset).padding(.vertical, 24)
+                                .frame(maxWidth: 720, minHeight: presentsStatus ? scrollViewport.size.height : 0)
+                                .frame(maxWidth: .infinity)
                             }
-                            .padding(.horizontal, 16).padding(.vertical, 24)
-                            .frame(maxWidth: 720).frame(maxWidth: .infinity)
-                        }
-                        .scrollDismissesKeyboard(.interactively)
-                        .scrollEdgeEffectStyle(.soft, for: .top)
-                        .disabled(model.state == .submitting || model.state == .unknown)
-                        .onChange(of: activeEditor) { _, value in
-                            if let value { proxy.scrollTo(value, anchor: .center) }
-                        }
-                        .onChange(of: focusedPhone) { _, value in
-                            if let value { activeEditor = nil; proxy.scrollTo(value, anchor: .center) }
-                        }
-                        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
-                            if let identifier = activeEditor ?? focusedPhone { proxy.scrollTo(identifier, anchor: .center) }
+                            .scrollDismissesKeyboard(.interactively)
+                            .scrollEdgeEffectHidden(true, for: .top)
+                            .disabled(model.state == .submitting || model.state == .unknown)
+                            .onChange(of: activeEditor) { _, value in
+                                if let value { proxy.scrollTo(value, anchor: .center) }
+                            }
+                            .onChange(of: focusedPhone) { _, value in
+                                if let value { activeEditor = nil; proxy.scrollTo(value, anchor: .center) }
+                            }
+                            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                                if let identifier = activeEditor ?? focusedPhone { proxy.scrollTo(identifier, anchor: .center) }
+                            }
+                            }
                         }
                     }
                 }
+                .background(Color(.systemGroupedBackground))
+                .overlay(alignment: .top) { topBarMaterial }
+                .safeAreaInset(edge: .bottom, alignment: .leading, spacing: 0) { if model.state != .loading { footer(in: viewport) } }
+                .navigationTitle(model.kind.title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(.hidden, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(role: .close) { dismiss() }
+                        .foregroundStyle(.primary)
+                        .tint(nil)
+                        .accessibilityLabel("关闭\(model.kind.title)")
+                        .accessibilityIdentifier("campus-form-close")
+                        .disabled(model.state == .submitting)
+                    }
+                    ToolbarItemGroup(placement: .keyboard) { Spacer(); Button("完成") { endEditing() } }
+                }
             }
-            .background(Color(.systemGroupedBackground))
-            .safeAreaInset(edge: .bottom, spacing: 0) { if model.state != .loading { footer } }
-            .toolbar(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) { Spacer(); Button("完成") { endEditing() } }
-            }
+            // Only the container edge is extended; the keyboard still lifts the footer.
+            .ignoresSafeArea(.container, edges: .bottom)
+        }
+        .background {
+            ScreenCornerReader { formCornerRadius = $0 }
+                .ignoresSafeArea()
         }
         .environment(\.timeZone, TimeZone(identifier: "Asia/Shanghai")!)
         .environment(\.locale, Locale(identifier: "zh_CN"))
         .presentationDetents([.large])
+        .presentationSizing(.page)
         .interactiveDismissDisabled(model.state == .submitting)
         .sheet(item: $model.confirmation) { confirmation($0) }
         .fileImporter(isPresented: $importingFile, allowedContentTypes: [.item]) { importFile($0) }
@@ -91,6 +117,7 @@ import ImageIO
         .onDisappear { location.cancel(); model.stop() }
     }
 
+    private var presentsStatus: Bool { model.state == .submitted || model.configuration == nil }
     private func reportLeaveSuccess() {
         guard model.state == .submitted, let receipt = leaveReceipt else { return }
         leaveReceipt = nil
@@ -253,126 +280,206 @@ import ImageIO
         }
     }
 
-    @ViewBuilder private var footer: some View {
-        CampusActionDock {
-            VStack(alignment: .leading, spacing: 10) {
-                if let error = model.error {
-                    Text(error).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("campus-form-error")
-                    if error == CampusError.authentication.localizedDescription {
-                        Button("重新认证") { Task { await session.refresh(); await model.load() } }
-                    }
-                }
-                if model.needsReload && model.state == .editing {
-                    Button("刷新配置并保留填写内容") { Task { await model.load(preservingDraft: true) } }
-                        .accessibilityIdentifier("campus-form-reload")
-                }
-                if model.state == .unknown {
-                    Button { Task { await model.checkResult(); reportLeaveSuccess() } } label: {
-                        HStack { if model.isChecking { ProgressView() }; Text("查询提交结果") }.frame(maxWidth: .infinity, minHeight: 44)
-                    }.buttonStyle(.glassProminent).campusActionControl().disabled(model.isChecking)
-                } else if model.state == .submitted {
-                    Button("完成") {
-                        onSubmitted(); dismiss()
-                    }.frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.glassProminent).campusActionControl()
-                } else if model.configuration != nil {
-                    Button { endEditing(); model.prepareConfirmation() } label: {
-                        Text("核对并提交").frame(maxWidth: .infinity, minHeight: 44)
-                    }.buttonStyle(.glassProminent).campusActionControl().disabled(!model.canReview || isImporting || isLocating)
-                        .accessibilityIdentifier("campus-form-review")
+    private func footer(in viewport: GeometryProxy) -> some View {
+        let radius = formCornerRadius > 0 ? formCornerRadius : deviceCornerRadius
+        let inset = SheetLayout.controlInset(radius, diameter: reviewControlHeight)
+        return VStack(alignment: .leading, spacing: 10) {
+            if model.error != nil || (model.needsReload && model.state == .editing) {
+                footerMessages
+                    .padding(.horizontal, 16)
+                    .frame(maxWidth: 720)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            footerAction
+                .frame(width: footerControlWidth(in: viewport, inset: inset))
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { reviewControlHeight = $0 }
+                .padding(.leading, inset - viewport.safeAreaInsets.leading)
+                .padding(.trailing, inset - viewport.safeAreaInsets.trailing)
+        }
+        .frame(width: viewport.size.width, alignment: .leading)
+        .padding(.top, 16)
+        .padding(.bottom, inset)
+    }
+
+    // Constrain the native capsule independently of oversized form content.
+    // https://developer.apple.com/documentation/swiftui/view/frame(minwidth:idealwidth:maxwidth:minheight:idealheight:maxheight:alignment:)
+    private func footerControlWidth(in viewport: GeometryProxy, inset: CGFloat) -> CGFloat {
+        max(0, viewport.size.width + viewport.safeAreaInsets.leading + viewport.safeAreaInsets.trailing - 2 * inset)
+    }
+
+    private var footerMessages: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let error = model.error {
+                Text(error).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("campus-form-error")
+                if error == CampusError.authentication.localizedDescription {
+                    Button("重新认证") { Task { await session.refresh(); await model.load() } }
                 }
             }
-            .padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity)
+            if model.needsReload && model.state == .editing {
+                Button("刷新配置并保留填写内容") { Task { await model.load(preservingDraft: true) } }
+                    .accessibilityIdentifier("campus-form-reload")
+            }
+        }
+    }
+
+    @ViewBuilder private var footerAction: some View {
+        // Fit only action labels; retain Dynamic Type throughout the form.
+        // https://developer.apple.com/documentation/swiftui/view/minimumscalefactor(_:)
+        if model.state == .unknown {
+            Button { Task { await model.checkResult(); reportLeaveSuccess() } } label: {
+                HStack {
+                    if model.isChecking { ProgressView() }
+                    Text("查询提交结果").lineLimit(1).minimumScaleFactor(0.5)
+                }.frame(minWidth: 0, maxWidth: .infinity, minHeight: 44)
+            }.buttonStyle(.glassProminent).campusActionControl().disabled(model.isChecking)
+        } else if model.state == .submitted {
+            Button { onSubmitted(); dismiss() } label: {
+                Text("完成").lineLimit(1).minimumScaleFactor(0.5)
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 44)
+            }.buttonStyle(.glassProminent).campusActionControl()
+        } else if model.configuration != nil {
+            Button { endEditing(); model.prepareConfirmation() } label: {
+                Text("核对并提交").lineLimit(1).minimumScaleFactor(0.5)
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 44)
+            }.buttonStyle(.glassProminent).campusActionControl().disabled(!model.canReview || isImporting || isLocating)
+                .accessibilityIdentifier("campus-form-review")
         }
     }
 
     private func confirmation(_ snapshot: CampusSubmission) -> some View {
-        VStack(spacing: 0) {
-            SheetHeader(title: "核对申请") { model.confirmation = nil }.disabled(model.state == .submitting)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    CampusSection("申请内容") {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                safeText(snapshot.configuration.choices.first { $0.id == snapshot.draft.typeID }?.name ?? "")
-                                    .font(.title3.weight(.semibold))
-                                safeText(snapshot.configuration.displayName).font(.subheadline).foregroundStyle(.secondary)
+        NavigationStack {
+            GeometryReader { viewport in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        CampusSection("申请内容") {
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    safeText(snapshot.configuration.choices.first { $0.id == snapshot.draft.typeID }?.name ?? "")
+                                        .font(.title3.weight(.semibold))
+                                    safeText(snapshot.configuration.displayName).font(.subheadline).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 8)
+                                CampusStatusBadge(text: snapshot.draft.leaving == true ? "离校" : (snapshot.kind == .leave ? "不离校" : "留校"))
                             }
-                            Spacer(minLength: 8)
-                            CampusStatusBadge(text: snapshot.draft.leaving == true ? "离校" : (snapshot.kind == .leave ? "不离校" : "留校"))
-                        }
-                        if snapshot.kind == .leave || snapshot.draft.leaving == true {
-                            Divider()
-                            CampusDateRange(start: dateText(snapshot.draft.begin), end: dateText(snapshot.draft.end), chineseDates: true)
-                        }
-                        if snapshot.kind == .leave {
-                            CampusInfoRow("请假天数", value: snapshot.draft.duration.formatted() + " 天")
-                            if snapshot.draft.leaving == true, snapshot.configuration.needsLeaveTime, let time = snapshot.draft.actualLeaveTime {
-                                CampusInfoRow("离校时间", value: CampusDisplayDate.timestamp(dateText(time), chinese: true))
+                            if snapshot.kind == .leave || snapshot.draft.leaving == true {
+                                Divider()
+                                CampusDateRange(start: dateText(snapshot.draft.begin), end: dateText(snapshot.draft.end), chineseDates: true)
+                            }
+                            if snapshot.kind == .leave {
+                                CampusInfoRow("请假天数", value: snapshot.draft.duration.formatted() + " 天")
+                                if snapshot.draft.leaving == true, snapshot.configuration.needsLeaveTime, let time = snapshot.draft.actualLeaveTime {
+                                    CampusInfoRow("离校时间", value: CampusDisplayDate.timestamp(dateText(time), chinese: true))
+                                }
                             }
                         }
-                    }
-                    CampusSection(snapshot.kind == .leave ? "联系与审批" : "联系方式") {
-                        if snapshot.kind == .leave {
-                            CampusInfoRow("审批人", value: snapshot.approvers?.users.first { $0.id == snapshot.draft.approverID }?.name ?? "")
-                            CampusInfoRow("紧急联系人电话", value: snapshot.draft.contactPhone)
-                        } else {
-                            CampusInfoRow("本人联系电话", value: snapshot.draft.phone)
-                            CampusInfoRow("家长联系电话", value: snapshot.draft.parentPhone)
+                        CampusSection(snapshot.kind == .leave ? "联系与审批" : "联系方式") {
+                            if snapshot.kind == .leave {
+                                CampusInfoRow("审批人", value: snapshot.approvers?.users.first { $0.id == snapshot.draft.approverID }?.name ?? "")
+                                CampusInfoRow("紧急联系人电话", value: snapshot.draft.contactPhone)
+                            } else {
+                                CampusInfoRow("本人联系电话", value: snapshot.draft.phone)
+                                CampusInfoRow("家长联系电话", value: snapshot.draft.parentPhone)
+                            }
                         }
-                    }
-                    if snapshot.kind == .departure && snapshot.draft.leaving == true {
-                        CampusSection("离校去向") {
-                            CampusInfoRow("目的地", value: snapshot.draft.area.joined(separator: " / "))
-                            safeText(snapshot.draft.detailAddress)
-                            CampusInfoRow("交通方式", value: snapshot.draft.travelMethod)
-                            CampusInfoRow("车次 / 航班", value: snapshot.draft.tripNumber)
+                        if snapshot.kind == .departure && snapshot.draft.leaving == true {
+                            CampusSection("离校去向") {
+                                CampusInfoRow("目的地", value: snapshot.draft.area.joined(separator: " / "))
+                                safeText(snapshot.draft.detailAddress)
+                                CampusInfoRow("交通方式", value: snapshot.draft.travelMethod)
+                                CampusInfoRow("车次 / 航班", value: snapshot.draft.tripNumber)
+                            }
                         }
-                    }
-                    if !snapshot.draft.reason.isEmpty {
-                        CampusSection("事由") { safeText(snapshot.draft.reason) }
-                    }
-                    if snapshot.configuration.needsDestination {
-                        CampusSection("去向") {
-                            CampusInfoRow("去向类型", value: snapshot.configuration.destinationTypes.first { $0.id == snapshot.draft.destinationTypeID }?.name ?? "")
-                            if !snapshot.draft.destinationDetails.isEmpty { safeText(snapshot.draft.destinationDetails) }
+                        if !snapshot.draft.reason.isEmpty {
+                            CampusSection("事由") { safeText(snapshot.draft.reason) }
                         }
-                    } else if !snapshot.draft.destinationDetails.isEmpty {
-                        CampusSection("去向") { safeText(snapshot.draft.destinationDetails) }
-                    }
-                    if snapshot.configuration.showLocation || snapshot.configuration.needsLocation,
-                       let address = snapshot.draft.locationAddress {
-                        CampusSection("当前位置") { safeText(address) }
-                    }
-                    if !snapshot.draft.attachments.isEmpty {
-                        CampusSection("证明材料 · \(snapshot.draft.attachments.count) 项") {
-                            ForEach(snapshot.draft.attachments) { safeText($0.name).font(.subheadline) }
+                        if snapshot.configuration.needsDestination {
+                            CampusSection("去向") {
+                                CampusInfoRow("去向类型", value: snapshot.configuration.destinationTypes.first { $0.id == snapshot.draft.destinationTypeID }?.name ?? "")
+                                if !snapshot.draft.destinationDetails.isEmpty { safeText(snapshot.draft.destinationDetails) }
+                            }
+                        } else if !snapshot.draft.destinationDetails.isEmpty {
+                            CampusSection("去向") { safeText(snapshot.draft.destinationDetails) }
                         }
+                        if snapshot.configuration.showLocation || snapshot.configuration.needsLocation,
+                           let address = snapshot.draft.locationAddress {
+                            CampusSection("当前位置") { safeText(address) }
+                        }
+                        if !snapshot.draft.attachments.isEmpty {
+                            CampusSection("证明材料 · \(snapshot.draft.attachments.count) 项") {
+                                ForEach(snapshot.draft.attachments) { safeText($0.name).font(.subheadline) }
+                            }
+                        }
+                        Text("确认后将提交学校审核。").font(.footnote).foregroundStyle(.secondary)
+                    }.padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .scrollEdgeEffectHidden(true, for: .top)
+                .safeAreaInset(edge: .bottom, alignment: .leading, spacing: 0) {
+                    Button {
+                        if model.kind == .leave {
+                            // Preserve the redacted receipt before submission clears the draft.
+                            leaveReceipt = LeaveTicketReceipt(
+                                baseline: snapshot.configuration.baselineRecordIDs,
+                                reason: CampusPrivacy.redact(snapshot.draft.reason),
+                                begin: LeaveTicketReceipt.timestamp(snapshot.draft.begin),
+                                end: LeaveTicketReceipt.timestamp(snapshot.draft.end))
+                        }
+                        Task { await model.submit(snapshot); reportLeaveSuccess() }
+                    } label: {
+                        HStack {
+                            if model.state == .submitting { ProgressView() }
+                            Text(model.state == .submitting ? "正在提交…" : "确认提交")
+                                .lineLimit(1).minimumScaleFactor(0.5)
+                        }.frame(minWidth: 0, maxWidth: .infinity, minHeight: 44)
+                    }.buttonStyle(.glassProminent).campusActionControl()
+                        .frame(width: footerControlWidth(in: viewport, inset: confirmationControlInset))
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { confirmationControlHeight = $0 }
+                        .padding(.leading, confirmationControlInset - viewport.safeAreaInsets.leading)
+                        .padding(.trailing, confirmationControlInset - viewport.safeAreaInsets.trailing)
+                        .frame(width: viewport.size.width, alignment: .leading)
+                        .padding(.top, 16)
+                        .padding(.bottom, confirmationControlInset)
+                        .disabled(model.state == .submitting)
+                        .accessibilityIdentifier("campus-form-confirm")
+                }
+                .background(Color(.systemGroupedBackground))
+                .overlay(alignment: .top) { topBarMaterial }
+                .navigationTitle("核对申请")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(.hidden, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(role: .close) { model.confirmation = nil }
+                        .foregroundStyle(.primary)
+                        .tint(nil)
+                        .accessibilityLabel("关闭核对申请")
+                        .accessibilityIdentifier("campus-form-confirm-close")
+                        .disabled(model.state == .submitting)
                     }
-                    Text("确认后将提交学校审核。").font(.footnote).foregroundStyle(.secondary)
-                }.padding(16).frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            CampusActionDock {
-                Button {
-                    if model.kind == .leave {
-                        // The model deliberately erases the draft after submission.
-                        // Capture only the redacted matching fields from the approved snapshot.
-                        leaveReceipt = LeaveTicketReceipt(
-                            baseline: snapshot.configuration.baselineRecordIDs,
-                            reason: CampusPrivacy.redact(snapshot.draft.reason),
-                            begin: LeaveTicketReceipt.timestamp(snapshot.draft.begin),
-                            end: LeaveTicketReceipt.timestamp(snapshot.draft.end))
-                    }
-                    Task { await model.submit(snapshot); reportLeaveSuccess() }
-                } label: {
-                    HStack { if model.state == .submitting { ProgressView() }; Text(model.state == .submitting ? "正在提交…" : "确认提交") }
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.glassProminent).campusActionControl().padding(16).disabled(model.state == .submitting)
-                    .accessibilityIdentifier("campus-form-confirm")
-            }
+            .ignoresSafeArea(.container, edges: .bottom)
         }
         .background(Color(.systemGroupedBackground))
-        .presentationDetents([.large]).interactiveDismissDisabled(model.state == .submitting)
+        .background {
+            ScreenCornerReader { confirmationCornerRadius = $0 }
+                .ignoresSafeArea()
+        }
+        .presentationDetents([.large]).presentationSizing(.page)
+        .interactiveDismissDisabled(model.state == .submitting)
+    }
+
+    private var confirmationControlInset: CGFloat {
+        let radius = confirmationCornerRadius > 0 ? confirmationCornerRadius : deviceCornerRadius
+        return SheetLayout.controlInset(radius, diameter: confirmationControlHeight)
+    }
+
+    private var topBarMaterial: some View {
+        TopBarMaterialBackground()
+            .frame(height: 44)
+            .offset(y: -44)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     private var selectedType: CampusFormChoice? { model.configuration?.choices.first { $0.id == model.draft.typeID } }

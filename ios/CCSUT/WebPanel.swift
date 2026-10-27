@@ -39,6 +39,33 @@ struct WebPanel: UIViewRepresentable {
 
 // MARK: - 工厂
 
+/// CAS's visible “记住账号” only saves a username. Its generated login POST
+/// has a separate rememberMe field, defaulting to false even after that click.
+enum CASLoginPersistence {
+    static let script = """
+        (() => {
+          if (location.origin !== 'https://auth.ccsut.cn' ||
+              location.pathname !== '/backstage/cas/login') return;
+          const enablePersistence = form => {
+            if (!(form instanceof HTMLFormElement) || form.method.toLowerCase() !== 'post') return;
+            const action = new URL(form.action, document.baseURI);
+            if (action.origin !== location.origin || action.pathname !== '/backstage/cas/login' ||
+                action.username || action.password) return;
+            const remember = form.querySelector('input[name="rememberMe"]');
+            if (remember) remember.value = 'true';
+          };
+          // The official Angular service creates a form then calls submit(),
+          // which bypasses DOM submit events. Cover that path and normal submits.
+          const originalSubmit = HTMLFormElement.prototype.submit;
+          HTMLFormElement.prototype.submit = function() {
+            enablePersistence(this);
+            return originalSubmit.apply(this, arguments);
+          };
+          document.addEventListener('submit', event => enablePersistence(event.target), true);
+        })();
+        """
+}
+
 enum WebFactory {
     /// 用共享的 Cookie 仓库造一个 WKWebView
     static func make(delegate: WKNavigationDelegate? = nil) -> WKWebView {
@@ -46,6 +73,11 @@ enum WebFactory {
         config.websiteDataStore = WebStore.dataStore
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.allowsInlineMediaPlayback = true
+        config.userContentController.addUserScript(WKUserScript(
+            source: CASLoginPersistence.script,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
 
         let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: config)
         wv.customUserAgent = UserAgent.mobile
@@ -118,6 +150,17 @@ final class WebNavigator: NSObject, WKNavigationDelegate {
             isFinished = true
             lastError = nil
             if let url { onNavigate?(url) }
+        }
+    }
+
+    // The portal can keep loading resources or display a school notice. Start
+    // cookie verification when its main document commits instead of waiting for
+    // every resource to finish. SessionStore still verifies the server identity.
+    nonisolated func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        Task { @MainActor in
+            guard let url = webView.url else { return }
+            currentURL = url
+            onNavigate?(url)
         }
     }
 

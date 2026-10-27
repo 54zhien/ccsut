@@ -54,6 +54,20 @@ enum SchedulePresentation {
         }.sorted { ($0.weekday, $0.section) < ($1.weekday, $1.section) }
     }
 
+    /// Returns nil when the verified week is unavailable or invalid; an empty
+    /// array means that the verified week has no courses on this Shanghai day.
+    static func todayCourses(_ slots: [ScheduleSlot], week: Int?, on date: Date) -> [ScheduleSlot]? {
+        guard let week, (1...53).contains(week) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let calendarWeekday = calendar.component(.weekday, from: date)
+        let weekday = calendarWeekday == 1 ? 7 : calendarWeekday - 1
+        let courses = cells(slots, week: week)
+            .filter { $0.weekday == weekday }
+            .flatMap(\.courses)
+        return courses.sorted(by: chronologicalOrder)
+    }
+
     private struct CourseKey: Hashable {
         let name: String
         let teacher: String
@@ -87,5 +101,57 @@ enum SchedulePresentation {
             if $0.startPeriod != $1.startPeriod { return $0.startPeriod < $1.startPeriod }
             return ($0.course, $0.room, $0.teacher) < ($1.course, $1.room, $1.teacher)
         }
+    }
+
+    private static func chronologicalOrder(_ lhs: ScheduleSlot, _ rhs: ScheduleSlot) -> Bool {
+        if lhs.startPeriod != rhs.startPeriod { return lhs.startPeriod < rhs.startPeriod }
+        if lhs.course != rhs.course { return lhs.course < rhs.course }
+        if lhs.room != rhs.room { return lhs.room < rhs.room }
+        if lhs.teacher != rhs.teacher { return lhs.teacher < rhs.teacher }
+        if lhs.endPeriod != rhs.endPeriod { return lhs.endPeriod < rhs.endPeriod }
+        return lhs.weeks.sorted().lexicographicallyPrecedes(rhs.weeks.sorted())
+    }
+}
+
+enum ExamLocationPresentation {
+    /// Removes only explicit floor markers. Unknown building and room strings remain visible.
+    static func concise(building: String?, room: String?) -> String {
+        let building = cleaned(building)
+        let room = cleaned(room)
+
+        guard let building else { return room ?? "" }
+        guard let room else { return building }
+        if building.localizedCaseInsensitiveCompare(room) == .orderedSame || building.hasSuffix(room) {
+            return building
+        }
+        if room.hasPrefix(building) { return room }
+        return "\(building) \(room)"
+    }
+
+    private static func cleaned(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value
+            .replacingOccurrences(of: "\u{3000}", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+
+        let floorPattern = #"第?\s*[0-9一二三四五六七八九十]+\s*(?:楼层|层楼|层|楼)(?!栋)"#
+        guard let floorExpression = try? NSRegularExpression(pattern: floorPattern) else { return normalized }
+        let searchRange = NSRange(normalized.startIndex..., in: normalized)
+        guard floorExpression.numberOfMatches(in: normalized, range: searchRange) > 0 else { return normalized }
+        let withoutFloors = floorExpression.stringByReplacingMatches(
+            in: normalized,
+            range: searchRange,
+            withTemplate: ""
+        )
+        let withoutEmptyBrackets = withoutFloors
+            .replacingOccurrences(of: #"\(\s*\)|（\s*）"#, with: "", options: .regularExpression)
+        let collapsed = withoutEmptyBrackets
+            .replacingOccurrences(of: #"[，,、/|—\-:：]{2,}"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // A floor token alone is still useful source information; do not turn it into a blank location.
+        return collapsed.isEmpty ? normalized : collapsed
     }
 }

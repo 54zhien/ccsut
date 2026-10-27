@@ -146,6 +146,27 @@ struct ElectiveStateTests {
                     == .denied(.snapshotUnverified),
               "a failed refresh for the same account retains content but disables mutations")
 
+        var closedState = ElectiveState<String>()
+        closedState.publish(accountBuilder.snapshot, generation: 41)
+        closedState.publishClosedChannel(generation: 41)
+        check(closedState.isChannelClosed && closedState.snapshot == nil
+              && closedState.actionDecision(for: "account-course", kind: .enroll, generation: 41)
+                    == .denied(.snapshotUnverified),
+              "channel closure removes stale catalog actions while retaining its account owner")
+        check(closedState.refreshStarted(generation: 42) && !closedState.isChannelClosed
+              && closedState.snapshotGeneration == nil,
+              "an account switch discards a prior account's closed-channel result")
+        closedState.publishClosedChannel(generation: 42)
+        check(!ElectiveMutationRecovery.canContinueAfterAwait(expectedGeneration: 41, currentGeneration: 42,
+                                                             state: &closedState)
+              && closedState.isChannelClosed && closedState.snapshotGeneration == 42,
+              "an old account continuation cannot erase the current account's closed-channel result")
+        closedState.publish(accountBuilder.snapshot, generation: 42)
+        check(!closedState.isChannelClosed
+              && closedState.actionDecision(for: "account-course", kind: .enroll, generation: 42)
+                    == .allowed(batchID: "account-batch"),
+              "a verified reopened catalog restores eligible actions")
+
         check(ElectiveMutationRecovery.isAuthenticationRejection("会话已失效，请重新登录"),
               "explicit business authentication rejection triggers renewal and a fresh read")
         check(!ElectiveMutationRecovery.isAuthenticationRejection("当前批次已选门数超过上限"),

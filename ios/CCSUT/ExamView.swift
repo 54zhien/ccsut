@@ -23,16 +23,17 @@ struct ExamView: View {
     @State private var loadGate = PageLoadGate()
     @State private var errorText: String?
     @State private var termHeaderTracker = AcademicTermHeaderTracker()
+    @State private var selectedTerm: String?
     @State private var referenceDate = Date()
 #if DEBUG
     @State private var previewPublicationCount = 0
 #endif
 
     var body: some View {
-        PageScrollSurface(refresh: { await load(force: true) }) { viewport, proxy in
+        PageScrollSurface(refresh: { await load(force: true) }, refreshHaptics: true) { viewport, proxy in
             VStack(spacing: 0) {
                 if isLoading && items.isEmpty {
-                    ProgressView("加载考试安排…")
+                    PageLoadingState("加载考试安排…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if errorText != nil, items.isEmpty {
                     ContentUnavailableView {
@@ -52,13 +53,25 @@ struct ExamView: View {
                     if let errorText {
                         PageStatusNotice(message: errorText) { Task { await load(force: true) } }
                     }
-                    content(proxy: proxy)
+                    content()
                 }
             }
             .frame(maxWidth: .infinity, minHeight: items.isEmpty ? viewport.height : 0)
+            .onChange(of: selectedTerm) { _, term in
+                guard let term else { return }
+                withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
+                    proxy.scrollTo("exam-term-\(term)", anchor: .top)
+                }
+            }
+            .onChange(of: allTerms) { _, availableTerms in
+                guard let selectedTerm, !availableTerms.contains(selectedTerm) else { return }
+                self.selectedTerm = nil
+            }
         }
         .coordinateSpace(name: "academic-scroll")
-        .academicDetailChrome(title: "考试")
+        .academicDetailChrome(title: "考试") {
+            if !allTerms.isEmpty { termFilter }
+        }
 #if DEBUG
         .overlay(alignment: .topTrailing) {
             PageRefreshPublicationDiagnostics(count: previewPublicationCount)
@@ -79,8 +92,17 @@ struct ExamView: View {
 
     // MARK: 内容
 
-    private func content(proxy: ScrollViewProxy) -> some View {
+    private func content() -> some View {
         LazyVStack(spacing: 0, pinnedViews: dynamicTypeSize.isAccessibilitySize ? [] : [.sectionHeaders]) {
+            if let selectedTerm {
+                Text("筛选学期：\(SchedulePresentation.termTitle(selectedTerm))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
+
             if let next = upcoming.first {
                 nextCard(next).padding(.bottom, 12)
             }
@@ -102,24 +124,45 @@ struct ExamView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 16)
                     } header: {
-                        termHeader(term, count: list.count) { target in
-                            withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
-                                proxy.scrollTo("exam-term-\(target)", anchor: .top)
-                            }
-                        }
+                        termHeader(term, count: list.count)
                             .id("exam-term-\(term)")
                     }
                 }
             }
         }
         .padding(.vertical, 12)
+        .frame(maxWidth: 720).frame(maxWidth: .infinity)
+    }
+
+    private var termFilter: some View {
+        Menu {
+            Picker("学期", selection: $selectedTerm) {
+                Text("全部学期").tag(nil as String?)
+                ForEach(allTerms, id: \.self) { term in
+                    Text(SchedulePresentation.termTitle(term)).tag(Optional(term))
+                }
+            }
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 48, height: 48)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .tint(.primary)
+        .glassEffect(.regular.interactive(), in: Circle())
+        .accessibilityLabel("学期筛选")
+        .accessibilityValue(selectedTerm.map(SchedulePresentation.termTitle) ?? "全部学期")
+        .accessibilityHint("选择学期后筛选并跳转到对应内容")
+        .accessibilityIdentifier("exam-term-filter")
     }
 
     /// 即将开始的那场（未来 60 天内最近的一场）
     private var upcoming: [ExamItem] {
         let now = referenceDate
         let limit = Calendar.current.date(byAdding: .day, value: 60, to: now) ?? now
-        return items
+        return displayedItems
             .filter { exam in
                 guard let d = exam.startDate else { return false }
                 return d >= now && d <= limit
@@ -127,12 +170,25 @@ struct ExamView: View {
             .sorted { ($0.startDate ?? now) < ($1.startDate ?? now) }
     }
 
-    private var grouped: [String: [ExamItem]] {
+    private var allGrouped: [String: [ExamItem]] {
         Dictionary(grouping: items) { $0.term ?? $0.dataXnxq ?? "未知学期" }
+    }
+
+    private var allTerms: [String] {
+        allGrouped.keys.sorted(by: >)
+    }
+
+    private var grouped: [String: [ExamItem]] {
+        Dictionary(grouping: displayedItems) { $0.term ?? $0.dataXnxq ?? "未知学期" }
     }
 
     private var terms: [String] {
         grouped.keys.sorted(by: >)
+    }
+
+    private var displayedItems: [ExamItem] {
+        guard let selectedTerm else { return items }
+        return items.filter { ($0.term ?? $0.dataXnxq ?? "未知学期") == selectedTerm }
     }
 
     // MARK: 置顶卡片
@@ -142,79 +198,87 @@ struct ExamView: View {
             HStack {
                 Label("即将开始", systemImage: "alarm.fill")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color("AccentForeground").opacity(0.9))
+                    .foregroundStyle(.tint)
                 Spacer()
                 if let d = exam.startDate {
                     Text(d, format: .relative(presentation: .named))
                         .environment(\.locale, Locale(identifier: "zh_CN"))
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(Color("AccentForeground").opacity(0.85))
+                        .foregroundStyle(.secondary)
                 }
             }
 
             Text(exam.kcmc ?? "—")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(Color("AccentForeground"))
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 8) {
-                Label(timeText(exam), systemImage: "clock.fill")
-                if !exam.location.isEmpty {
-                    Label(exam.location, systemImage: "mappin.and.ellipse")
+                Label("考试日期：\(dateText(exam))", systemImage: "calendar")
+                Label("考试时间：\(timeText(exam))", systemImage: "clock.fill")
+                if !locationText(exam).isEmpty {
+                    Label("考场：\(locationText(exam))", systemImage: "mappin.and.ellipse")
                 }
             }
-            .font(.caption)
-            .foregroundStyle(Color("AccentForeground").opacity(0.92))
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
 
             if let seat = exam.zwh, !seat.isEmpty, seat != "0" {
                 Text("座位 \(seat)")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 9)
                     .padding(.vertical, 3)
-                    .background(Color("AccentForeground").opacity(0.12), in: .capsule)
-                    .foregroundStyle(Color("AccentForeground"))
+                    .background(Color.accentColor.opacity(0.1), in: .capsule)
+                    .foregroundStyle(.tint)
             }
         }
-        .padding(20)
+        .padding(24)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.accentColor, in: .rect(cornerRadius: 28))
+        .appContentCard()
         .padding(.horizontal, 16)
     }
 
-    private func termHeader(_ term: String, count: Int, onSelectTerm: @escaping (String) -> Void) -> some View {
+    private func termHeader(_ term: String, count: Int) -> some View {
         AcademicTermStrip(term: term, tracker: termHeaderTracker) {
-            HStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(SchedulePresentation.termTitle(term))
-                        .font(.subheadline.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("\(count) 场")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if terms.count > 1 {
-                    AcademicTermJumpMenu(terms: terms, onSelect: onSelectTerm)
-                }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(SchedulePresentation.termTitle(term))
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(count) 场")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
         }
     }
 
+    private func dateText(_ exam: ExamItem) -> String {
+        guard let date = exam.startDate else { return nonempty(exam.ksrq) ?? "—" }
+        let style = Date.FormatStyle.dateTime
+            .year()
+            .month(.defaultDigits)
+            .day()
+            .weekday(.wide)
+            .locale(Locale(identifier: "zh_CN"))
+        return date.formatted(style)
+    }
+
+    private func locationText(_ exam: ExamItem) -> String {
+        ExamLocationPresentation.concise(building: exam.jxlmc, room: exam.jsmc)
+    }
+
     private func timeText(_ exam: ExamItem) -> String {
-        guard let raw = exam.kssj, !raw.isEmpty else {
-            return [exam.ksrq, exam.qssj].compactMap { $0 }.joined(separator: " ")
+        if let raw = nonempty(exam.kssj) {
+            guard let space = raw.firstIndex(of: " ") else { return raw }
+            let time = raw[raw.index(after: space)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            return time.isEmpty ? raw : time
         }
-        // "2026-09-15 14:20~15:50" → "09-15 14:20~15:50"
-        if let space = raw.firstIndex(of: " ") {
-            let date = raw[raw.startIndex..<space]
-            let time = raw[raw.index(after: space)...]
-            let parts = date.split(separator: "-")
-            if parts.count == 3 {
-                return "\(parts[1])-\(parts[2]) \(time)"
-            }
-            return "\(date) \(time)"
-        }
-        return raw
+        return nonempty(exam.qssj) ?? "—"
+    }
+
+    private func nonempty(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     // MARK: 加载
@@ -285,58 +349,47 @@ struct ExamView: View {
 private struct ExamRow: View {
     let exam: ExamItem
     var showTerm: Bool
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ScaledMetric(relativeTo: .title3) private var dateColumnWidth: CGFloat = 34
+    @ScaledMetric(relativeTo: .title3) private var dateColumnWidth: CGFloat = 64
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(spacing: 2) {
+                Text("日期")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 if let d = exam.startDate {
-                    Text(d, format: .dateTime.month(.defaultDigits))
-                        .font(.caption2)
+                    Text(shortDateLabel(d))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(d, format: .dateTime.day())
-                        .font(.title3.weight(.bold).monospacedDigit())
+                    Text(d, format: .dateTime.weekday(.wide))
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
                 } else {
-                    Image(systemName: "calendar")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
+                    Text(rawDateLabel)
+                        .font(.caption.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .frame(width: dateColumnWidth)
+            .environment(\.locale, Locale(identifier: "zh_CN"))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("考试日期：\(visibleDateText)")
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(exam.kcmc ?? "—")
                     .font(.subheadline.weight(.medium))
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                if dynamicTypeSize.isAccessibilitySize {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(exam.qssj ?? "—")
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                        if !exam.location.isEmpty {
-                            Text(exam.location)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .font(.caption)
+                Label("时间：\(visibleTimeText)", systemImage: "clock")
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-                } else {
-                    HStack(spacing: 6) {
-                        Text(exam.qssj ?? "—")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        if !exam.location.isEmpty {
-                            Text("·")
-                                .foregroundStyle(.tertiary)
-                            Text(exam.location)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !visibleLocation.isEmpty {
+                    Label("考场：\(visibleLocation)", systemImage: "mappin.and.ellipse")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 HStack(spacing: 6) {
@@ -363,5 +416,45 @@ private struct ExamRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+    }
+
+    private var visibleDateText: String {
+        guard let d = exam.startDate else {
+            let raw = exam.ksrq?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return raw.isEmpty ? "—" : raw
+        }
+        let format = Date.FormatStyle.dateTime
+            .year()
+            .month(.defaultDigits)
+            .day()
+            .weekday(.wide)
+            .locale(Locale(identifier: "zh_CN"))
+        return d.formatted(format)
+    }
+
+    private func shortDateLabel(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        return "\(calendar.component(.month, from: date))月\(calendar.component(.day, from: date))日"
+    }
+
+    private var visibleTimeText: String {
+        if let raw = exam.kssj?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty,
+           let space = raw.firstIndex(of: " ") {
+            let time = raw[raw.index(after: space)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !time.isEmpty { return time }
+        }
+        if let raw = exam.kssj?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty { return raw }
+        let start = exam.qssj?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return start.isEmpty ? "—" : start
+    }
+
+    private var rawDateLabel: String {
+        let raw = exam.ksrq?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? "—" : raw
+    }
+
+    private var visibleLocation: String {
+        ExamLocationPresentation.concise(building: exam.jxlmc, room: exam.jsmc)
     }
 }

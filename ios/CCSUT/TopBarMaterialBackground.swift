@@ -12,7 +12,7 @@ enum TopBarBlur {
 }
 
 struct TopBarMaterialBackground: UIViewRepresentable {
-    var style: UIBlurEffect.Style = .systemUltraThinMaterial
+    @Environment(\.colorScheme) private var colorScheme
     var additionalLength: CGFloat = 32
     var topHold: Double = 0.35
     var horizontalInset: CGFloat = 0
@@ -24,7 +24,9 @@ struct TopBarMaterialBackground: UIViewRepresentable {
     }
 
     func updateUIView(_ view: TopBarMaterialHost, context: Context) {
-        view.configure(style: style, additionalLength: additionalLength,
+        view.overrideUserInterfaceStyle = colorScheme == .dark ? .dark : .light
+        view.configure(style: colorScheme == .dark ? .systemUltraThinMaterialDark : .systemUltraThinMaterialLight,
+                       additionalLength: additionalLength,
                        topHold: topHold, horizontalInset: horizontalInset)
     }
 }
@@ -92,6 +94,7 @@ final class TopBarMaterialHost: UIView {
 /// mask instead of compositing a partially transparent visual-effect view.
 final class TopBarMaterialView: UIVisualEffectView {
     private let gradientMask = TopBarGradientMask()
+    private let blackTint = UIView()
     private var currentStyle: UIBlurEffect.Style = .systemUltraThinMaterial
     private var profile = TopBarFadeProfile()
     private var maskNeedsUpdate = true
@@ -102,6 +105,15 @@ final class TopBarMaterialView: UIVisualEffectView {
         isUserInteractionEnabled = false
         isAccessibilityElement = false
         accessibilityElementsHidden = true
+        // A dark system material still adds a luminous gray tint. Apply an
+        // explicit black surface inside the SAME masked effect so the top is
+        // black and the existing lower fade still reveals blurred content.
+        blackTint.backgroundColor = UIColor.black.withAlphaComponent(0.92)
+        blackTint.isUserInteractionEnabled = false
+        blackTint.isHidden = true
+        blackTint.frame = contentView.bounds
+        blackTint.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        contentView.addSubview(blackTint)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -112,6 +124,7 @@ final class TopBarMaterialView: UIVisualEffectView {
             effect = UIBlurEffect(style: style)
             maskNeedsUpdate = true
         }
+        blackTint.isHidden = style != .systemUltraThinMaterialDark
         let updated = TopBarFadeProfile(holdFraction: topHold)
         if profile.holdFraction != updated.holdFraction {
             profile = updated

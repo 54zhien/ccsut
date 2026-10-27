@@ -3,37 +3,54 @@ import SwiftUI
 /// Personal result records do not contain live capacity or mutation authority.
 struct EnrolledCourseCard: View {
     let record: EnrolledCourse
-    let readOnlyReason: String
 
     var body: some View {
-        VStack(alignment:.leading,spacing:12) {
-            HStack(alignment:.top,spacing:8) {
-                Text(record.kcmc ?? "—").font(.headline).lineLimit(2)
-                Spacer(minLength:4)
-                Text("\(record.xf ?? "—") 学分").font(.caption).foregroundStyle(.tint)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Text(record.kcmc ?? "—")
+                    .font(.headline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Text("\(record.xf ?? "—") 学分")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color.accentColor.opacity(0.1), in: .capsule)
             }
             if let teacher = record.rkjs, !teacher.isEmpty {
-                Label(teacher,systemImage:"person.fill").font(.caption).foregroundStyle(.secondary)
+                Label(teacher, systemImage: "person.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let schedule = record.sksjdd, !schedule.isEmpty {
-                Label(schedule,systemImage:"clock.fill").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Label(schedule, systemImage: "clock.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            HStack {
-                Text(record.xkfs == "选课" ? "自主选课" : record.xkfs ?? "来源待核实")
-                Spacer(minLength:8)
-                Text(record.studyStatus).foregroundStyle(record.xdfs == "1" ? Color.green : Color.secondary)
-            }.font(.caption)
-            Label(readOnlyReason,systemImage:"info.circle").font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal:false,vertical:true)
-        }
-        .padding(16).frame(maxWidth:.infinity,alignment:.leading)
-        .background(Color(.secondarySystemGroupedBackground),in:.rect(cornerRadius:26))
-        .overlay {
-            if record.xdfs == "1" {
-                RoundedRectangle(cornerRadius:26).strokeBorder(.green.opacity(0.55),lineWidth:1.5)
+            Divider()
+            HStack(alignment: .center, spacing: 10) {
+                Label(record.xkfs == "选课" ? "自主选课" : record.xkfs ?? "来源待核实",
+                      systemImage: record.xkfs == "选课" ? "checkmark.circle" : "info.circle")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Text(record.studyStatus)
+                    .fontWeight(.medium)
+                    .foregroundStyle(record.xdfs == "1" ? Color.green : Color.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background((record.xdfs == "1" ? Color.green : Color.secondary).opacity(0.1),
+                                in: .capsule)
             }
+            .font(.caption)
         }
-        .accessibilityElement(children:.contain)
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .appContentCard()
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("enrolled-course-\(record.id)")
     }
 }
@@ -45,8 +62,8 @@ struct EnrolledCourseDetail: View {
         NavigationStack {
             List {
                 Section {
-                    Text(record.kcmc ?? "—").font(.title3.weight(.semibold))
-                    Text(record.jxbmc ?? "").font(.caption).foregroundStyle(.secondary)
+                    AppDetailHeading(title: record.kcmc ?? "—", subtitle: record.jxbmc ?? "", symbol: "checkmark.seal")
+                        .padding(.vertical, 8)
                 }
                 Section("修读记录") {
                     row("学年学期",SchedulePresentation.termTitle(record.xnxq))
@@ -64,10 +81,13 @@ struct EnrolledCourseDetail: View {
                     row("课程",record.kcbh)
                     row("教学班",record.jxbbh)
                 }
-                Section { Text("修读记录仅供查看，操作权限以当前选课批次和学校规则为准。").font(.footnote).foregroundStyle(.secondary) }
             }
             .navigationTitle("课程详情").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement:.confirmationAction) { Button("完成") { dismiss() } } }
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                SheetHeader(title: "课程详情") { dismiss() }
+                    .background(Color(.systemGroupedBackground))
+            }
         }
     }
     @ViewBuilder private func row(_ title: String, _ value: String?) -> some View {

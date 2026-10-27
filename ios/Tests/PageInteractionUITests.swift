@@ -68,18 +68,56 @@ private struct RefreshObservationPoll {
 }
 
 final class PageInteractionUITests: XCTestCase {
-    override func setUp() { continueAfterFailure = false }
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+    }
+
+    override func tearDown() {
+        XCUIDevice.shared.orientation = .portrait
+        super.tearDown()
+    }
 
     func testCompleteSelectedIncludesClosedBatch() {
         let app = launch("electives", arguments:["--preview-complete-selected"])
         XCTAssertTrue(app.staticTexts["示例线上已选课"].waitForExistence(timeout:8))
         app.buttons.matching(NSPredicate(format:"label BEGINSWITH %@","已选")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["示例线下已选课"].waitForExistence(timeout:5))
+        XCTAssertFalse(app.staticTexts["示例配课课程"].exists)
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format:"label CONTAINS %@","仅供查看")).firstMatch.exists)
         let search = app.textFields["课程名 / 教师"]
         search.tap(); search.typeText("示例线下")
         XCTAssertTrue(app.staticTexts["示例线下已选课"].waitForExistence(timeout:5))
         XCTAssertTrue(app.staticTexts["正常修读"].exists)
         XCTAssertFalse(app.buttons["退课"].exists)
         capture(app,"complete-selected-closed-batch")
+    }
+
+    func testClosedElectiveChannelPreservesControlsAndEnrolledResults() {
+        let app = launch("electives", arguments: ["--preview-closed-catalog", "--preview-complete-selected"])
+        let closed = app.staticTexts["选课通道暂未开启"]
+        XCTAssertTrue(closed.waitForExistence(timeout: 8))
+        let search = app.textFields["课程名 / 教师"]
+        XCTAssertTrue(search.isHittable)
+        let anchoredY = search.frame.minY
+        XCTAssertLessThan(anchoredY, app.frame.height * 0.3, "Closed state controls stay at the top")
+        XCTAssertEqual(closed.frame.midX, app.frame.midX, accuracy: 3)
+        XCTAssertGreaterThan(closed.frame.midY, app.frame.height * 0.42, "Empty message should be centered, not attached to the filters")
+        XCTAssertLessThan(closed.frame.midY, app.frame.height * 0.65)
+        for title in ["全部", "可选", "有余量"] {
+            app.buttons[title].tap()
+            XCTAssertTrue(closed.exists)
+            XCTAssertEqual(search.frame.minY, anchoredY, accuracy: 2)
+            XCTAssertFalse(app.staticTexts["加载失败，请重试"].exists)
+            XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "接口返回错误")).firstMatch.exists)
+        }
+        capture(app, "electives-closed-channel")
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "已选")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["示例线下已选课"].waitForExistence(timeout: 5))
+        XCTAssertFalse(closed.exists)
+        XCTAssertEqual(search.frame.minY, anchoredY, accuracy: 2)
+        capture(app, "electives-closed-enrolled-results")
     }
 
     func testSelectedHistoryIsReadOnlyWithEmptyCatalog() {
@@ -175,12 +213,12 @@ final class PageInteractionUITests: XCTestCase {
         for id in ["campus-leave", "campus-travel", "campus-electricity"] {
             XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5))
         }
+        XCTAssertFalse(app.staticTexts["校园事务"].exists)
+        XCTAssertFalse(app.staticTexts["生活缴费"].exists)
         capture(app, "campus-home")
         app.buttons["campus-leave"].tap()
-        XCTAssertTrue(app.buttons["leave-wallet-toggle"].waitForExistence(timeout: 5))
-        app.buttons["leave-wallet-toggle"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["leave-ticket-preview-leave"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["campus-record-add"].exists)
+        XCTAssertTrue(app.staticTexts["示例请假记录"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["申请请假"].exists)
         capture(app, "campus-leave-records")
         app.terminate()
         app = launch("campus")
@@ -192,6 +230,7 @@ final class PageInteractionUITests: XCTestCase {
         app.terminate()
         app = launch("academic")
         XCTAssertTrue(app.buttons["academic-scores"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["学习与课程"].exists)
         XCTAssertFalse(app.buttons["academic-electricity"].exists)
     }
 
@@ -222,7 +261,20 @@ final class PageInteractionUITests: XCTestCase {
         app.buttons["campus-form-review"].tap()
         XCTAssertTrue(app.staticTexts["campus-form-error"].waitForExistence(timeout: 5))
         let reason = app.textViews["campus-form-reason"]
-        reason.tap(); reason.typeText("reason 18000000000")
+        reason.tap()
+        // First input removes validation messages and reflows the form. Send
+        // every literal character once and acknowledge it before continuing;
+        // never repair or retry missing input to conceal a failed interaction.
+        var acknowledged = ""
+        for character in "reason" {
+            reason.typeText(String(character))
+            acknowledged.append(character)
+            let expected = acknowledged
+            let received = NSPredicate { _, _ in (reason.value as? String ?? "") == expected }
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: received, evaluatedWith: reason)], timeout: 3), .completed,
+                           "Literal input must be acknowledged without correction: \(reason.value as? String ?? "missing")")
+        }
+        reason.typeText(" 18000000000")
         let visible = reason.value as? String ?? ""
         XCTAssertTrue(visible.contains("reason"))
         XCTAssertFalse(visible.contains("18000000000"))
@@ -293,6 +345,12 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertTrue(review.waitForExistence(timeout: 8))
         XCTAssertGreaterThanOrEqual(review.frame.height, 44)
         app.swipeUp()
+        XCTAssertTrue(review.isHittable)
+        XCTAssertGreaterThanOrEqual(review.frame.minX, app.frame.minX - 1)
+        XCTAssertLessThanOrEqual(review.frame.maxX, app.frame.maxX + 1,
+                                 "Large text cannot push the primary capsule beyond the physical screen")
+        XCTAssertEqual(review.frame.minX - app.frame.minX, app.frame.maxX - review.frame.maxX, accuracy: 2,
+                       "The primary capsule retains symmetric concentric side insets")
         capture(app, "campus-native-accessibility-form")
     }
 
@@ -312,13 +370,56 @@ final class PageInteractionUITests: XCTestCase {
 
     func testCampusElectricityAmountSelection() {
         let app = launch("campus-electricity")
-        let amount = app.textFields["缴费金额，单位元"]
-        XCTAssertTrue(amount.waitForExistence(timeout: 8))
+        let hundreds = app.pickerWheels.element(boundBy: 0)
+        XCTAssertTrue(hundreds.waitForExistence(timeout: 8))
+        if !hundreds.isHittable { app.swipeUp() }
+        XCTAssertEqual(app.pickerWheels.count, 3)
         XCTAssertTrue(app.staticTexts["剩余金额"].exists)
-        app.buttons["50 元"].tap()
-        XCTAssertEqual(amount.value as? String, "50")
+        hundreds.adjust(toPickerWheelValue: "4")
+        let tens = app.pickerWheels.element(boundBy: 1)
+        let ones = app.pickerWheels.element(boundBy: 2)
+        XCTAssertEqual(hundreds.value as? String, "4")
+        XCTAssertEqual(tens.value as? String, "0")
+        XCTAssertEqual(ones.value as? String, "0")
+        hundreds.adjust(toPickerWheelValue: "3")
+        tens.adjust(toPickerWheelValue: "9")
+        ones.adjust(toPickerWheelValue: "9")
+        XCTAssertEqual(hundreds.value as? String, "3")
+        XCTAssertEqual(tens.value as? String, "9")
+        XCTAssertEqual(ones.value as? String, "9")
+        hundreds.adjust(toPickerWheelValue: "0")
+        tens.adjust(toPickerWheelValue: "1")
+        ones.adjust(toPickerWheelValue: "0")
+        XCTAssertEqual(hundreds.value as? String, "0")
+        XCTAssertEqual(tens.value as? String, "1")
+        XCTAssertEqual(ones.value as? String, "0")
         XCTAssertFalse(app.buttons["立即缴费"].isEnabled, "Synthetic previews must never enable a real payment")
         capture(app, "campus-electricity-amount")
+    }
+
+    func testDetailTabsHideAndReturnWithHome() {
+        let app = launch("academic")
+        let scores = app.buttons["academic-scores"]
+        XCTAssertTrue(scores.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.tabBars.firstMatch.exists)
+        scores.tap()
+        let back = app.buttons["返回"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        let hiddenTabs = NSPredicate { _, _ in !app.tabBars.firstMatch.isHittable }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: hiddenTabs, evaluatedWith: app)], timeout: 5), .completed)
+        back.tap()
+        XCTAssertTrue(scores.waitForExistence(timeout: 5))
+        let visibleTabs = NSPredicate { _, _ in app.tabBars.firstMatch.isHittable }
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: visibleTabs, evaluatedWith: app)], timeout: 5), .completed)
+        app.tabBars.buttons["校园"].tap()
+        let leave = app.buttons["campus-leave"]
+        XCTAssertTrue(leave.waitForExistence(timeout: 5))
+        leave.tap()
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: hiddenTabs, evaluatedWith: app)], timeout: 5), .completed)
+        back.tap()
+        XCTAssertTrue(leave.waitForExistence(timeout: 5))
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: visibleTabs, evaluatedWith: app)], timeout: 5), .completed)
     }
 
     func testPaymentRecoveryEntry() {
@@ -381,9 +482,25 @@ final class PageInteractionUITests: XCTestCase {
             app.terminate()
             app = launch(page)
             XCUIDevice.shared.orientation = .landscapeLeft
-            let landscape = NSPredicate { _, _ in app.frame.width > app.frame.height }
-            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: landscape, evaluatedWith: app)], timeout: 5), .completed)
-            XCTAssertTrue(app.buttons[page == "campus-electricity" ? "立即缴费" : "campus-form-review"].isHittable)
+            var previousWindow: CGRect?
+            var stableSamples = 0
+            let landscape = NSPredicate { _, _ in
+                let window = app.windows.firstMatch.frame
+                guard app.frame.width > app.frame.height, window.width > window.height else {
+                    stableSamples = 0; previousWindow = nil; return false
+                }
+                stableSamples = previousWindow == window ? stableSamples + 1 : 0
+                previousWindow = window
+                return stableSamples >= 3
+            }
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: landscape, evaluatedWith: app)], timeout: 10), .completed)
+            let landscapeAction = app.buttons[page == "campus-electricity" ? "立即缴费" : "campus-form-review"]
+            XCTAssertTrue(landscapeAction.isHittable)
+            add(XCTAttachment(string: "orientation=\(XCUIDevice.shared.orientation.rawValue) app=\(app.frame) window=\(app.windows.firstMatch.frame) action=\(landscapeAction.frame)"))
+            let deviceCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            deviceCapture.name = "campus-landscape-device-\(page)"
+            deviceCapture.lifetime = .keepAlways
+            add(deviceCapture)
             capture(app, "campus-landscape-\(page)")
             app.terminate()
         }
@@ -400,86 +517,14 @@ final class PageInteractionUITests: XCTestCase {
         }
     }
 
-    func testLeaveWalletOpenCloseAndCancel() {
-        let app = launch("campus-leave")
-        let toggle = app.buttons["leave-wallet-toggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
-        XCTAssertEqual(toggle.label, "打开票夹")
-        capture(app, "wallet-closed")
-        toggle.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["leave-ticket-preview-leave"].waitForExistence(timeout: 5))
-        capture(app, "wallet-open")
-        app.buttons["campus-record-add"].tap()
-        let close = app.buttons["关闭申请请假"]
-        XCTAssertTrue(close.waitForExistence(timeout: 8))
-        close.tap()
-        XCTAssertTrue(toggle.waitForExistence(timeout: 8))
-        XCTAssertFalse(app.otherElements["leave-wallet-printing"].exists)
-        XCTAssertEqual(toggle.label, "收起票夹")
-        toggle.tap()
-        XCTAssertEqual(toggle.label, "打开票夹")
-        capture(app, "wallet-reclosed")
-    }
-
-    func testLeaveWalletPrintOnce() {
-        let app = launch("campus-leave", arguments: ["--preview-wallet-print"])
-        let submit = app.buttons["wallet-fixture-submit"]
-        XCTAssertTrue(submit.waitForExistence(timeout: 10))
-        if !submit.isHittable { app.swipeUp() }
-        submit.tap()
-        let completed = app.staticTexts["wallet-fixture-completions"]
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == %@", "完成 1"), evaluatedWith: completed)], timeout: 8), .completed)
-        capture(app, "wallet-after-print")
-        app.buttons["wallet-fixture-refresh"].tap()
-        XCTAssertEqual(completed.label, "完成 1")
-    }
-
-    func testLeaveWalletLargeText() {
-        let app = launch("campus-leave", largeText: true)
-        let toggle = app.buttons["leave-wallet-toggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
-        toggle.tap()
-        app.swipeUp()
-        XCTAssertTrue(app.buttons["campus-record-add"].isHittable)
-        capture(app, "wallet-large-text")
-    }
-
-    func testLeaveWalletManyAndEmpty() {
-        var app = launch("campus-leave", arguments: ["--preview-wallet-many"])
-        var toggle = app.buttons["leave-wallet-toggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
-        XCTAssertEqual(toggle.value as? String, "8 张请假条")
-        capture(app, "wallet-eight-closed")
-        toggle.tap()
-        app.swipeUp()
-        capture(app, "wallet-eight-expanded")
-        let last = app.descendants(matching: .any)["leave-ticket-wallet-7"]
-        for _ in 0..<10 {
-            if last.exists && last.isHittable { break }
-            app.swipeUp()
-        }
-        XCTAssertTrue(last.exists)
-        app.terminate()
-        app = launch("campus-leave", empty: true)
-        toggle = app.buttons["leave-wallet-toggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
-        XCTAssertEqual(toggle.value as? String, "0 张请假条")
-        XCTAssertTrue(app.buttons["campus-record-add"].isEnabled)
-        capture(app, "wallet-empty")
-    }
-
     func testCampusRecordsSurviveFormDismissal() {
         for page in ["campus-leave", "campus-travel"] {
             let app = launch(page)
             let isLeave = page == "campus-leave"
-            if isLeave {
-                XCTAssertTrue(app.buttons["leave-wallet-toggle"].waitForExistence(timeout: 8))
-                app.buttons["leave-wallet-toggle"].tap()
-            }
-            let record = isLeave ? app.descendants(matching: .any)["leave-ticket-preview-leave"] : app.staticTexts["示例区县"]
+            let record = app.staticTexts[isLeave ? "示例请假记录" : "示例区县"]
             XCTAssertTrue(record.waitForExistence(timeout: 8))
             for _ in 0..<2 {
-                app.buttons[isLeave ? "campus-record-add" : "办理离校登记"].tap()
+                app.buttons[isLeave ? "申请请假" : "办理离校登记"].tap()
                 let close = app.buttons[isLeave ? "关闭申请请假" : "关闭离校登记"]
                 XCTAssertTrue(close.waitForExistence(timeout: 5))
                 close.tap()
@@ -487,6 +532,171 @@ final class PageInteractionUITests: XCTestCase {
                 XCTAssertTrue(record.waitForExistence(timeout: 5), "Cancelling a form must retain existing records without a manual refresh")
             }
             capture(app, "campus-records-after-form-\(page)")
+            app.terminate()
+        }
+    }
+
+    func testBackgroundRoundTripRetainsVisibleContent() {
+        for (page, title) in [("schedule", "高等数学"), ("scores", "高等数学"), ("campus-leave", "示例请假记录")] {
+            let app = launch(page)
+            let content = app.staticTexts.matching(identifier: title).firstMatch
+            XCTAssertTrue(content.waitForExistence(timeout: 8))
+            capture(app, "background-before-\(page)")
+            // A real Home gesture plus pause exposes the actual app-switcher
+            // snapshot. Capture it separately from the foreground AX checks.
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.998))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.50))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 1)
+            let switcher = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            switcher.name = "background-switcher-\(page)"
+            switcher.lifetime = .keepAlways
+            add(switcher)
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            XCTAssertTrue(content.waitForExistence(timeout: 5), "Previously loaded content must survive foreground restoration")
+            XCTAssertTrue(content.isHittable)
+            capture(app, "background-restored-\(page)")
+            app.terminate()
+        }
+    }
+
+    func testDetailSheetsKeepContentAndCloseReachable() {
+        for page in ["course", "account", "elective-detail", "enrolled-detail"] {
+            for large in [false, true] {
+              let edges: [CGVector] = page == "course"
+                  ? [CGVector(dx: -21, dy: 0), CGVector(dx: 21, dy: 0),
+                     CGVector(dx: 0, dy: -21), CGVector(dx: 0, dy: 21)]
+                  : [CGVector(dx: 0, dy: 21)]
+              for (edgeIndex, edge) in edges.enumerated() {
+                let app = launch(page, largeText: large)
+                let close = app.buttons[page == "account" ? "关闭账号" : "关闭课程详情"]
+                XCTAssertTrue(close.waitForExistence(timeout: 8))
+                XCTAssertTrue(close.isHittable)
+                if page == "account" {
+                    XCTAssertTrue(app.staticTexts["预览同学"].isHittable)
+                    if !large {
+                        let account = app.staticTexts["示例账号"]
+                        XCTAssertTrue(account.isHittable)
+                        XCTAssertLessThanOrEqual(account.frame.maxY, app.buttons["退出登录"].frame.minY,
+                                                 "The collapsed account sheet must keep the identity above its footer")
+                    }
+                }
+                capture(app, "detail-sheet-\(page)-\(large ? "large" : "standard")-edge\(edgeIndex)")
+                // Exercise real near-edge touches with a 1pt interior margin
+                // around the recommended 44pt target, rather than glyph bounds.
+                add(XCTAttachment(string: "close=\(close.frame) edge=\(edge)"))
+                close.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                    .withOffset(edge).tap()
+                let dismissed = NSPredicate { _, _ in !close.exists }
+                XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: dismissed, evaluatedWith: app)], timeout: 5), .completed,
+                               "The close control must dismiss for near-edge touches 21pt from center")
+                app.terminate()
+              }
+            }
+        }
+    }
+
+    func testTodayCoursesSwitchesToAllTimetables() {
+        let app = launch("today")
+        let mode = app.buttons["schedule-mode-switch"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 8))
+        XCTAssertEqual(mode.label, "今日课程")
+        let first = app.buttons["today-course-0"]
+        let second = app.buttons["today-course-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertTrue(first.label.contains("大学物理"))
+        XCTAssertTrue(second.label.contains("高等数学"))
+        XCTAssertLessThan(first.frame.minY, second.frame.minY)
+        XCTAssertFalse(app.buttons["本周"].exists)
+        capture(app, "today-course-timeline")
+        first.tap()
+        let close = app.buttons["关闭课程详情"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.tap()
+        mode.tap()
+        XCTAssertEqual(mode.label, "所有课表")
+        let currentWeek = app.buttons["本周"]
+        XCTAssertTrue(currentWeek.waitForExistence(timeout: 5))
+        XCTAssertTrue(currentWeek.isHittable)
+        XCTAssertFalse(app.staticTexts["第 7 周"].exists,
+                       "All mode keeps the original capsules without the added current-week heading")
+        capture(app, "all-timetables-capsules")
+        app.buttons["第 8 周"].tap()
+        mode.tap()
+        XCTAssertEqual(mode.label, "今日课程")
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertTrue(first.label.contains("大学物理"))
+    }
+
+    func testTodayCoursesDistinguishesEmptyFromUnknownWeek() {
+        let empty = launch("today-empty")
+        XCTAssertTrue(empty.staticTexts["今天没有课程"].waitForExistence(timeout: 8))
+        XCTAssertFalse(empty.buttons["today-course-0"].exists)
+        capture(empty, "today-empty")
+        empty.terminate()
+        let unknown = launch("today-unverified")
+        XCTAssertTrue(unknown.staticTexts["暂时无法确认今日课程"].waitForExistence(timeout: 8))
+        XCTAssertFalse(unknown.staticTexts["今天没有课程"].exists)
+        XCTAssertTrue(unknown.buttons["schedule-mode-switch"].isHittable)
+        capture(unknown, "today-unverified")
+    }
+
+    func testTodayCoursesLargeTextKeepsModeAndDetailsReachable() {
+        let app = launch("today", largeText: true)
+        let mode = app.buttons["schedule-mode-switch"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 8))
+        XCTAssertTrue(mode.isHittable)
+        XCTAssertTrue(app.buttons["账号"].isHittable)
+        let first = app.buttons["today-course-0"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertTrue(first.isHittable)
+        capture(app, "today-largest-type")
+        first.tap()
+        XCTAssertTrue(app.buttons["关闭课程详情"].waitForExistence(timeout: 5))
+    }
+
+    func testWebLoginControlsUseMatchingNativeGeometry() {
+        let app = launch("web-login")
+        let close = app.buttons["关闭网页登录"]
+        let refresh = app.buttons["刷新网页"]
+        XCTAssertTrue(close.waitForExistence(timeout: 8))
+        XCTAssertTrue(refresh.isHittable)
+        XCTAssertGreaterThanOrEqual(refresh.frame.width, 44)
+        XCTAssertEqual(close.frame.width, refresh.frame.width, accuracy: 1)
+        XCTAssertEqual(close.frame.height, refresh.frame.height, accuracy: 1)
+        XCTAssertEqual(close.frame.midY, refresh.frame.midY, accuracy: 1)
+        refresh.tap()
+        XCTAssertTrue(close.isHittable)
+        capture(app, "web-login-native-controls")
+    }
+
+    func testRecordInitialLoadingIsCentered() {
+        for (page, title) in [("campus-leave", "正在读取请假记录…"), ("campus-travel", "正在读取离校记录…")] {
+            let app = launch(page, arguments: ["--preview-record-loading"])
+            let message = app.staticTexts[title]
+            XCTAssertTrue(message.waitForExistence(timeout: 8))
+            XCTAssertEqual(message.frame.midX, app.frame.midX, accuracy: 3)
+            XCTAssertGreaterThan(message.frame.midY, app.frame.height * 0.44)
+            XCTAssertLessThan(message.frame.midY, app.frame.height * 0.60)
+            XCTAssertTrue(app.buttons["campus-record-add"].isHittable)
+            capture(app, "initial-loading-\(page)")
+            app.terminate()
+        }
+    }
+
+    func testCampusEmptyStatesStayCenteredWithLargerAddControl() {
+        for (page, title) in [("campus-leave", "暂无请假记录"), ("campus-travel", "暂无离校记录")] {
+            let app = launch(page, empty: true)
+            let message = app.staticTexts[title]
+            XCTAssertTrue(message.waitForExistence(timeout: 8))
+            XCTAssertEqual(message.frame.midX, app.frame.midX, accuracy: 3)
+            XCTAssertGreaterThan(message.frame.midY, app.frame.height * 0.42)
+            XCTAssertLessThan(message.frame.midY, app.frame.height * 0.65)
+            let addControl = app.buttons["campus-record-add"]
+            XCTAssertTrue(addControl.isHittable)
+            XCTAssertEqual(addControl.frame.width, 64, accuracy: 1)
+            XCTAssertEqual(addControl.frame.height, 64, accuracy: 1)
+            capture(app, "empty-centered-\(page)")
             app.terminate()
         }
     }
@@ -535,7 +745,7 @@ final class PageInteractionUITests: XCTestCase {
             var referenceScroll = CGRect.zero
             for legacy in [true, false] {
                 let app = launch(page, legacyBlur: legacy)
-                let control = app.buttons[page == "schedule" || page == "academic" ? "账号" : "返回教务"]
+                let control = app.buttons[page == "schedule" || page == "academic" ? "账号" : "返回"]
                 XCTAssertTrue(control.waitForExistence(timeout: 5))
                 XCTAssertTrue(control.isHittable, "The blur must not block the top control")
                 let scroll = app.scrollViews.firstMatch
@@ -635,7 +845,7 @@ final class PageInteractionUITests: XCTestCase {
             let entry = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
             XCTAssertTrue(entry.waitForExistence(timeout: 5))
             entry.tap()
-            let back = app.buttons["返回教务"]
+            let back = app.buttons["返回"]
             XCTAssertTrue(back.waitForExistence(timeout: 5))
             XCTAssertLessThan(back.frame.midX, app.frame.width * 0.25)
             capture(app, "academic-\(title)")
@@ -652,7 +862,7 @@ final class PageInteractionUITests: XCTestCase {
             let entry = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
             XCTAssertTrue(entry.waitForExistence(timeout: 5))
             entry.tap()
-            XCTAssertTrue(app.buttons["返回教务"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["返回"].waitForExistence(timeout: 5))
             let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.45))
             let destination = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.45))
             edge.press(forDuration: 0.05, thenDragTo: destination)
@@ -666,12 +876,17 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testAcademicCancelledSwipeKeepsHeaderAttachedToPage() {
+        func motionSamples(_ key: String, in report: String) -> Int {
+            let prefix = key + "="
+            guard let field = report.split(separator: " ").first(where: { $0.hasPrefix(prefix) }) else { return 0 }
+            return Int(field.dropFirst(prefix.count)) ?? 0
+        }
         for page in ["scores", "exams", "electives"] {
             let app = launch("academic", transition: true)
             let entry = app.buttons["academic-\(page)"]
             XCTAssertTrue(entry.waitForExistence(timeout: 5))
             entry.tap()
-            let back = app.buttons["返回教务"]
+            let back = app.buttons["返回"]
             XCTAssertTrue(back.waitForExistence(timeout: 5))
             // The cold simulator can expose the back button before the page's
             // loading branch and native appearance transition have settled.
@@ -680,11 +895,22 @@ final class PageInteractionUITests: XCTestCase {
                 : app.descendants(matching: .any).matching(identifier: "term-header-2026-2027-1").firstMatch
             XCTAssertTrue(contentReady.waitForExistence(timeout: 8))
             XCTAssertTrue(contentReady.isHittable)
+            let diagnostic = app.staticTexts["transition-diagnostics"]
+            let pushed = NSPredicate { _, _ in motionSamples("tabDown", in: diagnostic.label) > 0 }
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: pushed, evaluatedWith: diagnostic)], timeout: 5), .completed,
+                           "Push must contain actual simultaneous tab-bar sinking and fading: \(diagnostic.label)")
+            let travel = diagnostic.label.split(separator: " ").first { $0.hasPrefix("tabYRange=") }
+                .flatMap { Double($0.dropFirst("tabYRange=".count)) } ?? 999
+            XCTAssertGreaterThan(travel, 5, "The tab bar must visibly sink")
+            XCTAssertLessThanOrEqual(travel, 24, "Use short 20pt travel, not a whole tab-bar height")
             let before = back.frame
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.45))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.24, dy: 0.45))
             start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 1.5)
             capture(app, "cancelled-pop-\(page)")
+            let reversed = NSPredicate { _, _ in motionSamples("tabUp", in: diagnostic.label) > 0 }
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: reversed, evaluatedWith: diagnostic)], timeout: 5), .completed,
+                           "Pop must contain actual simultaneous rising and fading in: \(diagnostic.label)")
             let sampleCount = Int(app.staticTexts["transition-samples"].label) ?? 0
             let drift = Double(app.staticTexts["transition-drift"].label) ?? 999
             print("Transition diagnostic \(page): \(app.staticTexts["transition-diagnostics"].label)")
@@ -692,20 +918,22 @@ final class PageInteractionUITests: XCTestCase {
             XCTAssertGreaterThan(sampleCount, 3, "Must measure actual in-flight interactive frames")
             XCTAssertLessThanOrEqual(drift, 2, "Title must travel with the detail page during a cancelled swipe")
             XCTAssertTrue(back.isHittable)
+            XCTAssertFalse(app.tabBars.firstMatch.isHittable, "Cancelled pop keeps the detail tab bar hidden")
             XCTAssertEqual(back.frame.midX, before.midX, accuracy: 2)
             app.terminate()
         }
     }
 
     func testAcademicHomeWithoutReminderHasStableSpacedEntries() {
-        let app = launch("academic", withoutUpcoming: true)
+        let app = launch("academic")
         let first = app.buttons["academic-scores"]
         let last = app.buttons["academic-electives"]
         XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["接下来的考试"].exists)
         let before = first.frame
         let account = app.buttons["账号"]
         XCTAssertGreaterThanOrEqual(before.minY - account.frame.maxY, 24)
-        XCTAssertGreaterThanOrEqual(before.height, 96, "Preserve the existing 96-point entry cards")
+        XCTAssertGreaterThanOrEqual(before.height, 88, "Grouped service rows keep a generous touch target")
         XCTAssertTrue(last.isHittable)
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.35))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.75))
@@ -717,13 +945,13 @@ final class PageInteractionUITests: XCTestCase {
 
     func testAcademicDetailSupportsContentSwipeBack() {
         let app = launch("scores", longList: true)
-        XCTAssertTrue(app.buttons["返回教务"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["返回"].waitForExistence(timeout: 5))
         let header = app.descendants(matching: .any).matching(identifier: "term-header-2026-2027-1").firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 5))
         app.swipeUp()
         XCTAssertTrue(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value == 'floating'"), evaluatedWith: header)], timeout: 5) == .completed,
                       "Native content-pop recognition must not steal a vertical scroll")
-        XCTAssertTrue(app.buttons["返回教务"].isHittable)
+        XCTAssertTrue(app.buttons["返回"].isHittable)
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: 0.45))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.45))
         start.press(forDuration: 0.1, thenDragTo: end)
@@ -800,7 +1028,7 @@ final class PageInteractionUITests: XCTestCase {
     }
 
     func testOtherPagesRetainTimetableRefreshAnimation() {
-        assertPagesRetainTimetableRefreshAnimation(["exams", "electives", "academic", "campus-leave", "campus-travel"])
+        assertPagesRetainTimetableRefreshAnimation(["exams", "electives", "campus-leave", "campus-travel"])
     }
 
     func testCampusPagesRetainTimetableRefreshAnimation() {
@@ -815,7 +1043,7 @@ final class PageInteractionUITests: XCTestCase {
             case "exams": anchor = app.staticTexts.matching(identifier: "机械设计基础").firstMatch
             case "electives": anchor = app.textFields["课程名 / 教师"]
             case "academic": anchor = app.buttons["academic-scores"]
-            case "campus-leave": anchor = app.buttons["leave-wallet-toggle"]
+            case "campus-leave": anchor = app.staticTexts["示例请假记录"]
             default: anchor = app.segmentedControls.firstMatch
             }
             XCTAssertTrue(anchor.waitForExistence(timeout: 8), page)
@@ -963,7 +1191,7 @@ final class PageInteractionUITests: XCTestCase {
         XCTAssertEqual(stripWidths[0], stripWidths[1], accuracy: 2)
     }
 
-    func testScoreBreakdownExpandsAndHomeReusesLoadedSummary() {
+    func testScoreBreakdownExpandsAndHomeKeepsOnlyEntryTitles() {
         let app = launch("scores")
         let disclosure = app.buttons["score-breakdown-1"]
         XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
@@ -974,23 +1202,30 @@ final class PageInteractionUITests: XCTestCase {
         capture(app, "score-breakdown-expanded")
         disclosure.tap()
         XCTAssertFalse(app.staticTexts["平时(40%)"].exists)
-        app.buttons["返回教务"].tap()
-        XCTAssertTrue(app.buttons["academic-scores"].label.contains("已公布 3 门成绩"))
+        app.buttons["返回"].tap()
+        XCTAssertEqual(app.buttons["academic-scores"].label, "成绩查询")
+        XCTAssertEqual(app.buttons["academic-exams"].label, "考试安排")
+        XCTAssertEqual(app.buttons["academic-electives"].label, "选课")
     }
 
     func testSemesterMenusReachHistoricalContent() {
         for (page, course) in [("scores", "历史学期课程"), ("exams", "历史学期考试")] {
             let app = launch(page, longList: true)
-            let menu = app.buttons.matching(identifier: "academic-term-jump-menu").firstMatch
+            let menu = app.buttons[page == "scores" ? "score-term-filter" : "exam-term-filter"]
             XCTAssertTrue(menu.waitForExistence(timeout: 5))
+            XCTAssertGreaterThanOrEqual(menu.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(menu.frame.height, 44)
+            let back = app.buttons["返回"]
+            XCTAssertEqual(menu.frame.width, back.frame.width, accuracy: 1, "Filter and back circles have the same rendered diameter")
+            XCTAssertEqual(menu.frame.height, back.frame.height, accuracy: 1)
             menu.tap()
-            let target = app.buttons["academic-term-jump-2025-2026-2"]
+            let target = app.buttons["2025–2026 学年 · 第二学期"]
             XCTAssertTrue(target.waitForExistence(timeout: 3))
             target.tap()
             let historical = app.staticTexts[course]
             XCTAssertTrue(historical.waitForExistence(timeout: 3))
             XCTAssertTrue(historical.isHittable)
-            XCTAssertTrue(app.buttons["返回教务"].isHittable)
+            XCTAssertTrue(app.buttons["返回"].isHittable)
             capture(app, "semester-jump-\(page)")
             app.terminate()
         }
@@ -1031,7 +1266,7 @@ final class PageInteractionUITests: XCTestCase {
 
         for page in ["schedule", "scores", "exams"] {
             let app = launch(page, longList: page == "exams", largeText: true)
-            let control = page == "schedule" ? app.buttons["本周"] : app.buttons["返回教务"]
+            let control = page == "schedule" ? app.buttons["本周"] : app.buttons["返回"]
             XCTAssertTrue(control.waitForExistence(timeout: 5))
             XCTAssertTrue(control.isHittable)
             capture(app, "large-text-\(page)")
@@ -1047,10 +1282,10 @@ final class PageInteractionUITests: XCTestCase {
                 XCTAssertTrue(detail.waitForExistence(timeout: 3))
                 capture(app, "large-text-score-details")
 
-                let menu = app.buttons.matching(identifier: "academic-term-jump-menu").firstMatch
+                let menu = app.buttons[page == "scores" ? "score-term-filter" : "exam-term-filter"]
                 XCTAssertTrue(reveal(menu, in: app, movingForward: false), "Large-text semester menu must be reachable")
                 menu.tap()
-                let target = app.buttons["academic-term-jump-2025-2026-2"]
+                let target = app.buttons["2025–2026 学年 · 第二学期"]
                 XCTAssertTrue(target.waitForExistence(timeout: 5))
                 XCTAssertTrue(target.isHittable)
                 target.tap()
@@ -1059,17 +1294,17 @@ final class PageInteractionUITests: XCTestCase {
                 XCTAssertTrue(historical.isHittable, "Historical score must be visible after the large-text jump")
                 capture(app, "large-text-scores-historical-term")
             } else if page == "exams" {
-                let menu = app.buttons.matching(identifier: "academic-term-jump-menu").firstMatch
+                let menu = app.buttons[page == "scores" ? "score-term-filter" : "exam-term-filter"]
                 XCTAssertTrue(reveal(menu, in: app, movingForward: true), "Large-text exam semester menu must be reachable")
                 menu.tap()
-                let target = app.buttons["academic-term-jump-2025-2026-2"]
+                let target = app.buttons["2025–2026 学年 · 第二学期"]
                 XCTAssertTrue(target.waitForExistence(timeout: 5))
                 XCTAssertTrue(target.isHittable)
                 target.tap()
                 let historical = app.staticTexts["历史学期考试"]
                 XCTAssertTrue(historical.waitForExistence(timeout: 5))
                 XCTAssertTrue(historical.isHittable, "Historical exam must be visible after the large-text jump")
-                let examDay = app.staticTexts.matching(NSPredicate(format: "label == %@ OR label == %@", "20", "20日")).firstMatch
+                let examDay = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "考试日期", "6月20日")).firstMatch
                 XCTAssertTrue(examDay.waitForExistence(timeout: 5))
                 XCTAssertTrue(examDay.isHittable, "Historical ExamRow date rail must be visible at large text")
                 capture(app, "large-text-exams-historical-date-rail")

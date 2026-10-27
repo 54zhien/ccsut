@@ -73,7 +73,8 @@ final class APIClient {
     /// timeout 是整个跳转链的预算，避免冷启动被多次超时拖住。
     func response(for request: URLRequest, timeout: TimeInterval = 20,
                   allowAuthenticationRedirects: Bool = false,
-                  expectedGeneration: UInt64? = nil) async throws -> (Data, HTTPURLResponse) {
+                  expectedGeneration: UInt64? = nil,
+                  followRedirects: Bool = true) async throws -> (Data, HTTPURLResponse) {
         var req = request
         let generation = expectedGeneration ?? CookieJar.generation
         let deadline = Date().addingTimeInterval(timeout)
@@ -104,6 +105,10 @@ final class APIClient {
                 guard let location = http.value(forHTTPHeaderField: "Location"),
                       let next = URL(string: location, relativeTo: url)?.absoluteURL
                 else { throw APIError.http(http.statusCode) }
+                // A caller may inspect the server's redirect without fetching its
+                // public landing page. Cookie rotation and generation checks above
+                // still apply; existing callers retain the full redirect chain.
+                if !followRedirects { return (data, http) }
                 if http.statusCode == 303 || ([301, 302].contains(http.statusCode) && req.httpMethod == "POST") {
                     req.httpMethod = "GET"
                     req.httpBody = nil
@@ -172,10 +177,23 @@ final class APIClient {
 // MARK: - 业务接口
 
 extension APIClient {
-    /// 会话探测也使用统一的严格包装响应校验。
-    func authenticatedProfile() async throws -> ElectiveInit {
-        let (data, _) = try await send(makeRequest("/admin/xsd/xk/listV2", method: "POST", form: [:]))
-        return try APIResponseDecoder.decodeEnvelope(ElectiveInit.self, from: data)
+    /// The protected portal entry returns server-issued account metadata even when
+    /// selection is closed. Use a navigation GET, not elective/XHR-specific headers.
+    func authenticatedProfile() async throws -> StudentIdentity {
+        let generation = CookieJar.generation
+        let url = base.appendingPathComponent("admin/")
+        guard try CookieJar.requestCookies(for: url, expectedGeneration: generation).header?.isEmpty == false
+        else { throw APIError.notLoggedIn }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
+        let (data, http) = try await response(for: request, expectedGeneration: generation, followRedirects: false)
+        if http.statusCode == 200 {
+            guard let html = String(data: data, encoding: .utf8) else { throw APIError.notLoggedIn }
+            return try StudentIdentity.portalPage(status: http.statusCode, responseURL: http.url, html: html)
+        }
+        return try StudentIdentity.portalRedirect(status: http.statusCode, responseURL: http.url,
+                                                  location: http.value(forHTTPHeaderField: "Location"))
     }
 
     /// 选课页初始化：学生信息、字典、批次加密串

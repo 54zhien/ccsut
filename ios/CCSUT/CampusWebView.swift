@@ -62,6 +62,7 @@ private final class CampusOfficialBrowser: NSObject, WKNavigationDelegate {
     private let generation: UInt64
     private var active = true
     private var navigationRevision: UInt64 = 0
+    private var activeNavigationID: ObjectIdentifier?
     private var destination: URL?
     private let handoff: CampusOfficialCookieHandoff
 
@@ -111,54 +112,61 @@ private final class CampusOfficialBrowser: NSObject, WKNavigationDelegate {
 
     nonisolated func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                              decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
-        if url.absoluteString == "about:blank" { decisionHandler(.allow); return }
-        guard ["ehall.ccsut.cn", "auth.ccsut.cn"].contains(url.host?.lowercased() ?? ""),
-              url.user == nil, url.password == nil else {
+        switch CampusOfficialNavigationPolicy.decision(
+            for: navigationAction.request.url,
+            targetIsMainFrame: navigationAction.targetFrame?.isMainFrame
+        ) {
+        case .allow:
+            decisionHandler(.allow)
+        case .blocked(let reportFailure):
             decisionHandler(.cancel)
-            Task { @MainActor [weak self] in self?.failed("官方页面跳转未被允许，请重试") }
-            return
-        }
-        if url.scheme == "http" {
+            if reportFailure {
+                Task { @MainActor [weak self] in self?.failed("官方页面跳转未被允许，请重试") }
+            }
+        case .upgrade(let upgraded):
             decisionHandler(.cancel)
-            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-            components?.scheme = "https"
-            let upgraded = components?.url
             Task { @MainActor [weak self] in
-                guard let self, self.current, let upgraded else { return }
+                guard let self, self.current else { return }
                 self.webView.load(URLRequest(url: upgraded))
             }
-        } else { decisionHandler(url.scheme == "https" ? .allow : .cancel) }
+        }
     }
 
     nonisolated func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        let navigationID = navigation.map { ObjectIdentifier($0) }
         Task { @MainActor [weak self] in
             guard let self, self.current else { return }
             self.navigationRevision &+= 1
+            self.activeNavigationID = navigationID
             self.isLoading = true
             self.error = nil
         }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        let navigationID = navigation.map { ObjectIdentifier($0) }
         Task { @MainActor [weak self] in
-            guard let self, self.current else { return }
+            guard let self, self.current, self.activeNavigationID == navigationID else { return }
             if self.webView.url?.host == "auth.ccsut.cn" {
                 self.isLoading = false
+                self.error = nil
                 return
             }
             guard self.webView.url?.host == "ehall.ccsut.cn" else { self.failed(); return }
             let revision = self.navigationRevision
             do {
                 for _ in 0..<8 {
-                    guard self.current, revision == self.navigationRevision else { return }
+                    guard self.current, revision == self.navigationRevision,
+                          self.activeNavigationID == navigationID else { return }
                     if let proof = try await self.identityProof() {
                         do {
                             try self.handoff.accept(identity: proof, cookies: [])
                             let cookies = try await self.webView.configuration.websiteDataStore.httpCookieStore.cookieSnapshot()
-                            guard self.current, revision == self.navigationRevision else { return }
+                            guard self.current, revision == self.navigationRevision,
+                                  self.activeNavigationID == navigationID else { return }
                             try self.handoff.accept(identity: proof, cookies: cookies)
                             self.isLoading = false
+                            self.error = nil
                             return
                         } catch CampusError.authentication { /* Wait for the official SPA's CAS bootstrap. */ }
                     }
@@ -166,7 +174,8 @@ private final class CampusOfficialBrowser: NSObject, WKNavigationDelegate {
                 }
                 throw CampusError.authentication
             } catch {
-                guard self.current, revision == self.navigationRevision else { return }
+                guard self.current, revision == self.navigationRevision,
+                      self.activeNavigationID == navigationID else { return }
                 self.isLoading = false
                 self.error = (error as? CampusError ?? .serviceUnavailable).localizedDescription
             }
@@ -195,13 +204,23 @@ private final class CampusOfficialBrowser: NSObject, WKNavigationDelegate {
 
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         if (error as NSError).code == NSURLErrorCancelled { return }
+        let navigationID = navigation.map { ObjectIdentifier($0) }
         let message = CampusWebFailure.message(error, syncingCookies: false)
-        Task { @MainActor [weak self] in self?.failed(message) }
+        Task { @MainActor [weak self] in
+            guard let self, self.current, self.isLoading,
+                  self.activeNavigationID == navigationID else { return }
+            self.failed(message)
+        }
     }
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         if (error as NSError).code == NSURLErrorCancelled { return }
+        let navigationID = navigation.map { ObjectIdentifier($0) }
         let message = CampusWebFailure.message(error, syncingCookies: false)
-        Task { @MainActor [weak self] in self?.failed(message) }
+        Task { @MainActor [weak self] in
+            guard let self, self.current, self.isLoading,
+                  self.activeNavigationID == navigationID else { return }
+            self.failed(message)
+        }
     }
 }
 

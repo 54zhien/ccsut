@@ -163,6 +163,14 @@ extension WKHTTPCookieStore {
 
 // MARK: - SessionStore
 
+struct SessionStudentName: Equatable, Sendable {
+    let account: String
+    let generation: UInt64
+    let value: String
+}
+
+typealias StudentNameResolver = @MainActor (String, UInt64) async -> SessionStudentName?
+
 @Observable
 @MainActor
 final class SessionStore {
@@ -219,16 +227,20 @@ final class SessionStore {
 
     private let api: APIClient
     private let prepareEcardSession: @MainActor (String, WKWebsiteDataStore) -> Void
+    private let studentNameResolver: StudentNameResolver?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var adoptionTask: Task<Bool, Never>?
     @ObservationIgnored private var isLoggingOut = false
+    @ObservationIgnored private var verifiedIdentity: (value: StudentIdentity, generation: UInt64)?
 
     init(api: APIClient = .shared,
          prepareEcardSession: @escaping @MainActor (String, WKWebsiteDataStore) -> Void = {
              EcardTokenBridge.prepareSession(forAccount: $0, dataStore: $1)
-         }) {
+         },
+         studentNameResolver: StudentNameResolver? = nil) {
         self.api = api
         self.prepareEcardSession = prepareEcardSession
+        self.studentNameResolver = studentNameResolver
     }
 
     private let cookieKey = "ccsut.cookies.v2"
@@ -262,6 +274,7 @@ final class SessionStore {
             // Do this before exposing MainTabs or starting the ecard prefetch.
             await injectToWebKit(allCookies())
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            guard publishVerifiedIdentity(generation: generation) else { return }
             phase = .loggedIn
             await refreshIfNeeded()
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
@@ -309,8 +322,27 @@ final class SessionStore {
     }
 
     private func verifySession() async throws {
+        let generation = CookieJar.generation
         let profile = try await api.authenticatedProfile()
-        guard profile.xsxh?.isEmpty == false else { throw APIError.notLoggedIn }
+        guard CookieJar.generation == generation, !Task.isCancelled else { throw CancellationError() }
+        if phase == .loggedIn || phase == .refreshing, let studentId, studentId != profile.studentNumber {
+            throw APIError.notLoggedIn
+        }
+        verifiedIdentity = (profile, generation)
+    }
+
+    private func publishVerifiedIdentity(generation: UInt64) -> Bool {
+        guard !Task.isCancelled, CookieJar.generation == generation,
+              let verifiedIdentity, verifiedIdentity.generation == generation else { return false }
+        let number = verifiedIdentity.value.studentNumber
+        if studentId != number {
+            let savedNumber = UserDefaults.standard.string(forKey: sidKey)
+            studentName = savedNumber == number ? UserDefaults.standard.string(forKey: nameKey) : nil
+            if savedNumber != number { UserDefaults.standard.removeObject(forKey: nameKey) }
+        }
+        studentId = number
+        UserDefaults.standard.set(number, forKey: sidKey)
+        return true
     }
 
     // MARK: 静默续期
@@ -350,6 +382,7 @@ final class SessionStore {
                   !APIClient.isAuthenticationURL(final) else { throw APIError.notLoggedIn }
             try await verifySession()
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
+            guard publishVerifiedIdentity(generation: generation) else { return }
             phase = .loggedIn
             lastError = nil
             await injectToWebKit(allCookies())
@@ -445,6 +478,7 @@ final class SessionStore {
         }
         guard CookieJar.generation == generation, !Task.isCancelled else { return false }
         CookieJar.commit(generation: generation)
+        guard publishVerifiedIdentity(generation: generation) else { return false }
         phase = .loggedIn
         lastError = nil
         Task {
@@ -454,27 +488,51 @@ final class SessionStore {
         return CookieJar.generation == generation && !Task.isCancelled
     }
 
-    /// 顺手把姓名学号读出来（/admin/xsd/xk/listV2 里有）
+    /// Publish independently verified identity first. Elective metadata is only
+    /// optional name enrichment; campus identity supplies a read-only fallback
+    /// when the elective channel is closed or omits the name.
     func loadProfile() async {
         guard !isLoggingOut, phase == .loggedIn || phase == .refreshing,
               !CookieJar.shared.isEmpty else { return }
         let generation = CookieJar.generation
-        // 先用缓存顶上，避免冷启动时「我的」页空白
-        if studentName == nil { studentName = UserDefaults.standard.string(forKey: nameKey) }
-        if studentId == nil { studentId = UserDefaults.standard.string(forKey: sidKey) }
-
         do {
-            let initData: ElectiveInit = try await api.electiveInit()
+            if verifiedIdentity?.generation != generation { try await verifySession() }
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
-            if let name = initData.xsxm, !name.isEmpty {
+            guard publishVerifiedIdentity(generation: generation), let account = studentId else { return }
+            prepareEcardSession(account, WebStore.dataStore)
+
+            var electiveName: String?
+            if let initData = try? await api.electiveInit() {
+                guard CookieJar.generation == generation, !Task.isCancelled else { return }
+                // A repeated account is optional, but an explicit mismatch is
+                // never allowed to enrich the currently authenticated account.
+                guard initData.xsxh == nil || initData.xsxh == account else { return }
+                if let name = initData.xsxm?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !name.isEmpty {
+                    electiveName = name
+                }
+            }
+
+            guard CookieJar.generation == generation, !Task.isCancelled, studentId == account else { return }
+            if let name = electiveName {
                 studentName = name
                 UserDefaults.standard.set(name, forKey: nameKey)
+                return
             }
-            if let sid = initData.xsxh, !sid.isEmpty {
-                studentId = sid
-                UserDefaults.standard.set(sid, forKey: sidKey)
-                prepareEcardSession(sid, WebStore.dataStore)
-            }
+
+            // Preserve a same-account name already in memory or on disk. The
+            // resolver is only needed when no usable optional name is known.
+            guard studentName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
+                  let studentNameResolver else { return }
+            guard let resolved = await studentNameResolver(account, generation),
+                  CookieJar.generation == generation, !Task.isCancelled,
+                  studentId == account,
+                  resolved.account == account, resolved.generation == generation,
+                  studentName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else { return }
+            let name = resolved.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, name.rangeOfCharacter(from: .controlCharacters) == nil else { return }
+            studentName = name
+            UserDefaults.standard.set(name, forKey: nameKey)
         } catch {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             lastError = "拉取学生信息失败：\(error.localizedDescription)"
@@ -519,8 +577,10 @@ final class SessionStore {
         Keychain.delete(cookieKey)
         UserDefaults.standard.removeObject(forKey: nameKey)
         UserDefaults.standard.removeObject(forKey: sidKey)
+        UserDefaults.standard.removeObject(forKey: "ccsut.teachingWeek.v1")
         studentName = nil
         studentId = nil
+        verifiedIdentity = nil
         lastError = nil
         lastCookieCount = 0
         // 等待所有可能写 WebKit 的任务结束，再做最终清理。

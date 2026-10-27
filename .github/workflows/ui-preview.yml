@@ -15,8 +15,32 @@ on:
       test_scope:
         description: 'Interaction checks to run (focused checks preserve full-suite failure evidence)'
         type: choice
-        options: [all, refresh-and-search, refresh-animation, refresh-campus, refresh-proof]
+        options: [all, meter-final, meter-gestures, design-final, design-followup, design-layout, design-adaptive, design-sheets, design-motion, refresh-and-search, refresh-animation, refresh-campus, refresh-proof, appearance-screens]
         default: all
+      appearance_source_ref:
+        description: 'Optional source revision for the focused appearance comparison'
+        type: string
+        default: ''
+      appearance_pages:
+        description: 'Space-separated preview pages for appearance-screens only'
+        type: string
+        default: 'schedule academic campus scores'
+      detail_checks:
+        description: 'Run only amount wheels, semester filter and detail tab visibility checks'
+        type: boolean
+        default: false
+      form_fit_only:
+        description: 'Verify only the scoped campus form containment follow-up'
+        type: boolean
+        default: false
+      menu_fit_only:
+        description: 'Verify only native glass menu size and semester interaction'
+        type: boolean
+        default: false
+      navigation_checks_only:
+        description: 'Verify tab motion, cancelled pop and root restoration'
+        type: boolean
+        default: false
       blur_diagnostics:
         description: 'Run the three failed checks in legacy mode and render both blur versions'
         type: boolean
@@ -32,11 +56,30 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.appearance_source_ref || github.ref }}
+      - name: Verify scoped amount and elective boundaries
+        if: ${{ inputs.test_scope == 'appearance-screens' && inputs.detail_checks && !inputs.form_fit_only && !inputs.menu_fit_only && !inputs.navigation_checks_only }}
+        run: |
+          set -euo pipefail
+          xcrun swiftc -parse-as-library ios/CCSUT/MeterAmount.swift ios/Tests/MeterAmountTests.swift -o "$RUNNER_TEMP/meter-tests"
+          "$RUNNER_TEMP/meter-tests"
+          python3 ios/Tests/run-student-name-tests.py
+          python3 ios/Tests/run-elective-load-tests.py
+          SOURCES=(ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift
+            ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift
+            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift
+            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift
+            ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift
+            ios/CCSUT/EcardPaymentPersistence.swift ios/CCSUT/EcardPaymentModel.swift)
+          xcrun swiftc -parse-as-library "${SOURCES[@]}" ios/Tests/EcardPaymentModelTests.swift -o "$RUNNER_TEMP/payment-model-tests"
+          "$RUNNER_TEMP/payment-model-tests"
       - name: Test timetable presentation
+        if: ${{ inputs.test_scope != 'appearance-screens' }}
         run: |
           xcrun swiftc -target "$(uname -m)-apple-macos14.0" -parse-as-library ios/CCSUT/TopBarBlurProfile.swift ios/Tests/TopBarBlurTests.swift -o "$RUNNER_TEMP/top-blur-tests"
           "$RUNNER_TEMP/top-blur-tests"
-          xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
           "$RUNNER_TEMP/schedule-tests"
           xcrun swiftc -parse-as-library ios/CCSUT/InterfacePreview.swift ios/Tests/ReleasePreviewTests.swift -o "$RUNNER_TEMP/release-preview-tests"
           "$RUNNER_TEMP/release-preview-tests" --preview-ui --preview-page academic
@@ -53,8 +96,47 @@ jobs:
       - name: Preserve simulator boot state
         if: failure()
         run: xcrun simctl list devices > "$RUNNER_TEMP/ui-screenshots/simulator-state.txt"
+      - name: Render physical meter before interaction checks
+        if: ${{ (inputs.test_scope == 'meter-final' || inputs.test_scope == 'meter-gestures') && steps.simulator.conclusion == 'success' }}
+        env:
+          TEST_SCOPE: ${{ inputs.test_scope }}
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/meter-screenshots"
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/source-revision.txt"
+          PAGES=(campus-electricity campus-electricity-large campus-electricity-confirmation campus-electricity-result campus-electricity-pending campus-electricity-recovery-corrupt course account elective-detail enrolled-detail)
+          if [ "$TEST_SCOPE" = 'meter-gestures' ]; then
+            PAGES=(campus-electricity-large campus-electricity-confirmation campus-electricity-recovery-corrupt)
+          fi
+          for PAGE in "${PAGES[@]}"; do
+            LAUNCH_ARGS=(--preview-ui --preview-page "$PAGE")
+            if [ "$PAGE" = 'campus-electricity-large' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page campus-electricity -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
+            fi
+            xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
+            xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut "${LAUNCH_ARGS[@]}"
+            sleep 3
+            xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$OUT/$PAGE-light.png"
+            xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance dark
+            sleep 3
+            xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$OUT/$PAGE-dark-live.png"
+            xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut "${LAUNCH_ARGS[@]}"
+            sleep 3
+            xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$OUT/$PAGE-dark.png"
+          done
+          xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
+          xcrun simctl terminate "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut
+      - name: Publish physical meter appearance
+        if: ${{ always() && (inputs.test_scope == 'meter-final' || inputs.test_scope == 'meter-gestures') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCSUT-meter-appearance
+          path: ${{ runner.temp }}/meter-screenshots/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Verify initial and selected week positioning
-        if: ${{ !inputs.blur_diagnostics && inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' }}
+        if: ${{ !inputs.blur_diagnostics && inputs.test_scope != 'meter-final' && inputs.test_scope != 'meter-gestures' && inputs.test_scope != 'design-followup' && inputs.test_scope != 'design-adaptive' && inputs.test_scope != 'design-sheets' && inputs.test_scope != 'design-motion' && inputs.test_scope != 'refresh-and-search' && inputs.test_scope != 'refresh-animation' && inputs.test_scope != 'refresh-campus' && inputs.test_scope != 'refresh-proof' && inputs.test_scope != 'appearance-screens' }}
         run: |
           set -o pipefail
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
@@ -81,7 +163,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - name: Verify native page interactions
-        if: ${{ !inputs.blur_diagnostics && !cancelled() && steps.simulator.conclusion == 'success' }}
+        if: ${{ inputs.test_scope != 'appearance-screens' && inputs.test_scope != 'design-motion' && !inputs.blur_diagnostics && !cancelled() && steps.simulator.conclusion == 'success' }}
         env:
           TEST_SCOPE: ${{ !inputs.blur_diagnostics && inputs.test_scope }}
         run: |
@@ -89,7 +171,70 @@ jobs:
           xcrun simctl io "$CCSUT_PREVIEW_DEVICE" recordVideo --codec=h264 "$RUNNER_TEMP/ui-screenshots/native-interactions.mp4" &
           VIDEO_PID=$!
           trap 'kill -INT "$VIDEO_PID"; wait "$VIDEO_PID" || true' EXIT
-          TEST_SELECTION=(-skip-testing:CCSUTUITests/PageInteractionUITests/testSemesterAndWeekdaysMoveWithCourses)
+          TEST_SELECTION=(
+            -skip-testing:CCSUTUITests/PageInteractionUITests/testSemesterAndWeekdaysMoveWithCourses
+            -skip-testing:CCSUTUITests/PageInteractionUITests/testCampusReducedMotion
+          )
+          if [ "$TEST_SCOPE" = 'design-sheets' ]; then
+            TEST_SELECTION=(-only-testing:CCSUTUITests/PageInteractionUITests/testDetailSheetsKeepContentAndCloseReachable)
+          fi
+          if [ "$TEST_SCOPE" = 'design-adaptive' ]; then
+            TEST_SELECTION=(-only-testing:CCSUTUITests/PageInteractionUITests/testCampusAdaptiveLayout)
+          fi
+          if [ "$TEST_SCOPE" = 'meter-final' ]; then
+            TEST_SELECTION=(
+                -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicDetailSupportsContentSwipeBack
+                -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
+              -only-testing:CCSUTUITests/PageInteractionUITests/testPaymentRecoveryEntry
+              -only-testing:CCSUTUITests/PageInteractionUITests/testPaymentRecoveryLargeText
+              -only-testing:CCSUTUITests/PageInteractionUITests/testDetailSheetsKeepContentAndCloseReachable
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTodayCoursesSwitchesToAllTimetables
+            )
+          fi
+          if [ "$TEST_SCOPE" = 'meter-gestures' ]; then
+            TEST_SELECTION=(
+                -only-testing:CCSUTUITests/PageInteractionUITests/testPaymentRecoveryEntry
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicDetailSupportsContentSwipeBack
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
+            )
+          fi
+          if [ "$TEST_SCOPE" = 'design-followup' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTodayCoursesSwitchesToAllTimetables
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTodayCoursesDistinguishesEmptyFromUnknownWeek
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTodayCoursesLargeTextKeepsModeAndDetailsReachable
+              -only-testing:CCSUTUITests/PageInteractionUITests/testDetailSheetsKeepContentAndCloseReachable
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
+            )
+          fi
+          if [ "$TEST_SCOPE" = 'design-final' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTodayCoursesSwitchesToAllTimetables
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTodayCoursesDistinguishesEmptyFromUnknownWeek
+              -only-testing:CCSUTUITests/PageInteractionUITests/testTodayCoursesLargeTextKeepsModeAndDetailsReachable
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicHomeWithoutReminderHasStableSpacedEntries
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusAdaptiveLayout
+              -only-testing:CCSUTUITests/PageInteractionUITests/testDetailSheetsKeepContentAndCloseReachable
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
+              -only-testing:CCSUTUITests/PageInteractionUITests/testDetailTabsHideAndReturnWithHome
+              -only-testing:CCSUTUITests/PageInteractionUITests/testRecordInitialLoadingIsCentered
+              -only-testing:CCSUTUITests/PageInteractionUITests/testWebLoginControlsUseMatchingNativeGeometry
+            )
+          fi
+          if [ "$TEST_SCOPE" = 'design-layout' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicHomeWithoutReminderHasStableSpacedEntries
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusEntryAndRecords
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusLargeTextEntries
+              -only-testing:CCSUTUITests/PageInteractionUITests/testLargeTextKeepsAcademicControlsAccessible
+              -only-testing:CCSUTUITests/PageInteractionUITests/testScoreBreakdownExpandsAndHomeKeepsOnlyEntryTitles
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusAdaptiveLayout
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusRecordsSurviveFormDismissal
+            )
+          fi
           if [ "$TEST_SCOPE" = 'refresh-and-search' ]; then
             TEST_SELECTION=(
               -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicPagesPullToRefreshIncludingEmptyStates
@@ -127,11 +272,90 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
             "${TEST_SELECTION[@]}" \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
+      - name: Verify focused detail controls
+        if: ${{ inputs.test_scope == 'appearance-screens' && inputs.detail_checks && steps.simulator.conclusion == 'success' }}
+        env:
+          FORM_FIT_ONLY: ${{ inputs.form_fit_only }}
+          MENU_FIT_ONLY: ${{ inputs.menu_fit_only }}
+          NAVIGATION_CHECKS_ONLY: ${{ inputs.navigation_checks_only }}
+        run: |
+          set -o pipefail
+          xcrun simctl io "$CCSUT_PREVIEW_DEVICE" recordVideo --codec=h264 "$RUNNER_TEMP/ui-screenshots/scoped-detail-interactions.mp4" &
+          VIDEO_PID=$!
+          trap 'kill -INT "$VIDEO_PID"; wait "$VIDEO_PID" || true' EXIT
+          TEST_SELECTION=(
+            -only-testing:CCSUTUITests/PageInteractionUITests/testRecordInitialLoadingIsCentered
+            -only-testing:CCSUTUITests/PageInteractionUITests/testWebLoginControlsUseMatchingNativeGeometry
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeLeaveForm
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeDepartureForm
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusNativeFormLargeText
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusFormKeyboardKeepsEditorVisible
+          )
+          if [ "$FORM_FIT_ONLY" != 'true' ]; then
+            TEST_SELECTION+=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
+              -only-testing:CCSUTUITests/PageInteractionUITests/testSemesterMenusReachHistoricalContent
+              -only-testing:CCSUTUITests/PageInteractionUITests/testDetailTabsHideAndReturnWithHome
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
+              -only-testing:CCSUTUITests/PageInteractionUITests/testClosedElectiveChannelPreservesControlsAndEnrolledResults
+                -only-testing:CCSUTUITests/PageInteractionUITests/testElectiveEmptySearchCanResetAndDisabledReasonIsVisible
+                -only-testing:CCSUTUITests/PageInteractionUITests/testCampusEmptyStatesStayCenteredWithLargerAddControl
+                -only-testing:CCSUTUITests/PageInteractionUITests/testBackgroundRoundTripRetainsVisibleContent
+            )
+          fi
+          if [ "$MENU_FIT_ONLY" = 'true' ]; then
+            TEST_SELECTION=(-only-testing:CCSUTUITests/PageInteractionUITests/testSemesterMenusReachHistoricalContent)
+          fi
+          if [ "$NAVIGATION_CHECKS_ONLY" = 'true' ]; then
+            TEST_SELECTION=(
+              -only-testing:CCSUTUITests/PageInteractionUITests/testRecordInitialLoadingIsCentered
+              -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
+              -only-testing:CCSUTUITests/PageInteractionUITests/testDetailTabsHideAndReturnWithHome
+            )
+          fi
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-tests.xcresult" \
+            "${TEST_SELECTION[@]}" \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-test.log"
+      - name: Verify dark cold-start payment confirmation
+        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' && (inputs.test_scope == 'meter-final' || inputs.test_scope == 'meter-gestures') }}
+        run: |
+          set -euo pipefail
+          xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance dark
+          trap 'xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light' EXIT
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-meter-dark-tests.xcresult" \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-meter-dark-test.log"
+      - name: Verify actual reduced motion preference
+        if: ${{ !cancelled() && steps.simulator.conclusion == 'success' && (inputs.test_scope == 'meter-final' || inputs.test_scope == 'meter-gestures' || inputs.test_scope == 'design-layout' || inputs.test_scope == 'design-motion' || inputs.test_scope == 'all' || github.event_name == 'push') }}
+        run: |
+          set -o pipefail
+          xcrun simctl spawn "$CCSUT_PREVIEW_DEVICE" defaults write com.apple.Accessibility ReduceMotionEnabled -bool YES
+          trap 'xcrun simctl spawn "$CCSUT_PREVIEW_DEVICE" defaults write com.apple.Accessibility ReduceMotionEnabled -bool NO' EXIT
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
+            -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-motion-tests.xcresult" \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusReducedMotion \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-motion-test.log"
       - name: Export interaction screenshots
         if: always()
         run: |
+          APP_DATA=$(xcrun simctl get_app_container "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut data 2>/dev/null || true)
+          if [ -f "$APP_DATA/Library/Caches/tab-transition.log" ]; then
+            cp "$APP_DATA/Library/Caches/tab-transition.log" "$RUNNER_TEMP/tab-transition.log"
+            cat "$RUNNER_TEMP/tab-transition.log"
+          fi
           if [ -d "$RUNNER_TEMP/ui-tests.xcresult" ]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-tests.xcresult" --output-path "$RUNNER_TEMP/ui-test-attachments"
+          fi
+          if [ -d "$RUNNER_TEMP/ui-motion-tests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-motion-tests.xcresult" --output-path "$RUNNER_TEMP/ui-motion-attachments"
+          fi
+          if [ -d "$RUNNER_TEMP/ui-meter-dark-tests.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui-meter-dark-tests.xcresult" --output-path "$RUNNER_TEMP/ui-meter-dark-attachments"
           fi
       - name: Publish interaction evidence
         if: always()
@@ -140,9 +364,17 @@ jobs:
           name: CCSUT-ui-interactions
           path: |
             ${{ runner.temp }}/ui-test.log
+            ${{ runner.temp }}/tab-transition.log
             ${{ runner.temp }}/ui-test-attachments/*.png
             ${{ runner.temp }}/ui-test-attachments/*.txt
             ${{ runner.temp }}/ui-test-attachments/manifest.json
+            ${{ runner.temp }}/ui-motion-test.log
+            ${{ runner.temp }}/ui-motion-attachments/*.png
+            ${{ runner.temp }}/ui-motion-attachments/manifest.json
+            ${{ runner.temp }}/ui-meter-dark-test.log
+            ${{ runner.temp }}/ui-meter-dark-attachments/*.png
+            ${{ runner.temp }}/ui-meter-dark-attachments/*.txt
+            ${{ runner.temp }}/ui-meter-dark-attachments/manifest.json
           if-no-files-found: ignore
           retention-days: 14
       - name: Compare failed checks with legacy blur
@@ -158,6 +390,58 @@ jobs:
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO \
             SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG CCSUT_TEST_LEGACY_TOP_BLUR" \
             2>&1 | tee "$RUNNER_TEMP/legacy-blur-test.log"
+      - name: Render focused appearance comparison
+        if: ${{ !cancelled() && (inputs.test_scope == 'appearance-screens' || inputs.test_scope == 'design-sheets' || inputs.test_scope == 'design-final' || inputs.test_scope == 'design-followup') && steps.simulator.conclusion == 'success' }}
+        env:
+          APPEARANCE_PAGES: ${{ inputs.appearance_pages || 'schedule academic campus scores' }}
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/ui-screenshots"
+          git rev-parse HEAD > "$OUT/source-revision.txt"
+          read -r -a PAGES <<< "$APPEARANCE_PAGES"
+          for PAGE in "${PAGES[@]}"; do
+            case "$PAGE" in
+              *[!a-z-]*|'') echo "Invalid preview page"; exit 1 ;;
+            esac
+            LAUNCH_ARGS=(--preview-ui --preview-page "$PAGE")
+            if [ "$PAGE" = 'today-large' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page today -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
+            fi
+            if [ "$PAGE" = 'electives-selected' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page electives --preview-complete-selected --preview-selected-tab)
+            fi
+            if [ "$PAGE" = 'campus-electricity-large' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page campus-electricity -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
+            fi
+            if [ "$PAGE" = 'electives-closed' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page electives --preview-closed-catalog --preview-complete-selected)
+            fi
+            if [ "$PAGE" = 'electives-selected-closed' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page electives --preview-closed-catalog --preview-complete-selected --preview-selected-tab)
+            fi
+            if [ "$PAGE" = 'electives-closed-large' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page electives --preview-closed-catalog --preview-complete-selected -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
+            fi
+            if [ "$PAGE" = 'campus-form-leave-large' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page campus-form-leave -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL)
+            fi
+            if [ "$PAGE" = 'campus-leave-empty' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page campus-leave --preview-empty)
+            fi
+            if [ "$PAGE" = 'campus-travel-empty' ]; then
+              LAUNCH_ARGS=(--preview-ui --preview-page campus-travel --preview-empty)
+            fi
+            xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance light
+            xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut "${LAUNCH_ARGS[@]}"
+            sleep 3
+            xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$OUT/$PAGE-light.png"
+            xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance dark
+            sleep 3
+            xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$OUT/$PAGE-dark-live.png"
+            xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut "${LAUNCH_ARGS[@]}"
+            sleep 3
+            xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$OUT/$PAGE-dark.png"
+          done
       - name: Render preview screens
         if: ${{ !inputs.skip_previews && !cancelled() && steps.simulator.conclusion == 'success' && inputs.render_catalog != false }}
         run: bash ios/Tests/render-preview.sh

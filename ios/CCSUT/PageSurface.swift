@@ -2,6 +2,103 @@ import SwiftUI
 import UIKit
 import Observation
 
+/// Content stays on semantic, opaque surfaces; glass is reserved for controls.
+/// HIG Materials/Layout and WWDC25/356, reviewed 2026-10-26.
+enum AppLayout {
+    static let pageInset: CGFloat = 20
+    static let cardRadius: CGFloat = 28
+    static let sectionSpacing: CGFloat = 28
+}
+
+struct AppSectionHeading: View {
+    let title: String
+    var detail: String? = nil
+
+    init(_ title: String, detail: String? = nil) { self.title = title; self.detail = detail }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.title3.weight(.bold)).foregroundStyle(.primary)
+                .accessibilityAddTraits(.isHeader)
+            if let detail { Text(detail).font(.subheadline).foregroundStyle(.secondary) }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 4)
+    }
+}
+
+struct AppServiceRow: View {
+    let title: String
+    let symbol: String
+    var tint: Color = .accentColor
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: symbol)
+                .font(.system(size: 23, weight: .regular))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(tint)
+                .frame(width: 44, height: 44)
+                .accessibilityHidden(true)
+            Text(title).font(.body.weight(.semibold)).foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 20).padding(.vertical, 20)
+        .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct AppDetailHeading: View {
+    let title: String
+    let subtitle: String
+    var symbol: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let symbol {
+                Image(systemName: symbol).font(.title2).foregroundStyle(.tint)
+                    .symbolRenderingMode(.hierarchical).accessibilityHidden(true)
+            }
+            Text(title).font(.title2.weight(.bold))
+                .accessibilityAddTraits(.isHeader)
+            if !subtitle.isEmpty {
+                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct PageLoadingState: View {
+    let title: String
+
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            ProgressView().controlSize(.regular).accessibilityHidden(true)
+            Text(title).font(.subheadline).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+extension View {
+    func appContentCard() -> some View {
+        background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: AppLayout.cardRadius))
+    }
+}
+
 enum AppMessages {
     static let loadFailure = "加载失败，请重试"
 
@@ -51,15 +148,9 @@ struct SheetSymbolButton: View {
 
     var body: some View {
         Button(action: action) {
-            if let symbolSize {
-                // Image bounds, rather than a text baseline, define the center.
-                Image(systemName: symbol)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: symbolSize, height: symbolSize, alignment: .center)
-            } else {
-                Label(label, systemImage: symbol)
-            }
+            Image(systemName: symbol)
+                .font(.system(size: symbolSize ?? 20, weight: .medium))
+                .frame(width: 24, height: 24)
         }
             .labelStyle(.iconOnly)
             .buttonStyle(.glass)
@@ -167,9 +258,10 @@ final class PageLoadGate {
 /// Keep refresh, scroll geometry and the scroll view in one stable owner; page
 /// chrome and loading tasks belong outside this surface.
 struct PageScrollSurface<Content: View>: View {
-    let refresh: @MainActor () async -> Void
-    var onOffsetChange: (CGFloat) -> Void = { _ in }
+    var refresh: (@MainActor () async -> Void)? = nil
+    var refreshHaptics = false
     var backgroundColor: Color = Color(.systemGroupedBackground)
+    var onOffsetChange: (CGFloat) -> Void = { _ in }
     @ViewBuilder var content: (CGSize, ScrollViewProxy) -> Content
 
     var body: some View {
@@ -178,10 +270,12 @@ struct PageScrollSurface<Content: View>: View {
                 ScrollView(.vertical) {
                     content(viewport.size, proxy)
                         .background {
-                            NativePageRefreshAnchor(action: refresh)
+                            if let refresh {
+                                NativePageRefreshAnchor(action: refresh, haptics: refreshHaptics)
                                 .frame(width: 0, height: 0)
                                 .allowsHitTesting(false)
                                 .accessibilityHidden(true)
+                            }
                         }
                 }
                 .scrollEdgeEffectStyle(.soft, for: .top)
@@ -283,7 +377,8 @@ private struct PageRefreshDiagnostics: ViewModifier {
 /// held inset when a pushed page updates its layout during an asynchronous read.
 private struct NativePageRefreshAnchor: UIViewRepresentable {
     let action: @MainActor () async -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+    let haptics: Bool
+    func makeCoordinator() -> Coordinator { Coordinator(action: action, haptics: haptics) }
     func makeUIView(context: Context) -> AnchorView {
         let view = AnchorView()
         view.coordinator = context.coordinator
@@ -292,6 +387,7 @@ private struct NativePageRefreshAnchor: UIViewRepresentable {
     }
     func updateUIView(_ view: AnchorView, context: Context) {
         context.coordinator.action = action
+        context.coordinator.haptics = haptics
         view.connect()
     }
     static func dismantleUIView(_ view: AnchorView, coordinator: Coordinator) { coordinator.detach() }
@@ -313,12 +409,14 @@ private struct NativePageRefreshAnchor: UIViewRepresentable {
 
     @MainActor final class Coordinator: NSObject {
         var action: @MainActor () async -> Void
+        var haptics: Bool
         private let control = UIRefreshControl()
         private weak var scroll: UIScrollView?
         private var task: Task<Void, Never>?
         private var revision: UInt64 = 0
-        init(action: @escaping @MainActor () async -> Void) {
+        init(action: @escaping @MainActor () async -> Void, haptics: Bool) {
             self.action = action
+            self.haptics = haptics
             super.init()
             control.addTarget(self, action: #selector(refresh), for: .valueChanged)
         }
@@ -331,6 +429,7 @@ private struct NativePageRefreshAnchor: UIViewRepresentable {
         }
         @objc private func refresh() {
             guard task == nil else { return }
+            if haptics { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
             let expectedRevision = revision
             let action = action
             #if DEBUG
@@ -600,6 +699,6 @@ struct NagiBackButton: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: Circle())
-        .accessibilityLabel("返回教务")
+        .accessibilityLabel("返回")
     }
 }

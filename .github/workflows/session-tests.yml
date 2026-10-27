@@ -106,18 +106,27 @@ jobs:
           "$RUNNER_TEMP/elective-state-tests"
           xcrun swiftc -parse-as-library ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift ios/CCSUT/ElectiveState.swift ios/CCSUT/EnrolledCourses.swift ios/Tests/EnrolledCoursesTests.swift -o "$RUNNER_TEMP/enrolled-courses-tests"
           "$RUNNER_TEMP/enrolled-courses-tests"
-          xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/CCSUT/AcademicCalendar.swift ios/Tests/AcademicReliabilityTests.swift -o "$RUNNER_TEMP/academic-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/CCSUT/AcademicCalendar.swift ios/Tests/AcademicReliabilityTests.swift -o "$RUNNER_TEMP/academic-tests"
           "$RUNNER_TEMP/academic-tests"
       - name: Run timetable presentation regressions
         if: always()
         run: |
-          xcrun swiftc -parse-as-library ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/Tests/SchedulePresentationTests.swift -o "$RUNNER_TEMP/schedule-tests"
           "$RUNNER_TEMP/schedule-tests"
           xcrun swiftc -parse-as-library ios/CCSUT/InterfacePreview.swift ios/Tests/ReleasePreviewTests.swift -o "$RUNNER_TEMP/release-preview-tests"
           "$RUNNER_TEMP/release-preview-tests" --preview-ui --preview-page academic
       - name: Run selected-course load ownership regressions
         if: always()
         run: python3 ios/Tests/run-elective-load-tests.py
+      - name: Run optional student name and logout cache regressions
+        if: always()
+        run: python3 ios/Tests/run-student-name-tests.py
+      - name: Run bounded physical meter amount regressions
+        if: always()
+        run: |
+          set -e
+          xcrun swiftc -parse-as-library ios/CCSUT/MeterAmount.swift ios/Tests/MeterAmountTests.swift -o "$RUNNER_TEMP/meter-amount-tests"
+          "$RUNNER_TEMP/meter-amount-tests"
       - name: Run retained material top blur regressions
         if: always()
         run: |

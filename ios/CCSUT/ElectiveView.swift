@@ -31,6 +31,7 @@ struct ElectiveView: View {
     @State private var pending: PendingAction?
     @State private var workingId: String?
     @State private var actionMessage: String?
+    @State private var controlsHeight: CGFloat = 0
 #if DEBUG
     @State private var previewPublicationCount = 0
     @State private var previewCatalogFailureInjected = false
@@ -47,16 +48,9 @@ struct ElectiveView: View {
     }
 
     var body: some View {
-        PageScrollSurface(refresh: { await load(force: true) }) { viewport, _ in
-            VStack(spacing: 0) {
-                if isLoading && classes.isEmpty && enrolledModel.context == nil {
-                    ProgressView("拉取教学班…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    list
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: classes.isEmpty ? viewport.height : 0)
+        PageScrollSurface(refresh: { await load(force: true) }, refreshHaptics: true) { viewport, _ in
+            list(viewportHeight: viewport.height)
+                .frame(maxWidth: .infinity, minHeight: viewport.height, alignment: .top)
         }
         .scrollDismissesKeyboard(.immediately)
         .academicDetailChrome(title: "选课")
@@ -66,7 +60,15 @@ struct ElectiveView: View {
         }
 #endif
         .task {
+#if DEBUG
+            let isSelectedTabPreview = InterfacePreview.enabled
+                && ProcessInfo.processInfo.arguments.contains("--preview-selected-tab")
+            if isSelectedTabPreview { selectedFilter = .selected }
+#endif
             if classes.isEmpty { await load() }
+#if DEBUG
+            if isSelectedTabPreview { selectedFilter = .selected }
+#endif
         }
         .onChange(of: enrolledModel.currentSummary) { _, summary in
             if let summary { onLoaded(summary.count, summary.term) }
@@ -97,41 +99,63 @@ struct ElectiveView: View {
                 .submitLabel(.search)
             if !keyword.isEmpty {
                 Button { keyword = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.circle)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("清除搜索")
             }
         }
-        .padding(12)
-        .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 18))
+        .padding(.leading, 16)
+        .padding(.trailing, keyword.isEmpty ? 16 : 4)
+        .frame(minHeight: 52)
+        .background(Color(.secondarySystemGroupedBackground), in: .capsule)
     }
 
-    private var list: some View {
-        LazyVStack(spacing: 16) {
-            VStack(spacing: 14) {
-                searchField
-                filterBar
-                if selectedFilter == .selected { enrolledHeader }
-                else if let initData { header(initData) }
-            }
-            .padding(16)
-            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 28))
+    private func list(viewportHeight: CGFloat) -> some View {
+        // Only the result region expands; the measured controls stay at the top.
+        return LazyVStack(spacing: 16) {
+            VStack(spacing: 16) {
+                VStack(spacing: 14) {
+                    searchField
+                    filterBar
+                    if selectedFilter == .selected { enrolledHeader }
+                    else if let initData { header(initData) }
+                }
+                .accessibilityIdentifier("elective-controls")
 
-            if let errorText {
-                PageStatusNotice(message:errorText) { Task { await load(force:true) } }
+                if let errorText {
+                    PageStatusNotice(message:errorText) { Task { await load(force:true) } }
+                }
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
             if selectedFilter == .selected {
-                enrolledList
+                if isLoading && enrolledModel.context == nil {
+                    PageLoadingState("读取完整已选结果…")
+                        .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
+                } else {
+                    enrolledList(viewportHeight: viewportHeight)
+                }
+            } else if isLoading && classes.isEmpty {
+                PageLoadingState("拉取教学班…")
+                    .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
+            } else if electiveState.isChannelClosed {
+                ContentUnavailableView("选课通道暂未开启", systemImage: "calendar.badge.clock",
+                    description: Text("可前往“已选”查看当前或历史选课记录。"))
+                    .accessibilityIdentifier("elective-channel-closed")
+                    .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
             } else {
                 ForEach(filtered) { item in catalogCard(item) }
                 if classes.isEmpty {
                     ContentUnavailableView(errorText == nil ? "当前没有可选课程" : AppMessages.loadFailure,
                                            systemImage:errorText == nil ? "tray" : "exclamationmark.icloud")
+                        .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
                 }
             }
 
-            if selectedFilter != .selected && !classes.isEmpty && filtered.isEmpty {
+            if selectedFilter != .selected && !electiveState.isChannelClosed && !classes.isEmpty && filtered.isEmpty {
                 ContentUnavailableView {
                     Label("未找到课程", systemImage: "magnifyingglass")
                 } description: {
@@ -141,13 +165,14 @@ struct ElectiveView: View {
                         .buttonStyle(.borderedProminent)
                         .accessibilityHint("清除搜索文字并切换为全部课程")
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
+                .accessibilityIdentifier("elective-no-results")
+                .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, AppLayout.pageInset)
         .padding(.top, 12)
         .padding(.bottom, 24)
+        .frame(maxWidth: 720).frame(maxWidth: .infinity)
         .background(Color(.systemGroupedBackground))
         .confirmationDialog(
             pending.map { $0.enrolling ? "确认选课？" : "确认退课？" } ?? "",
@@ -177,7 +202,7 @@ struct ElectiveView: View {
             Label(SchedulePresentation.termTitle(data.xkxnxq ?? "—"), systemImage: "calendar")
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
-                Label(data.xsxm ?? "—", systemImage: "person")
+                Label(session.studentName ?? data.xsxm ?? "已登录", systemImage: "person")
                 Spacer(minLength: 8)
                 if let summary = enrolledModel.currentSummary, summary.term == data.xkxnxq {
                     Label("\(summary.count) 已选", systemImage: "checkmark.circle.fill")
@@ -199,6 +224,7 @@ struct ElectiveView: View {
     private var enrolledHeader: some View {
         VStack(alignment:.leading,spacing:8) {
             if let context = enrolledModel.context {
+                let selectedTerm = enrolledModel.selectedTerm ?? context.defaultTerm
                 Menu {
                     ForEach(context.terms,id:\.self) { term in
                         Button(SchedulePresentation.termTitle(term)) {
@@ -208,19 +234,47 @@ struct ElectiveView: View {
                         .accessibilityIdentifier("enrolled-term-\(term)")
                     }
                 } label: {
-                    Label(SchedulePresentation.termTitle(enrolledModel.selectedTerm ?? context.defaultTerm),systemImage:"calendar")
-                        .fixedSize(horizontal:false,vertical:true)
+                    HStack(spacing: 10) {
+                        Image(systemName: "calendar")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("已选课程学期")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(SchedulePresentation.termTitle(selectedTerm))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 6)
+                    .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10)
+                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20))
                 .accessibilityIdentifier("enrolled-term-menu")
+                .accessibilityLabel("已选课程学期")
+                .accessibilityValue(SchedulePresentation.termTitle(selectedTerm))
+                .accessibilityHint("点按切换显示的学期")
                 .disabled(electiveState.isActionInProgress)
             }
-            HStack {
-                Text("含自主选课与配课")
+            HStack(alignment: .firstTextBaseline) {
+                Text("线上、线下选课记录")
+                    .font(.subheadline.weight(.medium))
                 Spacer(minLength:8)
-                if let snapshot = enrolledModel.snapshot { Text("\(snapshot.count) 门").monospacedDigit() }
+                if let snapshot = enrolledModel.snapshot {
+                    Text("\(snapshot.count) 门")
+                        .font(.caption.monospacedDigit())
+                }
             }
+            .foregroundStyle(.secondary)
         }
-        .font(.caption).foregroundStyle(.secondary)
         .frame(maxWidth:.infinity,alignment:.leading)
     }
 
@@ -231,7 +285,7 @@ struct ElectiveView: View {
         }
     }
 
-    @ViewBuilder private var enrolledList: some View {
+    @ViewBuilder private func enrolledList(viewportHeight: CGFloat) -> some View {
         if enrolledModel.isLoading {
             ProgressView("读取完整已选结果…")
         }
@@ -248,7 +302,7 @@ struct ElectiveView: View {
             if let item = enrolledModel.currentCourse(for:record,catalog:electiveState,catalogTerm:initData?.xkxnxq) {
                 catalogCard(item)
             } else {
-                EnrolledCourseCard(record:record,readOnlyReason:enrolledReadOnlyReason)
+                EnrolledCourseCard(record:record)
                     .contentShape(.rect)
                     .onTapGesture { enrolledDetail = record }
             }
@@ -259,13 +313,9 @@ struct ElectiveView: View {
             } description: {
                 Text(enrolledModel.snapshot?.isEmpty == true ? "教务系统返回该学期暂无个人课程。" : "请尝试其他课程名或教师。")
             }
+            .accessibilityIdentifier("elective-enrolled-empty")
+            .modifier(ElectiveEmptyStateLayout(viewportHeight: viewportHeight, controlsHeight: controlsHeight))
         }
-    }
-
-    private var enrolledReadOnlyReason: String {
-        if !enrolledModel.isVerified || isLoading { return "课程结果尚未验证完成，仅供查看" }
-        if enrolledModel.selectedTerm != enrolledModel.context?.defaultTerm { return "历史学期课程，仅供查看" }
-        return "仅供查看，下拉刷新可核实操作条件"
     }
 
     private func catalogCard(_ item: TeachingClass) -> some View {
@@ -464,37 +514,38 @@ struct ElectiveView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(Filter.allCases) { f in
-                    let on = f == selectedFilter
-                    Button {
-                        withAnimation(.snappy(duration: 0.18)) { selectedFilter = f }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(f.rawValue)
-                                .font(.caption.weight(.medium))
-                            if f == .selected, selectedCount > 0 {
-                                Text("\(selectedCount)")
-                                    .font(.caption2.weight(.bold).monospacedDigit())
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background((on ? Color("AccentForeground") : Color.accentColor)
-                                        .opacity(0.15), in: .capsule)
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(
-                            on ? AnyShapeStyle(Color.accentColor)
-                               : AnyShapeStyle(Color(.secondarySystemGroupedBackground)),
-                            in: .capsule
-                        )
-                        .foregroundStyle(on ? Color("AccentForeground") : Color.primary)
-                    }
-                    .buttonStyle(.plain)
+                    filterButton(f)
                 }
             }
             .padding(.horizontal, 2)
         }
         .padding(.top, 2)
+    }
+
+    private func filterButton(_ filter: Filter) -> some View {
+        let selected = filter == selectedFilter
+        return Button {
+            withAnimation(.snappy(duration: 0.18)) { selectedFilter = filter }
+        } label: {
+            HStack(spacing: 6) {
+                Text(filter.rawValue)
+                    .font(.subheadline.weight(.medium))
+                if filter == .selected, selectedCount > 0 {
+                    Text("\(selectedCount)")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            .foregroundStyle(selected ? Color.accentColor : Color.primary)
+            .background(selected ? Color.accentColor.opacity(0.12) : Color(.secondarySystemGroupedBackground), in: .capsule)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(filter.rawValue)
+        .accessibilityValue(filter == .selected ? "\(selectedCount) 门" : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     // MARK: 筛选
@@ -561,6 +612,13 @@ struct ElectiveView: View {
                 try? await Task.sleep(for: InterfacePreview.refreshFixtureDelay)
             }
             guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
+            if ProcessInfo.processInfo.arguments.contains("--preview-closed-catalog") {
+                electiveState.publishClosedChannel(generation: generation)
+                initData = nil
+                errorText = nil
+                previewPublicationCount += 1
+                return
+            }
             if InterfacePreview.catalogReadFailureOnce && !previewCatalogFailureInjected {
                 previewCatalogFailureInjected = true
                 errorText = "教学班读取失败，请重试核实操作条件"
@@ -591,6 +649,8 @@ struct ElectiveView: View {
             var builder = ElectiveSnapshotBuilder<TeachingClass>()
             var batchError: Error?
             if let batches = initData.pcencs, !batches.isEmpty {
+                var closedBatchError: APIError?
+                var hasSuccessfulBatch = false
                 for (pcid, pcenc) in batches.sorted(by: { $0.key < $1.key }) {
                     guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
                     let normalizedPCID = pcid.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -605,13 +665,22 @@ struct ElectiveView: View {
                         guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
                         guard let items = page.initData else { throw APIError.empty }
                         builder.append(records(for: items), batchID: normalizedPCID)
+                        hasSuccessfulBatch = true
                     } catch {
                         guard !handleCookieGenerationChange(expected: generation) else { return }
                         if error is CancellationError { throw error }
-                        if batchError == nil { batchError = error }
+                        if let apiError = error as? APIError,
+                           case .business(let code, let message) = apiError,
+                           ElectiveCatalogResponse.isChannelClosed(code: code, message: message) {
+                            closedBatchError = apiError
+                        } else if batchError == nil {
+                            batchError = error
+                        }
                     }
                 }
+                // A closed batch must not hide real failures or another batch's valid catalog.
                 if let batchError { throw batchError }
+                if !hasSuccessfulBatch, let closedBatchError { throw closedBatchError }
             } else {
                 let page = try await APIClient.shared.teachingClasses(batch: nil)
                 guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
@@ -638,6 +707,15 @@ struct ElectiveView: View {
             guard !handleCookieGenerationChange(expected: generation) else { return }
             if Task.isCancelled {
                 electiveState.refreshFailed()
+                return
+            }
+            if case .business(let code, let message) = e,
+               ElectiveCatalogResponse.isChannelClosed(code: code, message: message) {
+                electiveState.publishClosedChannel(generation: generation)
+                self.initData = nil
+                pending = nil
+                detail = nil
+                errorText = nil
                 return
             }
             if case .notLoggedIn = e {
@@ -688,6 +766,8 @@ struct PendingAction: Identifiable {
 }
 
 struct ClassCard: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let item: TeachingClass
     var onAction: (() -> Void)? = nil
     var isWorking: Bool = false
@@ -695,84 +775,52 @@ struct ClassCard: View {
     var actionBlockReason: String? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 8) {
-                Text(item.kcmc ?? "—")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-
-                Spacer(minLength: 4)
-
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(item.xf ?? "—")
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(.tint)
-                    Text("学分")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
+            if dynamicTypeSize.isAccessibilitySize {
+                courseTitle
+                creditBadge
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    courseTitle
+                    Spacer(minLength: 4)
+                    creditBadge
                 }
             }
 
-            HStack {
-                if let teacher = item.teacher, !teacher.isEmpty {
-                    Label(teacher, systemImage: "person.fill")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                if item.isSelected {
-                    Label("已选", systemImage: "checkmark.circle.fill")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.green)
-                }
+            if let teacher = item.teacher, !teacher.isEmpty {
+                Label(teacher, systemImage: "person")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let place = item.sksjdd, !place.isEmpty {
-                Label(place, systemImage: "clock.fill")
-                    .font(.caption)
+                Label {
+                    Text(place)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "clock")
+                }
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
             }
 
-            HStack(spacing: 10) {
+            Divider()
+
+            if dynamicTypeSize.isAccessibilitySize {
                 CapacityBar(item: item)
-
-                if item.isFull && !item.isSelected {
-                    Text("已满")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.orange)
-                } else if item.canSelect && !item.isSelected {
-                    Text("可选")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.green)
+                HStack(spacing: 12) {
+                    courseStatus
+                    Spacer(minLength: 8)
+                    actionButton
                 }
-
-                Spacer(minLength: 4)
-
-                if let onAction {
-                    Button(action: onAction) {
-                        HStack(spacing: 4) {
-                            if isWorking {
-                                ProgressView().controlSize(.mini)
-                            }
-                            Text(item.isSelected ? "退课" : "选课")
-                                .font(.caption.weight(.semibold))
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(
-                            item.isSelected ? Color.red.opacity(0.12) : Color.accentColor.opacity(0.14),
-                            in: .capsule
-                        )
-                        .foregroundStyle(item.isSelected ? Color.red : Color.accentColor)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isWorking || !canPerformAction)
-                    .opacity(canPerformAction || isWorking ? 1 : 0.45)
-                    .accessibilityHint(Text(actionBlockReason ?? (item.isSelected ? "点按后确认退课" : "点按后确认选课")))
+            } else {
+                HStack(spacing: 12) {
+                    CapacityBar(item: item)
+                    courseStatus
+                    actionButton
                 }
             }
-            .padding(.top, 2)
 
             if let actionBlockReason {
                 Label(actionBlockReason, systemImage: "info.circle")
@@ -781,14 +829,62 @@ struct ClassCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(16)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
-        .overlay {
+        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
+    }
+
+    private var courseTitle: some View {
+        Text(item.kcmc ?? "—")
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var creditBadge: some View {
+        Text("\(item.xf ?? "—") 学分")
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(.secondary)
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(.tertiarySystemFill), in: .capsule)
+    }
+
+    @ViewBuilder private var courseStatus: some View {
+        Group {
             if item.isSelected {
-                RoundedRectangle(cornerRadius: 26)
-                    .strokeBorder(.green.opacity(0.55), lineWidth: 1.5)
+                Label("已选", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            } else if item.isFull {
+                Text("已满").foregroundStyle(.orange)
+            } else if item.canSelect {
+                Text("可选").foregroundStyle(.green)
             }
+        }
+        .font(.caption.weight(.medium))
+        .fixedSize()
+    }
+
+    @ViewBuilder private var actionButton: some View {
+        if let onAction {
+            Button(action: onAction) {
+                HStack(spacing: 6) {
+                    if isWorking {
+                        ProgressView().controlSize(.mini)
+                    }
+                    Text(item.isSelected ? "退课" : "选课")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .fixedSize()
+                .padding(.horizontal, 4)
+                .frame(minHeight: 32)
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.capsule)
+            .tint(item.isSelected ? Color.red : Color.accentColor)
+            .disabled(isWorking || !canPerformAction)
+            .accessibilityHint(Text(actionBlockReason ?? (item.isSelected ? "点按后确认退课" : "点按后确认选课")))
         }
     }
 }
@@ -801,18 +897,49 @@ struct CapacityBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color(.tertiarySystemFill))
+                segments(width: geo.size.width)
+            }
+            .frame(height: 8)
+
+            Text(capacitySummary)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("选课名额")
+        .accessibilityValue(capacitySummary)
+    }
+
+    private var capacitySummary: String {
+        guard item.capacity > 0 else { return "\(item.enrolled)/\(item.capacity)" }
+        return "已选 \(item.enrolled) · 余量 \(max(0, item.capacity - item.enrolled))"
+    }
+
+    @ViewBuilder
+    private func segments(width: CGFloat) -> some View {
+        if item.capacity <= 0 {
+            Capsule().fill(Color(.tertiarySystemFill))
+        } else {
+            let ratio = min(max(item.fillRatio, 0), 1)
+            let gap: CGFloat = ratio > 0 && ratio < 1 ? 4 : 0
+            let availableWidth = max(0, width - gap)
+            HStack(spacing: 0) {
+                if ratio > 0 {
                     Capsule()
                         .fill(fillColor.gradient)
-                        .frame(width: max(4, geo.size.width * item.fillRatio))
+                        .frame(width: availableWidth * ratio)
+                }
+                if gap > 0 {
+                    Color.clear.frame(width: gap)
+                }
+                if ratio < 1 {
+                    Capsule()
+                        .fill(Color(.tertiarySystemFill))
+                        .frame(width: availableWidth * (1 - ratio))
                 }
             }
-            .frame(height: 5)
-
-            Text("\(item.enrolled)/\(item.capacity)")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
+            .frame(width: width, alignment: .leading)
         }
     }
 
@@ -899,5 +1026,22 @@ struct ClassDetailSheet: View {
                     .multilineTextAlignment(.trailing)
             }
         }
+    }
+}
+
+// Measure the intrinsic empty group before adding space. Aim at the whole
+// viewport midpoint, clamping below the anchored controls for large text.
+private struct ElectiveEmptyStateLayout: ViewModifier {
+    let viewportHeight: CGFloat
+    let controlsHeight: CGFloat
+    @State private var contentHeight: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        let contentTop = 12 + controlsHeight + 16
+        content
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+            .padding(.top, max(0, (viewportHeight - contentHeight) / 2 - contentTop))
+            .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - contentTop - 24), alignment: .top)
     }
 }

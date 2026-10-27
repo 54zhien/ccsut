@@ -5,22 +5,13 @@ struct ScheduleDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
-            SheetHeader(title: "课程详情") { dismiss() }
+        NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    VStack(spacing: 8) {
-                        Text(slot.course)
-                            .font(.title2.weight(.semibold))
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityAddTraits(.isHeader)
-                        Text("\(weekdayName) · \(SchedulePresentation.periodCaption(slot))")
-                            .font(.subheadline)
-                            .foregroundStyle(Color.accentColor)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 8)
+                VStack(alignment: .leading, spacing: 24) {
+                    AppDetailHeading(title: slot.course,
+                                     subtitle: "\(weekdayName) · \(SchedulePresentation.periodCaption(slot))",
+                                     symbol: "book.closed")
+                        .padding(.horizontal, 4)
 
                     VStack(spacing: 0) {
                         information("person", label: "任课教师", value: slot.teacher.isEmpty ? "未标注" : slot.teacher)
@@ -32,15 +23,23 @@ struct ScheduleDetailSheet: View {
                         information("calendar", label: "上课周次",
                                     value: slot.weeks.isEmpty ? "未标注" : "第 \(WeekParser.compress(slot.weeks.sorted())) 周")
                     }
+                    .padding(.horizontal, 20)
+                    .appContentCard()
                 }
                 .textSelection(.enabled)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 24)
+                .padding(20)
+                .frame(maxWidth: 720).frame(maxWidth: .infinity)
             }
             .scrollBounceBehavior(.basedOnSize)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("课程详情")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                SheetHeader(title: "课程详情") { dismiss() }
+                    .background(Color(.systemGroupedBackground))
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .ignoresSafeArea(.container, edges: .top)
     }
 
     private func information(_ symbol: String, label: String, value: String) -> some View {

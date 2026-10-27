@@ -167,10 +167,13 @@ struct EnrolledCoursesSummary: Equatable { let count: Int; let term: String }
             guard accepts(version,owner:owner) else { return }
             try Task.checkCancellation()
             guard courses.allSatisfy({$0.xnxq == target}) else { throw APIError.decoding("已选课程学期不匹配") }
-            snapshot = courses.sorted { ($0.kcmc ?? "").localizedStandardCompare($1.kcmc ?? "") == .orderedAscending }
+            // The personal grid also contains assigned major courses. This page
+            // is selection history, including electives from closed channels.
+            let selected = courses.filter { $0.xkfs?.trimmingCharacters(in: .whitespacesAndNewlines) == "选课" }
+            snapshot = selected.sorted { ($0.kcmc ?? "").localizedStandardCompare($1.kcmc ?? "") == .orderedAscending }
             isVerified = true
             if catalogGeneration == owner { linkedCatalogGeneration = owner }
-            if target == context.defaultTerm { currentSummary = EnrolledCoursesSummary(count:courses.count,term:target) }
+            if target == context.defaultTerm { currentSummary = EnrolledCoursesSummary(count:selected.count,term:target) }
         } catch {
             guard accepts(version,owner:owner) else { return }
             errorText = error is CancellationError || Task.isCancelled ? "已选课程读取已取消，请重试"

@@ -90,6 +90,17 @@ private actor ReadGate {
         } catch { check(true,"later page failure rejects entire result") }
 
         let generation = GenerationBox()
+        let electiveOnly = EnrolledCoursesModel(generation:{generation.value},contextLoader:{ _ in context },coursesLoader:{ term,_ in
+            [try course("closed-online",term:term), try course("closed-offline",term:term),
+             try course("assigned-major",term:term,method:"配课"), try course("unknown",term:term,method:"未知")]
+        })
+        await electiveOnly.load()
+        check(Set(electiveOnly.snapshot?.map(\.id) ?? []) == ["closed-online","closed-offline"] &&
+              electiveOnly.currentSummary?.count == 2,
+              "selected results keep closed-channel electives and exclude assigned major courses")
+        await electiveOnly.load(term:past)
+        check(electiveOnly.snapshot?.count == 2 && electiveOnly.snapshot?.allSatisfy({$0.xnxq == past}) == true,
+              "historical term applies the same elective-only scope")
         var fail = false
         let model = EnrolledCoursesModel(generation:{generation.value},contextLoader:{ _ in context },coursesLoader:{ term,_ in
             if fail { throw URLError(.timedOut) }; return [try course(term == current ? "closed" : "past",term:term)]
