@@ -1,6 +1,9 @@
 name: Payment model crash investigation
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/payment-model-crash]
+    paths: ['.github/workflows/payment-model-diagnostics.yml']
 jobs:
   investigate:
     runs-on: macos-26
