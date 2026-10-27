@@ -7,18 +7,12 @@ on:
 jobs:
   investigate:
     runs-on: macos-26
-    strategy:
-      fail-fast: false
-      matrix:
-        diagnostic: [original, lldb, scribble, zombies]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Capture first failure across fresh payment processes
-        env:
-          DIAGNOSTIC: ${{ matrix.diagnostic }}
+      - name: Verify WebKit callback executor contract
         run: |
           set -e
           xcrun swiftc --version
@@ -30,25 +24,5 @@ jobs:
             ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift
             ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift
             ios/CCSUT/EcardPaymentPersistence.swift ios/CCSUT/EcardPaymentModel.swift)
-          xcrun swiftc -g -parse-as-library "${SOURCES[@]}" "$RUNNER_TEMP/EcardPaymentModelTests.swift" -o "$RUNNER_TEMP/payment-model"
-          if [ "$DIAGNOSTIC" = lldb ]; then
-            export PAYMENT_LLDB_FAILURE="$RUNNER_TEMP/lldb-failure.txt"
-            echo 'Investigation has not completed' > "$PAYMENT_LLDB_FAILURE"
-            lldb --batch -o 'command script import ios/Tests/payment_lldb_stress.py' -o payment-stress -- "$RUNNER_TEMP/payment-model"
-            test ! -f "$PAYMENT_LLDB_FAILURE"
-          else
-            if [ "$DIAGNOSTIC" = scribble ]; then
-              export MallocScribble=1 MallocPreScribble=1
-            elif [ "$DIAGNOSTIC" = zombies ]; then
-              export NSZombieEnabled=YES
-            fi
-            CCSUT_PAYMENT_REPETITIONS=300 python3 ios/Tests/run-payment-model-diagnostics.py "$RUNNER_TEMP/payment-model"
-          fi
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: payment-crash-reports-${{ matrix.diagnostic }}
-          path: |
-            ~/Library/Logs/DiagnosticReports/
-            ${{ runner.temp }}/payment-model*
-            ${{ runner.temp }}/lldb-failure.txt
+          xcrun swiftc -g -parse-as-library "${SOURCES[@]}" ios/Tests/CookieCallbackExecutorTests.swift -o "$RUNNER_TEMP/cookie-executor"
+          "$RUNNER_TEMP/cookie-executor"
