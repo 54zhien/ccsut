@@ -6,8 +6,6 @@ on:
       - 'ios/CCSUT/**'
       - 'ios/Tests/**'
       - 'tools/**'
-      - '_e2e*.mjs'
-      - '_probe2.mjs'
       - 'package*.json'
       - '.github/workflows/session-tests.yml'
       - '.gitignore'
