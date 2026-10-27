@@ -15,13 +15,8 @@ struct CampusRecordsView: View {
     var body: some View {
         Group {
             if let model {
-                if mode == .leave {
-                    LeaveTicketWalletView(model: model, account: session.studentId ?? "")
-                        .id(Connection(account: session.studentId, generation: CookieJar.generation))
-                } else {
-                    CampusRecordContent(model: model, mode: mode, account: session.studentId ?? "",
-                                        selected: $selectedKind) { reconnectRevision &+= 1 }
-                }
+                CampusRecordContent(model: model, mode: mode, account: session.studentId ?? "",
+                                    selected: $selectedKind) { reconnectRevision &+= 1 }
             } else if accountError {
                 ContentUnavailableView {
                     Label("暂时无法读取校园记录", systemImage: "person.crop.circle.badge.exclamationmark")
@@ -30,10 +25,8 @@ struct CampusRecordsView: View {
                 PageLoadingState("正在连接校园服务…").frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background { if mode == .leave { LeaveWalletBackground() } else { Color(.systemGroupedBackground) } }
-        .academicDetailChrome(title: mode == .leave ? "请假条票夹" : "节假日离返校",
-                              backgroundColor: mode == .leave ? .clear : Color(.systemGroupedBackground))
-        .background { if mode == .leave { LeaveWalletBackground() } }
+        .background(Color(.systemGroupedBackground))
+        .academicDetailChrome(title: mode == .leave ? "请假" : "节假日离返校")
         .task(id: ConnectionTask(connection: Connection(account: session.studentId, generation: CookieJar.generation), revision: reconnectRevision)) {
             let connection = Connection(account: session.studentId, generation: CookieJar.generation)
             // A dismissed form resumes the same account/session. Refresh its existing model

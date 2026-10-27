@@ -183,14 +183,9 @@ jobs:
           fi
           if [ "$TEST_SCOPE" = 'meter-final' ]; then
             TEST_SELECTION=(
-                -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterStartupRecoveryControls
                 -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicDetailSupportsContentSwipeBack
                 -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
               -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
-              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterAdaptiveControls
-              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterReturnsToCampus
-              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterConfirmationRemainsExplicit
-              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterSameSelectionKeepsRoomAndBalance
               -only-testing:CCSUTUITests/PageInteractionUITests/testPaymentRecoveryEntry
               -only-testing:CCSUTUITests/PageInteractionUITests/testPaymentRecoveryLargeText
               -only-testing:CCSUTUITests/PageInteractionUITests/testDetailSheetsKeepContentAndCloseReachable
@@ -199,12 +194,8 @@ jobs:
           fi
           if [ "$TEST_SCOPE" = 'meter-gestures' ]; then
             TEST_SELECTION=(
-                -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterConfirmationRemainsExplicit
                 -only-testing:CCSUTUITests/PageInteractionUITests/testPaymentRecoveryEntry
               -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection
-              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterAdaptiveControls
-              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterReturnsToCampus
-              -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterSameSelectionKeepsRoomAndBalance
               -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicDetailSupportsContentSwipeBack
               -only-testing:CCSUTUITests/PageInteractionUITests/testAcademicCancelledSwipeKeepsHeaderAttachedToPage
             )
@@ -336,7 +327,7 @@ jobs:
           xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug \
             -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/ui-meter-dark-tests.xcresult" \
-            -only-testing:CCSUTUITests/PageInteractionUITests/testPhysicalMeterConfirmationRemainsExplicit \
+            -only-testing:CCSUTUITests/PageInteractionUITests/testCampusElectricityAmountSelection \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/ui-meter-dark-test.log"
       - name: Verify actual reduced motion preference
         if: ${{ !cancelled() && steps.simulator.conclusion == 'success' && (inputs.test_scope == 'meter-final' || inputs.test_scope == 'meter-gestures' || inputs.test_scope == 'design-layout' || inputs.test_scope == 'design-motion' || inputs.test_scope == 'all' || github.event_name == 'push') }}

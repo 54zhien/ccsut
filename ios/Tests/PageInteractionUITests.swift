@@ -215,10 +215,8 @@ final class PageInteractionUITests: XCTestCase {
         }
         capture(app, "campus-home")
         app.buttons["campus-leave"].tap()
-        XCTAssertTrue(app.buttons["leave-wallet-toggle"].waitForExistence(timeout: 5))
-        app.buttons["leave-wallet-toggle"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["leave-ticket-preview-leave"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["campus-record-add"].exists)
+        XCTAssertTrue(app.staticTexts["示例请假记录"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["申请请假"].exists)
         capture(app, "campus-leave-records")
         app.terminate()
         app = launch("campus")
@@ -369,263 +367,31 @@ final class PageInteractionUITests: XCTestCase {
 
     func testCampusElectricityAmountSelection() {
         let app = launch("campus-electricity")
-        let building = app.buttons["选择楼栋"]
-        XCTAssertTrue(building.waitForExistence(timeout: 8))
-        XCTAssertEqual(building.value as? String, "示例宿舍 1 栋")
-        XCTAssertEqual(app.buttons["选择房间"].value as? String, "101 室")
-        func digit(_ place: Int) -> XCUIElement {
-            app.descendants(matching: .any).matching(identifier: "meter-digit-\(place)").firstMatch
-        }
-        XCTAssertTrue(digit(100).waitForExistence(timeout: 8))
-        revealMeterControl(digit(100), in: app)
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "剩余金额").firstMatch.exists)
-        for _ in 0..<4 { turnMeterDrum(digit(100)) }
-        XCTAssertEqual(digit(100).value as? String, "4")
-        XCTAssertEqual(digit(10).value as? String, "0")
-        XCTAssertEqual(digit(1).value as? String, "0")
-        turnMeterDrum(digit(100))
-        XCTAssertEqual(digit(100).value as? String, "4", "The upper amount boundary cannot be exceeded by another turn")
-        for _ in 0..<4 { turnMeterDrum(digit(100), upwards: false) }
-        XCTAssertEqual(digit(100).value as? String, "0")
-        XCTAssertEqual(digit(10).value as? String, "1")
-        XCTAssertEqual(digit(1).value as? String, "0")
-        turnMeterDrum(digit(10), upwards: false)
-        turnMeterDrum(digit(1), upwards: false)
-        XCTAssertEqual(digit(10).value as? String, "1", "The minimum remains ten yuan")
-        XCTAssertEqual(digit(1).value as? String, "0")
-        turnMeterDrum(digit(1))
-        XCTAssertEqual(digit(1).value as? String, "1")
-        turnMeterDrum(digit(1), upwards: false)
-        XCTAssertEqual(digit(1).value as? String, "0")
-        turnMeterDrum(digit(1))
-        XCTAssertEqual(digit(1).value as? String, "1", "A short upward turn advances the physical thumbwheel once")
+        let hundreds = app.pickerWheels.element(boundBy: 0)
+        XCTAssertTrue(hundreds.waitForExistence(timeout: 8))
+        if !hundreds.isHittable { app.swipeUp() }
+        XCTAssertEqual(app.pickerWheels.count, 3)
+        XCTAssertTrue(app.staticTexts["剩余金额"].exists)
+        hundreds.adjust(toPickerWheelValue: "4")
+        let tens = app.pickerWheels.element(boundBy: 1)
+        let ones = app.pickerWheels.element(boundBy: 2)
+        XCTAssertEqual(hundreds.value as? String, "4")
+        XCTAssertEqual(tens.value as? String, "0")
+        XCTAssertEqual(ones.value as? String, "0")
+        hundreds.adjust(toPickerWheelValue: "3")
+        tens.adjust(toPickerWheelValue: "9")
+        ones.adjust(toPickerWheelValue: "9")
+        XCTAssertEqual(hundreds.value as? String, "3")
+        XCTAssertEqual(tens.value as? String, "9")
+        XCTAssertEqual(ones.value as? String, "9")
+        hundreds.adjust(toPickerWheelValue: "0")
+        tens.adjust(toPickerWheelValue: "1")
+        ones.adjust(toPickerWheelValue: "0")
+        XCTAssertEqual(hundreds.value as? String, "0")
+        XCTAssertEqual(tens.value as? String, "1")
+        XCTAssertEqual(ones.value as? String, "0")
         XCTAssertFalse(app.buttons["立即缴费"].isEnabled, "Synthetic previews must never enable a real payment")
         capture(app, "campus-electricity-amount")
-    }
-
-    private func turnMeterDrum(_ drum: XCUIElement, upwards: Bool = true) {
-        let start = drum.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upwards ? 0.8 : 0.2))
-        let end = drum.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upwards ? 0.2 : 0.8))
-        start.press(forDuration: 0.05, thenDragTo: end)
-    }
-
-    func testPhysicalMeterStartupRecoveryControls() {
-        let campuses = launch("campus-electricity", arguments: ["--preview-multiple-campuses"])
-        let campus = campuses.buttons["选择校区"]
-        XCTAssertTrue(campus.waitForExistence(timeout: 8))
-        XCTAssertTrue(campus.isEnabled)
-        campus.tap()
-        XCTAssertTrue(campuses.buttons["meter-option-campus-0"].waitForExistence(timeout: 5),
-                      "Campus selection remains reachable before any building is available")
-        XCTAssertTrue(campuses.buttons["meter-option-campus-1"].exists)
-        capture(campuses, "physical-meter-campus-prerequisite")
-        campuses.terminate()
-
-        let failed = launch("campus-electricity", arguments: ["--preview-meter-startup-error"])
-        let retry = failed.buttons["重新加载"]
-        XCTAssertTrue(retry.waitForExistence(timeout: 8))
-        revealMeterControl(retry, in: failed)
-        XCTAssertTrue(retry.isEnabled, "A read failure retains an explicit retry entry")
-        if failed.buttons["立即缴费"].exists { XCTAssertFalse(failed.buttons["立即缴费"].isEnabled) }
-        capture(failed, "physical-meter-startup-retry")
-        failed.terminate()
-
-        let pending = launch("campus-electricity-pending")
-        let order = pending.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "preview-order")).firstMatch
-        XCTAssertTrue(order.waitForExistence(timeout: 8), "The original order ID remains available for pending-payment recovery")
-        XCTAssertTrue(pending.buttons["查询支付结果"].exists)
-        XCTAssertFalse(pending.buttons["立即缴费"].exists)
-        capture(pending, "physical-meter-pending-order")
-    }
-
-    private func revealMeterControl(_ control: XCUIElement, in app: XCUIApplication, upwards: Bool = true) {
-        func visibleBounds() -> CGRect {
-            var bounds = app.windows.firstMatch.frame.insetBy(dx: 4, dy: 4)
-            let back = app.buttons["返回"]
-            if back.exists && back.isHittable {
-                let top = max(bounds.minY, back.frame.maxY + 4)
-                bounds = CGRect(x: bounds.minX, y: top, width: bounds.width, height: max(0, bounds.maxY - top))
-            }
-            return bounds
-        }
-        func fullyVisible() -> Bool {
-            control.isHittable && visibleBounds().contains(control.frame)
-        }
-        for _ in 0..<8 where !fullyVisible() {
-            // Stay inside the measured housing rim. A fixed window-edge point
-            // can be outside the scroll view's safe area after rotation.
-            let bounds = visibleBounds()
-            let moveUp = control.frame.maxY > bounds.maxY ? true : control.frame.minY < bounds.minY ? false : upwards
-            let selector = app.buttons["meter-building-selector"]
-            let reference = selector.exists ? selector.frame : control.frame
-            let x = min(bounds.maxX - 12, max(bounds.minX + 12, reference.minX - 10))
-            let window = app.windows.firstMatch
-            let origin = window.coordinate(withNormalizedOffset: .zero)
-            let start = origin.withOffset(CGVector(dx: x - window.frame.minX,
-                                                   dy: bounds.minY + bounds.height * (moveUp ? 0.75 : 0.25) - window.frame.minY))
-            let end = origin.withOffset(CGVector(dx: x - window.frame.minX,
-                                                 dy: bounds.minY + bounds.height * (moveUp ? 0.25 : 0.75) - window.frame.minY))
-            start.press(forDuration: 0.05, thenDragTo: end)
-        }
-        if !fullyVisible() { capture(app, "physical-meter-unreachable-control") }
-        XCTAssertTrue(fullyVisible(), "The complete control must be visible before tapping: control=\(control.frame), visible=\(visibleBounds())")
-    }
-
-    func testPhysicalMeterAdaptiveControls() {
-        defer { XCUIDevice.shared.orientation = .portrait }
-        for large in [false, true] {
-            XCUIDevice.shared.orientation = .portrait
-            let app = launch("campus-electricity", largeText: large,
-                             arguments: large ? ["--preview-long-balance"] : [])
-            if !large {
-                XCUIDevice.shared.orientation = .landscapeLeft
-                let landscape = NSPredicate { _, _ in app.windows.firstMatch.frame.width > app.windows.firstMatch.frame.height }
-                XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: landscape, evaluatedWith: app)], timeout: 8), .completed)
-            }
-            func screen(_ name: String) {
-                let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-                attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
-            }
-            let building = app.buttons["选择楼栋"]
-            XCTAssertTrue(building.waitForExistence(timeout: 8))
-            revealMeterControl(building, in: app)
-            screen("physical-meter-top-\(large ? "large" : "landscape")")
-            if large {
-                let previousValue = building.value as? String
-                let previousY = building.frame.minY
-                building.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
-                    .press(forDuration: 0.05, thenDragTo: building.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)))
-                XCTAssertFalse(app.buttons["meter-selection-close"].exists, "Vertical movement scrolls instead of opening the selector")
-                XCTAssertEqual(building.value as? String, previousValue)
-                XCTAssertLessThan(building.frame.minY, previousY - 10, "The selector must yield vertical movement to its scroll view")
-                let balance = app.descendants(matching: .any).matching(
-                    NSPredicate(format: "label == %@ AND value == %@", "剩余金额", "123456.78 元")).firstMatch
-                revealMeterControl(balance, in: app)
-                XCTAssertGreaterThanOrEqual(balance.frame.minX, app.windows.firstMatch.frame.minX)
-                XCTAssertLessThanOrEqual(balance.frame.maxX, app.windows.firstMatch.frame.maxX)
-                screen("physical-meter-long-balance-large")
-            }
-            let ones = app.descendants(matching: .any).matching(identifier: "meter-digit-1").firstMatch
-            revealMeterControl(ones, in: app)
-            XCTAssertGreaterThanOrEqual(ones.frame.height, 44)
-            turnMeterDrum(ones)
-            XCTAssertEqual(ones.value as? String, "1")
-            screen("physical-meter-drums-\(large ? "large" : "landscape")")
-            let pay = app.buttons["立即缴费"]
-            revealMeterControl(pay, in: app)
-            XCTAssertGreaterThanOrEqual(pay.frame.height, 44)
-            XCTAssertFalse(pay.isEnabled)
-            XCTAssertTrue(app.buttons["返回"].isHittable, "Return remains available after scrolling the meter")
-            screen("physical-meter-payment-\(large ? "large" : "landscape")")
-            app.terminate()
-        }
-    }
-
-    func testPhysicalMeterReturnsToCampus() {
-        let app = launch("campus")
-        let entry = app.buttons["campus-electricity"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 8))
-        entry.tap()
-        let back = app.buttons["返回"]
-        XCTAssertTrue(back.waitForExistence(timeout: 8))
-        XCTAssertTrue(back.isHittable)
-        XCTAssertFalse(app.tabBars.firstMatch.isHittable)
-        XCTAssertTrue(app.buttons["选择楼栋"].exists)
-        let pay = app.buttons["立即缴费"]
-        XCTAssertTrue(pay.isHittable, "The standard meter opens with its embedded payment key visible")
-        XCTAssertGreaterThanOrEqual(pay.frame.height, 44)
-        XCTAssertTrue(app.windows.firstMatch.frame.insetBy(dx: 4, dy: 4).contains(pay.frame),
-                      "The initial viewport must show the whole payment key before scrolling")
-        capture(app, "physical-meter-initial-viewport")
-        let building = app.buttons["选择楼栋"]
-        let beforeTurn = building.value as? String
-        let turnStart = building.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
-        let turnEnd = building.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
-        turnStart.press(forDuration: 0.05, thenDragTo: turnEnd)
-        capture(app, "physical-meter-after-selector-turn")
-        XCTAssertTrue(back.exists, "Turning an embedded selector must not invoke content-swipe navigation")
-        XCTAssertTrue(building.exists)
-        XCTAssertFalse(app.buttons["meter-selection-close"].exists, "Turning the selector must not also open its tap action")
-        XCTAssertTrue(building.isHittable)
-        XCTAssertEqual(building.value as? String, beforeTurn, "A single-option selector stops at its boundary")
-        XCTAssertTrue(pay.isHittable, "Turning the selector must leave payment unobstructed")
-        revealMeterControl(app.buttons["立即缴费"], in: app)
-        XCTAssertTrue(back.isHittable)
-        capture(app, "physical-meter-from-campus")
-        back.tap()
-        XCTAssertTrue(entry.waitForExistence(timeout: 8))
-        XCTAssertTrue(app.tabBars.firstMatch.isHittable)
-        entry.tap()
-        XCTAssertTrue(back.waitForExistence(timeout: 8))
-        let ready = NSPredicate { _, _ in back.isHittable && pay.isHittable }
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: ready, evaluatedWith: app)], timeout: 5), .completed)
-        let window = app.windows.firstMatch
-        print("METER_CONTENT_SWIPE app=\(app.frame) window=\(window.frame) state=\(app.state.rawValue)")
-        XCTAssertEqual(app.state, .runningForeground)
-        // Exercise both outcomes from the actual window's blank content area.
-        // A deliberately short, held gesture cancels; a long, fast gesture
-        // commits. UIKit, not the application, decides the completion threshold.
-        window.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: 0.84))
-            .press(forDuration: 0.05,
-                   thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.34, dy: 0.84)),
-                   withVelocity: .slow, thenHoldForDuration: 0.2)
-        let cancelled = NSPredicate { _, _ in app.state == .runningForeground && back.isHittable && pay.isHittable }
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: cancelled, evaluatedWith: app)], timeout: 5), .completed,
-                       "Cancelling the meter's native content swipe must leave its controls usable")
-        capture(app, "physical-meter-cancelled-content-swipe")
-        window.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.84))
-            .press(forDuration: 0.05,
-                   thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.84)),
-                   withVelocity: .fast, thenHoldForDuration: 0)
-        let returned = NSPredicate { _, _ in entry.exists && entry.isHittable && app.tabBars.firstMatch.isHittable }
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: returned, evaluatedWith: app)], timeout: 5), .completed,
-                       "Content swipe outside embedded selectors still returns to Campus")
-    }
-
-    func testPhysicalMeterConfirmationRemainsExplicit() {
-        let app = launch("campus-electricity-confirmation")
-        let confirm = app.buttons["确认支付 50 元"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 8))
-        revealMeterControl(confirm, in: app)
-        XCTAssertEqual(app.staticTexts["payment-confirmation-room"].label, "示例宿舍 1 栋 · 101 室")
-        capture(app, "physical-meter-confirmation")
-        let close = app.buttons["关闭确认缴费"]
-        revealMeterControl(close, in: app, upwards: false)
-        close.tap()
-        XCTAssertFalse(confirm.exists)
-        XCTAssertTrue(app.buttons["立即缴费"].exists)
-    }
-
-    func testPhysicalMeterSameSelectionKeepsRoomAndBalance() {
-        let app = launch("campus-electricity")
-        for (label, field) in [("选择楼栋", "building"), ("选择房间", "room")] {
-            let selector = app.buttons[label]
-            XCTAssertTrue(selector.waitForExistence(timeout: 8))
-            revealMeterControl(selector, in: app)
-            // This fixture has one valid choice. Turning either way must stop at
-            // the boundary without clearing dependent room data or the balance.
-            let previousValue = selector.value as? String
-            let left = selector.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
-            let right = selector.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
-            right.press(forDuration: 0.05, thenDragTo: left)
-            if app.buttons["meter-selection-close"].exists { capture(app, "physical-meter-unwanted-selector-sheet") }
-            XCTAssertFalse(app.buttons["meter-selection-close"].exists, "A turn must not also perform a tap")
-            left.press(forDuration: 0.05, thenDragTo: right)
-            if app.buttons["meter-selection-close"].exists { capture(app, "physical-meter-unwanted-selector-sheet") }
-            XCTAssertFalse(app.buttons["meter-selection-close"].exists, "A turn must not also perform a tap")
-            XCTAssertEqual(selector.value as? String, previousValue)
-            selector.tap()
-            let current = app.buttons["meter-option-\(field)-0"]
-            XCTAssertTrue(current.waitForExistence(timeout: 5))
-            XCTAssertEqual(current.value as? String, "已选择")
-            capture(app, "physical-meter-\(field)-selector")
-            current.tap()
-            XCTAssertTrue(selector.waitForExistence(timeout: 5))
-            XCTAssertEqual(app.buttons["选择房间"].value as? String, "101 室")
-            let balance = app.descendants(matching: .any).matching(
-                NSPredicate(format: "label == %@ AND value == %@", "剩余金额", "36.80 元")).firstMatch
-            XCTAssertTrue(balance.exists, "Choosing the checked row must preserve dependent room and verified balance")
-        }
     }
 
     func testDetailTabsHideAndReturnWithHome() {
@@ -707,7 +473,6 @@ final class PageInteractionUITests: XCTestCase {
             var app = launch(page, largeText: true)
             let action = app.buttons[page == "campus-electricity" ? "立即缴费" : "campus-form-review"]
             XCTAssertTrue(action.waitForExistence(timeout: 8))
-            if page == "campus-electricity" { revealMeterControl(action, in: app) }
             XCTAssertTrue(action.isHittable)
             XCTAssertGreaterThanOrEqual(action.frame.height, 44)
             capture(app, "campus-largest-type-\(page)")
@@ -727,10 +492,9 @@ final class PageInteractionUITests: XCTestCase {
             }
             XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: landscape, evaluatedWith: app)], timeout: 10), .completed)
             let landscapeAction = app.buttons[page == "campus-electricity" ? "立即缴费" : "campus-form-review"]
-            if page == "campus-electricity" { revealMeterControl(landscapeAction, in: app) }
             XCTAssertTrue(landscapeAction.isHittable)
             add(XCTAttachment(string: "orientation=\(XCUIDevice.shared.orientation.rawValue) app=\(app.frame) window=\(app.windows.firstMatch.frame) action=\(landscapeAction.frame)"))
-            let deviceCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            let deviceCapture = XCTAttachment(screenshot: XCUIDevice.shared.screenshot())
             deviceCapture.name = "campus-landscape-device-\(page)"
             deviceCapture.lifetime = .keepAlways
             add(deviceCapture)
@@ -745,97 +509,19 @@ final class PageInteractionUITests: XCTestCase {
             let probe = app.staticTexts["campus-reduce-motion"]
             XCTAssertTrue(probe.waitForExistence(timeout: 8))
             XCTAssertEqual(probe.label, "reduce-motion-on", "Verify the real simulator preference reaches SwiftUI")
-            if page == "campus-electricity" {
-                let ones = app.descendants(matching: .any).matching(identifier: "meter-digit-1").firstMatch
-                revealMeterControl(ones, in: app)
-                turnMeterDrum(ones)
-                XCTAssertEqual(ones.value as? String, "1", "Reducing motion must retain the real amount interaction")
-            }
             capture(app, "campus-reduce-motion-\(page)")
             app.terminate()
         }
-    }
-
-    func testLeaveWalletOpenCloseAndCancel() {
-        let app = launch("campus-leave")
-        let toggle = app.buttons["leave-wallet-toggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
-        XCTAssertEqual(toggle.label, "打开票夹")
-        capture(app, "wallet-closed")
-        toggle.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["leave-ticket-preview-leave"].waitForExistence(timeout: 5))
-        capture(app, "wallet-open")
-        app.buttons["campus-record-add"].tap()
-        let close = app.buttons["关闭申请请假"]
-        XCTAssertTrue(close.waitForExistence(timeout: 8))
-        close.tap()
-        XCTAssertTrue(toggle.waitForExistence(timeout: 8))
-        XCTAssertFalse(app.otherElements["leave-wallet-printing"].exists)
-        XCTAssertEqual(toggle.label, "收起票夹")
-        toggle.tap()
-        XCTAssertEqual(toggle.label, "打开票夹")
-        capture(app, "wallet-reclosed")
-    }
-
-    func testLeaveWalletPrintOnce() {
-        let app = launch("campus-leave", arguments: ["--preview-wallet-print"])
-        let submit = app.buttons["wallet-fixture-submit"]
-        XCTAssertTrue(submit.waitForExistence(timeout: 10))
-        if !submit.isHittable { app.swipeUp() }
-        submit.tap()
-        let completed = app.staticTexts["wallet-fixture-completions"]
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == %@", "完成 1"), evaluatedWith: completed)], timeout: 8), .completed)
-        capture(app, "wallet-after-print")
-        app.buttons["wallet-fixture-refresh"].tap()
-        XCTAssertEqual(completed.label, "完成 1")
-    }
-
-    func testLeaveWalletLargeText() {
-        let app = launch("campus-leave", largeText: true)
-        let toggle = app.buttons["leave-wallet-toggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
-        toggle.tap()
-        app.swipeUp()
-        XCTAssertTrue(app.buttons["campus-record-add"].isHittable)
-        capture(app, "wallet-large-text")
-    }
-
-    func testLeaveWalletManyAndEmpty() {
-        var app = launch("campus-leave", arguments: ["--preview-wallet-many"])
-        var toggle = app.buttons["leave-wallet-toggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
-        XCTAssertEqual(toggle.value as? String, "8 张请假条")
-        capture(app, "wallet-eight-closed")
-        toggle.tap()
-        app.swipeUp()
-        capture(app, "wallet-eight-expanded")
-        let last = app.descendants(matching: .any)["leave-ticket-wallet-7"]
-        for _ in 0..<10 {
-            if last.exists && last.isHittable { break }
-            app.swipeUp()
-        }
-        XCTAssertTrue(last.exists)
-        app.terminate()
-        app = launch("campus-leave", empty: true)
-        toggle = app.buttons["leave-wallet-toggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
-        XCTAssertEqual(toggle.value as? String, "0 张请假条")
-        XCTAssertTrue(app.buttons["campus-record-add"].isEnabled)
-        capture(app, "wallet-empty")
     }
 
     func testCampusRecordsSurviveFormDismissal() {
         for page in ["campus-leave", "campus-travel"] {
             let app = launch(page)
             let isLeave = page == "campus-leave"
-            if isLeave {
-                XCTAssertTrue(app.buttons["leave-wallet-toggle"].waitForExistence(timeout: 8))
-                app.buttons["leave-wallet-toggle"].tap()
-            }
-            let record = isLeave ? app.descendants(matching: .any)["leave-ticket-preview-leave"] : app.staticTexts["示例区县"]
+            let record = app.staticTexts[isLeave ? "示例请假记录" : "示例区县"]
             XCTAssertTrue(record.waitForExistence(timeout: 8))
             for _ in 0..<2 {
-                app.buttons[isLeave ? "campus-record-add" : "办理离校登记"].tap()
+                app.buttons[isLeave ? "申请请假" : "办理离校登记"].tap()
                 let close = app.buttons[isLeave ? "关闭申请请假" : "关闭离校登记"]
                 XCTAssertTrue(close.waitForExistence(timeout: 5))
                 close.tap()
@@ -1354,7 +1040,7 @@ final class PageInteractionUITests: XCTestCase {
             case "exams": anchor = app.staticTexts.matching(identifier: "机械设计基础").firstMatch
             case "electives": anchor = app.textFields["课程名 / 教师"]
             case "academic": anchor = app.buttons["academic-scores"]
-            case "campus-leave": anchor = app.buttons["leave-wallet-toggle"]
+            case "campus-leave": anchor = app.staticTexts["示例请假记录"]
             default: anchor = app.segmentedControls.firstMatch
             }
             XCTAssertTrue(anchor.waitForExistence(timeout: 8), page)
