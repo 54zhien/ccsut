@@ -76,8 +76,20 @@ jobs:
             ios/CCSUT/EcardPaymentPersistence.swift ios/CCSUT/EcardPaymentModel.swift)
           xcrun swiftc -parse-as-library "${SOURCES[@]}" ios/Tests/EcardPaymentAPITests.swift -o "$RUNNER_TEMP/payment-api"
           "$RUNNER_TEMP/payment-api"
-          xcrun swiftc -parse-as-library "${SOURCES[@]}" ios/Tests/EcardPaymentModelTests.swift -o "$RUNNER_TEMP/payment-model"
-          "$RUNNER_TEMP/payment-model"
+          xcrun swiftc -parse-as-library "${SOURCES[@]}" ios/Tests/CookieCallbackExecutorTests.swift -o "$RUNNER_TEMP/cookie-executor"
+          "$RUNNER_TEMP/cookie-executor"
+          python3 ios/Tests/payment-diagnostics.test.py
+          xcrun swiftc -g -parse-as-library "${SOURCES[@]}" ios/Tests/EcardPaymentModelTests.swift -o "$RUNNER_TEMP/payment-model"
+          python3 ios/Tests/run-payment-model-diagnostics.py "$RUNNER_TEMP/payment-model"
+      - name: Preserve native crash reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-crash-reports
+          path: |
+            ~/Library/Logs/DiagnosticReports/payment-model*
+            ${{ runner.temp }}/payment-model
+            ${{ runner.temp }}/payment-model.dSYM/
       - name: Run embedded login script regressions
         if: always()
         run: node --test ios/Tests/login-script.test.mjs ios/Tests/campus-web-privacy.test.mjs ios/Tests/cas-script.test.mjs

@@ -76,7 +76,8 @@ private actor ModelServer {
     @MainActor static func main() async throws {
         var failures = 0
         func check(_ value: Bool, _ name: String) {
-            print("\(value ? "PASS" : "FAIL") \(name)"); if !value { failures += 1 }
+            FileHandle.standardError.write(Data("\(value ? "PASS" : "FAIL") \(name)\n".utf8))
+            if !value { failures += 1 }
         }
         let temporary = FileManager.default.temporaryDirectory.standardizedFileURL
         let root = temporary.appendingPathComponent("payment-tests-" + UUID().uuidString).standardizedFileURL
