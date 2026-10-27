@@ -490,10 +490,21 @@ struct ExamItem: Decodable, Identifiable, Hashable {
         (kspcmc ?? "").contains("补") || (kspcmc ?? "").contains("缓")
     }
 
+    var schoolDateText: String? {
+        guard let date = startDate else { return nil }
+        var style = Date.FormatStyle.dateTime.year().month(.defaultDigits).day().weekday(.wide)
+            .locale(Locale(identifier: "zh_CN"))
+        style.calendar = Calendar(identifier: .gregorian)
+        style.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        return date.formatted(style)
+    }
+
     /// 考试开始的 Date（用于排序和倒计时）
     var startDate: Date? {
         guard let d = ksrq, let t = qssj else { return nil }
         let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy-MM-dd HH:mm"
         f.timeZone = TimeZone(identifier: "Asia/Shanghai")
         return f.date(from: "\(d) \(t)")

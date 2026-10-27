@@ -113,7 +113,7 @@ final class APIClient {
     /// Keep the encoded query intact: CAS tickets and service values are opaque here.
     private static func transportURL(_ url: URL) -> URL? {
         guard let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased(),
-              host == "ccsut.cn" || host.hasSuffix(".ccsut.cn"),
+              ["tls.ccsut.cn", "auth.ccsut.cn"].contains(host),
               url.user == nil, url.password == nil, url.fragment == nil else { return nil }
         if scheme == "https" { return url.port == nil || url.port == 443 ? url : nil }
         guard scheme == "http", ["tls.ccsut.cn", "auth.ccsut.cn"].contains(host),

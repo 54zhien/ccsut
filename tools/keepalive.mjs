@@ -1,24 +1,13 @@
 #!/usr/bin/env node
 /**
- * keepalive.mjs — 会话保活 / 失效检测 / 存活时长测量
- *
- * 两种用法，目的完全不同：
- *
- *   ① 保活（让会话永不掉线）
- *      node tools/keepalive.mjs --state ./out/state.json --watch
- *      默认每 10 分钟打一次卡，服务端会话会被不断续期。
- *
- *   ② 测服务端空闲超时（想知道"到底能撑多久"）
- *      node tools/keepalive.mjs --state ./out/state.json --watch --interval 1800
- *      每 30 分钟才探一次，第一次报失效的时间点 ≈ 服务端 session timeout。
- *
- *   单次检查：node tools/keepalive.mjs --state ./out/state.json
- *
- * 退出码：0=有效  2=失效  1=出错
+ * Check the saved school session; --watch repeats at --interval seconds.
+ * Requests may extend idle sessions but cannot guarantee continued login.
+ * Exit codes: 0 valid, 2 expired, 1 request or configuration error.
  */
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { sessionRequest } from './session-request.mjs';
 
 const args = process.argv.slice(2);
 const flag = (n, d = null) => {
@@ -41,8 +30,6 @@ const UA =
 
 const startedAt = Date.now();
 let lastOkAt = null;
-let pingCount = 0;
-const timeline = [];
 
 /** 把毫秒转成 1h23m 这种紧凑格式 */
 function human(ms) {
@@ -56,35 +43,16 @@ function human(ms) {
   return `${s}s`;
 }
 
-function cookieHeader(cookies) {
-  return cookies
-    .filter((c) => c.domain.includes('ccsut.cn'))
-    .map((c) => `${c.name}=${c.value}`)
-    .join('; ');
-}
-
 async function checkOnce(state) {
   const startedAt = Date.now();
-  const res = await fetch(PROBE, {
+  const before = new Set(state.cookies.map(cookie => JSON.stringify(cookie)));
+  const res = await sessionRequest(PROBE, state, {
     method: 'GET',
     redirect: 'manual',
-    headers: { cookie: cookieHeader(state.cookies), 'user-agent': UA, accept: 'application/json' },
+    headers: { 'user-agent': UA, accept: 'application/json' },
   });
 
-  // 服务端可能在响应里刷新 Cookie，合并回去
-  let refreshed = 0;
-  for (const sc of res.headers.getSetCookie?.() ?? []) {
-    const [pair] = sc.split(';');
-    const i = pair.indexOf('=');
-    if (i < 0) continue;
-    const name = pair.slice(0, i).trim();
-    const value = pair.slice(i + 1).trim();
-    const hit = state.cookies.find((c) => c.name === name && c.domain.includes('ccsut.cn'));
-    if (hit && hit.value !== value) {
-      hit.value = value;
-      refreshed++;
-    }
-  }
+  const refreshed = state.cookies.filter(cookie => !before.has(JSON.stringify(cookie))).length;
 
   const location = res.headers.get('location') ?? '';
   let alive = res.status === 200 && !location.includes('/admin/login');
@@ -102,7 +70,7 @@ async function checkOnce(state) {
 async function main() {
   const raw = (await fs.readFile(STATE_PATH, 'utf8')).replace(/^\uFEFF/, '');
   const state = JSON.parse(raw);
-  const totalCookies = state.cookies.filter((c) => c.domain.includes('ccsut.cn')).length;
+  const totalCookies = state.cookies.filter((c) => c.domain === 'ccsut.cn' || c.domain.endsWith('.ccsut.cn')).length;
   if (!totalCookies) {
     console.error('✗ state.json 里没有 ccsut.cn 的 Cookie，先跑 tools/capture.mjs');
     process.exit(1);
@@ -126,7 +94,6 @@ async function main() {
 
   let alive = true;
   for (;;) {
-    pingCount++;
     let line;
     try {
       const r = await checkOnce(state);
@@ -148,7 +115,6 @@ async function main() {
     }
 
     console.log(line);
-    timeline.push({ at: new Date().toISOString(), line });
     await fs.writeFile(STATE_PATH, JSON.stringify(state, null, 2)).catch(() => {});
 
     if (LOG_PATH) {
@@ -157,7 +123,7 @@ async function main() {
     }
 
     // 失效后不再空转
-    if (!alive && flag('stop-on-fail', true) !== false) {
+    if (!alive && String(flag('stop-on-fail', true)) !== 'false') {
       console.log('\n会话已失效，停止探测。重新登录：node tools/capture.mjs');
       process.exit(2);
     }

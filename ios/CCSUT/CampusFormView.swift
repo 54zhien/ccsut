@@ -606,6 +606,6 @@ private actor CampusFormPreviewAPI: CampusFormServing {
     func roleUsers(_ role: CampusApprovers) async throws -> CampusApprovers { role }
     func locate(latitude: Double, longitude: Double) async throws -> String { "示例地址" }
     func submit(_ submission: CampusSubmission) async throws { try await Task.sleep(for:.milliseconds(300)) }
-    func reconcile(_ submission: CampusSubmission) async throws -> Bool { false }
+    func reconcile(_ attempt: CampusFormRecoveryDescriptor) async throws -> Bool { false }
 }
 #endif

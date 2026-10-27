@@ -11,28 +11,44 @@ import FoundationNetworking
     static func restore(_ cookies: [HTTPCookie], policy: Policy,
                         read: () async throws -> [HTTPCookie],
                         write: (HTTPCookie) async throws -> Void,
+                        delete: (HTTPCookie) async throws -> Void,
                         isCurrent: () -> Bool) async throws {
         func checkCurrent() throws {
             try Task.checkCancellation()
             guard isCurrent() else { throw CancellationError() }
+        }
+        func isSchoolCookie(_ cookie: HTTPCookie) -> Bool {
+            let domain = cookie.domain.lowercased()
+            return domain == "ccsut.cn" || domain.hasSuffix(".ccsut.cn")
         }
         func key(_ cookie: HTTPCookie) -> String {
             let domain = cookie.domain.lowercased()
             let normalizedDomain = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
             return "\(cookie.name)|\(normalizedDomain)|\(cookie.path)"
         }
+        let desired = cookies.filter {
+            isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date()
+        }
         var expected: [HTTPCookie]?
         for attempt in 0..<2 {
             try checkCurrent()
             do {
+                let existing = try await read()
+                try checkCurrent()
                 if expected == nil {
                     if policy == .fillMissing {
-                        let existing = try await read()
-                        try checkCurrent()
                         let keys = Set(existing.filter { ($0.expiresDate ?? .distantFuture) > Date() }.map(key))
-                        expected = cookies.filter { !keys.contains(key($0)) }
+                        expected = desired.filter { !keys.contains(key($0)) }
                     } else {
-                        expected = cookies
+                        expected = desired
+                    }
+                }
+                if policy == .replaceExisting {
+                    let desiredKeys = Set(desired.map(key))
+                    for cookie in existing where isSchoolCookie(cookie) && !desiredKeys.contains(key(cookie)) {
+                        try checkCurrent()
+                        try await delete(cookie)
+                        try checkCurrent()
                     }
                 }
                 for cookie in expected ?? [] {
@@ -46,6 +62,12 @@ import FoundationNetworking
                     actual.contains { key($0) == key(cookie) && $0.value == cookie.value &&
                         ($0.expiresDate ?? .distantFuture) > Date() }
                 }) else { throw SyncError.incomplete }
+                if policy == .replaceExisting {
+                    let desiredKeys = Set(desired.map(key))
+                    guard actual.allSatisfy({ !isSchoolCookie($0) || desiredKeys.contains(key($0)) }) else {
+                        throw SyncError.incomplete
+                    }
+                }
                 return
             } catch {
                 try checkCurrent()

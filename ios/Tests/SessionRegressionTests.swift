@@ -1,5 +1,6 @@
 import Foundation
 import WebKit
+import Security
 
 /// Captures the fallback entry without making a real school request.
 @MainActor private final class InertEcardWebView: WKWebView {
@@ -109,6 +110,48 @@ struct SessionRegressionTests {
         defer {
             Keychain.delete("ccsut.cookies.v2")
         }
+
+        _ = CookieJar.replace([cookie("jw_uf", "memory-only")], persistChanges: false)
+        let stagedGeneration = CookieJar.generation
+        let failedSaveStatus: OSStatus? = {
+            do {
+                try CookieJar.commit(generation: stagedGeneration, save: { data, key in
+                    try Keychain.save(data, for: key, operation: { _, _ in errSecInteractionNotAllowed })
+                })
+                return nil
+            } catch {
+                return (error as? KeychainSaveError)?.statusCode
+            }
+        }()
+        let persistenceFailureWasRecorded: Bool
+        if case .failed(let error) = CookieJar.persistenceState {
+            persistenceFailureWasRecorded = (error as? KeychainSaveError)?.statusCode == errSecInteractionNotAllowed
+        } else {
+            persistenceFailureWasRecorded = false
+        }
+        check(failedSaveStatus == errSecInteractionNotAllowed && persistenceFailureWasRecorded,
+              "Keychain save status reaches the cookie commit caller")
+        check(CookieJar.header(for: "tls.ccsut.cn") == "jw_uf=memory-only",
+              "Keychain failure preserves verified cookies for the current in-memory session")
+        let replacementStatus = CookieJar.replace([cookie("jw_uf", "replace-failure")], save: { data, key in
+            try Keychain.save(data, for: key, operation: { _, _ in errSecInteractionNotAllowed })
+        })
+        let replacementFailureWasReturned: Bool
+        if case .failed(let error) = replacementStatus {
+            replacementFailureWasReturned = (error as? KeychainSaveError)?.statusCode == errSecInteractionNotAllowed
+        } else {
+            replacementFailureWasReturned = false
+        }
+        check(replacementFailureWasReturned, "cookie replacement returns a failed durable-save result")
+        let deletionStatus = CookieJar.replace([], delete: { _ in errSecInteractionNotAllowed })
+        let deletionFailureWasReturned: Bool
+        if case .failed(let error) = deletionStatus {
+            deletionFailureWasReturned = (error as? KeychainDeleteError)?.statusCode == errSecInteractionNotAllowed
+        } else {
+            deletionFailureWasReturned = false
+        }
+        check(deletionFailureWasReturned, "empty cookie replacement reports when the stale Keychain fallback remains")
+
         CookieJar.shared = [cookie("jw_uf", "expired", expires: Date(timeIntervalSinceNow: -60))]
         check(CookieJar.header(for: "tls.ccsut.cn") == nil, "expired authentication Cookie is never sent")
 
@@ -598,6 +641,27 @@ struct SessionRegressionTests {
             check(store.phase == .loggedIn && allHTTPS && correctScopedCookies && preservedTicket
                   && CookieJar.header(for: "tls.ccsut.cn") == "jw_uf=http-renewed",
                   "HTTP CAS renewal upgrades before Secure cookie matching and preserves ticket bytes (port \(port))")
+        }
+
+        let rejectedHTTPSHosts = [
+            "https://ccsut.cn/admin/profile", "https://unknown.ccsut.cn/admin/profile",
+            "https://ecard.ccsut.cn/plat/login", "https://zts.ccsut.cn/passport"
+        ]
+        for (index, target) in rejectedHTTPSHosts.enumerated() {
+            CookieJar.shared = [cookie("jw_uf", "fixture", domain: ".ccsut.cn")]
+            SchoolProtocol.requestCount = 0
+            do {
+                _ = try await api.response(for: URLRequest(url: URL(string: target)!),
+                                           allowAuthenticationRedirects: true)
+                check(false, "academic transport rejects non-chain HTTPS host \(index)")
+            } catch {
+                let rejected = (error as? APIError).map {
+                    if case .notLoggedIn = $0 { return true }
+                    return false
+                } == true
+                check(rejected && SchoolProtocol.requestCount == 0,
+                      "academic transport rejects non-chain HTTPS host \(index) before sending cookies")
+            }
         }
 
         let rejectedAcademicURLs = [

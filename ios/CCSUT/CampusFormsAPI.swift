@@ -9,7 +9,7 @@ protocol CampusFormServing: Sendable {
     func roleUsers(_ role: CampusApprovers) async throws -> CampusApprovers
     func locate(latitude: Double, longitude: Double) async throws -> String
     func submit(_ submission: CampusSubmission) async throws
-    func reconcile(_ submission: CampusSubmission) async throws -> Bool
+    func reconcile(_ attempt: CampusFormRecoveryDescriptor) async throws -> Bool
 }
 
 extension CampusClient: CampusFormServing {
@@ -232,37 +232,31 @@ extension CampusClient: CampusFormServing {
     }
 
     func reconcile(_ submission: CampusSubmission) async throws -> Bool {
+        try await reconcile(CampusFormRecoveryDescriptor(submission: submission))
+    }
+
+    func reconcile(_ attempt: CampusFormRecoveryDescriptor) async throws -> Bool {
         try checkState()
-        guard submission.configuration.generation == generation, submission.configuration.account == account else { throw CancellationError() }
-        let rows = try await formRecords(submission.kind)
-        let d = submission.draft, c = submission.configuration
-        // Without the server upload identifiers in this immutable snapshot, records cannot prove
-        // which exact attachment set was accepted. Keep the outcome pending rather than guess.
-        guard d.attachments.isEmpty else { return false }
-        let expected = try submission.payload(uploaded: [])
+        guard attempt.generation == generation, attempt.account == account else { throw CancellationError() }
+        // Without server upload identifiers, the exact attachment set cannot be matched safely.
+        guard !attempt.hasAttachments, let expectedFingerprint = attempt.expectedFingerprint else { return false }
+        let rows = try await formRecords(attempt.kind)
         let matching = rows.filter { row in
-            guard let id = Self.text(row[submission.kind == .leave ? "id" : "openid"]), !c.baselineRecordIDs.contains(id),
-                  let time = Self.parseDate(row[submission.kind == .leave ? "applyTime" : "applyDate"] as? String),
-                  time >= submission.createdAt.addingTimeInterval(-2) else { return false }
-            let fields: [String]
-            let dateFields: [String]
-            if submission.kind == .leave {
-                fields = ["leaveType", "reason", "linkmanPhone", "approver", "roleId", "leaveSchool", "address", "qxlx", "qxmx"]
-                dateFields = ["beginTime", "endTime", "leaveTime"]
-                guard let days = row["leaveDay"] as? NSNumber, abs(days.doubleValue - d.duration) < 0.0001,
+            guard let id = Self.text(row[attempt.kind == .leave ? "id" : "openid"]),
+                  !attempt.baselineRecordFingerprints.contains(CampusFormRecoveryFingerprint.recordID(id)),
+                  let time = Self.parseDate(row[attempt.kind == .leave ? "applyTime" : "applyDate"] as? String),
+                  time >= attempt.createdAt.addingTimeInterval(-2),
+                  CampusFormRecoveryFingerprint.form(kind: attempt.kind, values: row) == expectedFingerprint else { return false }
+            if attempt.kind == .leave {
+                guard let expectedDuration = attempt.duration,
+                      let days = row["leaveDay"] as? NSNumber, abs(days.doubleValue - expectedDuration) < 0.0001,
                       let files = row["applyFiles"] as? [Any], files.isEmpty,
                       let fileList = row["fileList"], (fileList is NSNull || fileList as? String == "" || fileList as? String == "[]") else { return false }
-            } else {
-                fields = ["type", "isLeave", "phone", "jzPhone", "reason", "jtgj", "tjcs", "xxdz", "txdz"]
-                dateFields = ["startDate", "endDate"]
             }
-            return fields.allSatisfy { Self.sameField(row[$0], expected[$0]) }
-                && dateFields.allSatisfy { key in
-                    if let text = expected[key] as? String, !text.isEmpty {
-                        guard let date = Self.parseDate(text) else { return false }
-                        return Self.sameTime(row[key], date)
-                    }
-                    return Self.sameField(row[key], expected[key])
+            return attempt.dateExpectations.allSatisfy { expected in
+                if let date = expected.value { return Self.sameTime(row[expected.field], date) }
+                guard let actual = row[expected.field] else { return false }
+                return actual is NSNull || actual as? String == ""
                 }
         }
         return matching.count == 1
@@ -270,10 +264,17 @@ extension CampusClient: CampusFormServing {
 
     private func formRecords(_ kind: CampusFormKind) async throws -> [[String: Any]] {
         if kind == .leave {
-            let page = try Self.formDictionary(await formRead(kind, path: "/backstage/leaveadmin/leaveApply/queryListForPage", json: {
-                ["pageNum": 1, "pageSize": 100, "pageParam": ["userId": $0]]
-            }))
-            guard let rows = page["list"] as? [[String: Any]] else { throw CampusFormError.invalidResponse }; return rows
+            var records: [[String: Any]] = []
+            for pageNumber in 1...50 {
+                let page = try Self.formDictionary(await formRead(kind, path: "/backstage/leaveadmin/leaveApply/queryListForPage", json: {
+                    ["pageNum": pageNumber, "pageSize": 100, "pageParam": ["userId": $0]]
+                }))
+                guard let rows = page["list"] as? [[String: Any]] else { throw CampusFormError.invalidResponse }
+                records.append(contentsOf: rows)
+                if !Self.morePages(page, count: rows.count, page: pageNumber) { return records }
+                if pageNumber == 50 { throw CampusFormError.invalidResponse }
+            }
+            throw CampusFormError.invalidResponse
         }
         return try Self.formArray(formReadData: await formRead(kind, path: "/backstage/returnschool/studentGqleave/queryStuGqleaveInfo", json: { ["studentId": $0] }))
     }

@@ -22,7 +22,7 @@ final class CampusFormModel {
     private var revision: UInt64 = 0
     private var candidateRevision: UInt64 = 0
     private var configurationRevision: UInt64 = 0
-    private var pending: CampusSubmission?
+    private var pending: CampusFormRecoveryDescriptor?
     @ObservationIgnored private var loadTask: Task<CampusFormConfiguration, Error>?
     @ObservationIgnored private var candidateTask: Task<CampusApprovers, Error>?
     @ObservationIgnored private var submitTask: Task<Void, Error>?
@@ -33,6 +33,11 @@ final class CampusFormModel {
         self.currentGeneration = currentGeneration; generation = currentGeneration()
         let start = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970 / 60) * 60)
         draft = CampusFormDraft(begin: start, end: start.addingTimeInterval(14_400))
+        pending = CampusFormRecoveryStore.restore(account: account, generation: generation, kind: kind)
+        if pending != nil {
+            state = .unknown
+            error = CampusFormError.unknownOutcome.localizedDescription
+        }
     }
     var candidateKey: String { "\(configurationRevision)|\(draft.typeID)|\(draft.begin.timeIntervalSince1970)|\(draft.end.timeIntervalSince1970)" }
     var canMatchApprovers: Bool {
@@ -118,6 +123,15 @@ final class CampusFormModel {
         guard verifyAccount(), state == .editing, confirmation?.id == approved.id,
               approved.draft == draft, approved.configuration == configuration else { return }
         let rev = revision, api = api
+        let recovery = CampusFormRecoveryDescriptor(submission: approved)
+        if let existing = CampusFormRecoveryStore.claim(recovery) {
+            pending = existing
+            confirmation = nil
+            state = .unknown
+            error = CampusFormError.unknownOutcome.localizedDescription
+            return
+        }
+        pending = recovery
         state = .submitting; error = nil
         let task = Task { try await api.submit(approved) }; submitTask = task
         do {
@@ -127,9 +141,11 @@ final class CampusFormModel {
         } catch {
             guard verifyAccount(), rev == revision else { return }
             if error as? CampusFormError == .unknownOutcome {
-                state = .unknown; pending = approved
+                state = .unknown; pending = recovery
             } else {
                 state = .editing
+                pending = nil
+                CampusFormRecoveryStore.remove(recovery)
                 if error as? CampusFormError == .configurationChanged { needsReload = true; approvers = nil; draft.approverID = "" }
             }
             report(error)
@@ -169,6 +185,7 @@ final class CampusFormModel {
         clear(); state = .cancelled
     }
     private func finishSubmitted() {
+        if let pending { CampusFormRecoveryStore.remove(pending) }
         state = .submitted; error = nil; pending = nil; confirmation = nil
         draft = CampusFormDraft(begin: draft.begin, end: draft.end)
     }
@@ -179,7 +196,42 @@ final class CampusFormModel {
         draft = CampusFormDraft(begin: Date(), end: Date())
     }
     @discardableResult private func verifyAccount() -> Bool {
-        guard active, currentGeneration() == generation else { clear(); state = .cancelled; return false }
+        guard active else { clear(); state = .cancelled; return false }
+        guard currentGeneration() == generation else {
+            if let pending { CampusFormRecoveryStore.remove(pending) }
+            clear(); state = .cancelled; return false
+        }
         return true
+    }
+}
+
+/// Keeps privacy-minimal unresolved attempt descriptors in memory for the active session.
+/// Raw text fields and attachment bytes are never retained here or serialized to disk.
+@MainActor private enum CampusFormRecoveryStore {
+    private struct Key: Hashable {
+        let account: String
+        let generation: UInt64
+        let kind: CampusFormKind
+    }
+    private static var attempts: [Key: CampusFormRecoveryDescriptor] = [:]
+
+    static func restore(account: String, generation: UInt64, kind: CampusFormKind) -> CampusFormRecoveryDescriptor? {
+        attempts = attempts.filter { $0.key.account == account && $0.key.generation == generation }
+        return attempts[Key(account: account, generation: generation, kind: kind)]
+    }
+
+    /// Atomically claims the one unresolved mutation slot for this account/session/form.
+    static func claim(_ attempt: CampusFormRecoveryDescriptor) -> CampusFormRecoveryDescriptor? {
+        let key = Key(account: attempt.account, generation: attempt.generation, kind: attempt.kind)
+        if let existing = attempts[key] { return existing }
+        attempts[key] = attempt
+        return nil
+    }
+
+    /// A stale model may clear only the attempt it claimed, never another model's attempt.
+    static func remove(_ attempt: CampusFormRecoveryDescriptor) {
+        let key = Key(account: attempt.account, generation: attempt.generation, kind: attempt.kind)
+        guard attempts[key]?.id == attempt.id else { return }
+        attempts[key] = nil
     }
 }

@@ -73,15 +73,13 @@ struct FeeItem: Decodable {
     let maxmoney: String?
     /// 单日上限，实测 "1000"
     let daymaxmoney: String?
-    /// 快捷金额，实测 "10,50,100"
-    let dayout: String?
     let implInterface: String?
     let feeitemImplBean: FeeItemImpl?
 
     enum CodingKeys: String, CodingKey {
         case feeitemid, name, flag, view
         case billingUnit   = "billing_unit"
-        case maxmoney, daymaxmoney, dayout
+        case maxmoney, daymaxmoney
         case implInterface = "impl_interface"
         case feeitemImplBean
     }
@@ -95,38 +93,13 @@ struct FeeItem: Decodable {
         billingUnit = try c.decodeIfPresent(String.self, forKey: .billingUnit)
         maxmoney = try c.ecardTextIfPresent(forKey: .maxmoney, allowsDecimal: true)
         daymaxmoney = try c.ecardTextIfPresent(forKey: .daymaxmoney, allowsDecimal: true)
-        dayout = try c.decodeIfPresent(String.self, forKey: .dayout)
         implInterface = try c.decodeIfPresent(String.self, forKey: .implInterface)
         feeitemImplBean = try c.decodeIfPresent(FeeItemImpl.self, forKey: .feeitemImplBean)
     }
 
-    // flag[4] → 0 选择模式 / 1 输入模式 / 4 IEC 电表模式
-    // flag[7] → 是否需要输入金额
-    // flag[9] → "2" 表示需要先改密码
-    var isSelectMode: Bool { bit(4) == "0" }
-    var needsAmount:  Bool { bit(7) == "1" }
-    var requiresPasswordChange: Bool { bit(9) == "2" }
-
-    private func bit(_ index: Int) -> Character? {
-        let chars = Array(flag)
-        return index < chars.count ? chars[index] : nil
-    }
-
     var unit: String { billingUnit ?? "元" }
-    var quickAmounts: [Decimal] {
-        (dayout ?? "").split(separator: ",").compactMap { Decimal(string: String($0)) }
-    }
     var maxAmount: Decimal? { maxmoney.flatMap { Decimal(string: $0) } }
     var dayMaxAmount: Decimal? { daymaxmoney.flatMap { Decimal(string: $0) } }
-    var vendorName: String? { feeitemImplBean?.implname }
-
-    /// 金额是否落在服务端给出的范围内
-    func accepts(amount: Decimal) -> Bool {
-        guard amount > 0 else { return false }
-        if let max = maxAmount, amount > max { return false }
-        if let dayMax = dayMaxAmount, amount > dayMax { return false }
-        return true
-    }
 }
 
 struct FeeItemImpl: Decodable {

@@ -240,14 +240,7 @@ struct ExamView: View {
     }
 
     private func dateText(_ exam: ExamItem) -> String {
-        guard let date = exam.startDate else { return nonempty(exam.ksrq) ?? "—" }
-        let style = Date.FormatStyle.dateTime
-            .year()
-            .month(.defaultDigits)
-            .day()
-            .weekday(.wide)
-            .locale(Locale(identifier: "zh_CN"))
-        return date.formatted(style)
+        exam.schoolDateText ?? nonempty(exam.ksrq) ?? "—"
     }
 
     private func locationText(_ exam: ExamItem) -> String {
@@ -407,17 +400,11 @@ private struct ExamRow: View {
     }
 
     private var visibleDateText: String {
-        guard let d = exam.startDate else {
+        guard let text = exam.schoolDateText else {
             let raw = exam.ksrq?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return raw.isEmpty ? "—" : raw
         }
-        let format = Date.FormatStyle.dateTime
-            .year()
-            .month(.defaultDigits)
-            .day()
-            .weekday(.wide)
-            .locale(Locale(identifier: "zh_CN"))
-        return d.formatted(format)
+        return text
     }
 
     private func shortDateLabel(_ date: Date) -> String {

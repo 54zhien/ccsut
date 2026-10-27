@@ -5,10 +5,39 @@ import Security
 
 // MARK: - Keychain
 
+enum KeychainSaveError: LocalizedError {
+    case status(OSStatus)
+
+    var statusCode: OSStatus {
+        switch self { case .status(let value): value }
+    }
+
+    var errorDescription: String? { "Keychain save failed (status \(statusCode))." }
+}
+
+enum KeychainDeleteError: LocalizedError {
+    case status(OSStatus)
+
+    var statusCode: OSStatus {
+        switch self { case .status(let value): value }
+    }
+
+    var errorDescription: String? { "Keychain delete failed (status \(statusCode))." }
+}
+
 enum Keychain {
     private static let service = "cn.ccsut.app"
+    typealias StatusOperation = (Data, String) -> OSStatus
+    typealias DeleteOperation = (String) -> OSStatus
 
-    static func save(_ data: Data, for key: String) {
+    static func save(_ data: Data, for key: String,
+                     operation: StatusOperation? = nil) throws {
+        let operation = operation ?? saveToKeychain
+        let status = operation(data, key)
+        guard status == errSecSuccess else { throw KeychainSaveError.status(status) }
+    }
+
+    private static func saveToKeychain(_ data: Data, _ key: String) -> OSStatus {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -16,12 +45,11 @@ enum Keychain {
         ]
         let value = [kSecValueData as String: data]
         let status = SecItemUpdate(base as CFDictionary, value as CFDictionary)
-        if status == errSecItemNotFound {
-            var attrs = base
-            attrs[kSecValueData as String] = data
-            attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            SecItemAdd(attrs as CFDictionary, nil)
-        }
+        guard status == errSecItemNotFound else { return status }
+        var attrs = base
+        attrs[kSecValueData as String] = data
+        attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(attrs as CFDictionary, nil)
     }
 
     static func load(_ key: String) -> Data? {
@@ -37,13 +65,15 @@ enum Keychain {
         return out as? Data
     }
 
-    static func delete(_ key: String) {
+    @discardableResult
+    static func delete(_ key: String, operation: DeleteOperation? = nil) -> OSStatus {
         let q: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
         ]
-        SecItemDelete(q as CFDictionary)
+        if let operation { return operation(key) }
+        return SecItemDelete(q as CFDictionary)
     }
 }
 
@@ -174,26 +204,6 @@ final class SessionStore {
     private(set) var lastError: String?
     private(set) var studentName: String?
     private(set) var studentId: String?
-    private(set) var lastCookieCount = 0
-
-    /// 供 UI 展示的会话健康摘要
-    var cookieSummary: String {
-        let list = allCookies()
-            .sorted { ($0.expiresDate ?? .distantPast) > ($1.expiresDate ?? .distantPast) }
-            .prefix(4)
-            .map { c in
-                let d = c.expiresDate.map { String(format: "%.1f天", $0.timeIntervalSinceNow / 86400) } ?? "会话"
-                return "\(c.name)·\(d)"
-            }
-        return list.isEmpty ? "未登录" : list.joined(separator: "  ")
-    }
-
-    /// 调试用：当前所有 Cookie 的名字
-    var cookieNames: String {
-        let names = allCookies().map(\.name).sorted()
-        return names.isEmpty ? "无" : names.joined(separator: ",")
-    }
-
     var tgcRemainingDays: Double? {
         guard let tgc = allCookies().first(where: { $0.name == "TGC" }),
               let exp = tgc.expiresDate else { return nil }
@@ -258,13 +268,14 @@ final class SessionStore {
             // still be valid after a cold launch, but CAS/ecard WebViews start
             // empty until the restored (and verified) cookies are injected.
             // Do this before exposing MainTabs or starting the ecard prefetch.
-            await injectToWebKit(allCookies())
+            await injectToWebKit(allCookies(), expectedGeneration: generation)
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             guard publishVerifiedIdentity(generation: generation) else { return }
             phase = .loggedIn
             await refreshIfNeeded()
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             await loadProfile()
+            updateCookiePersistenceWarning()
         } catch {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             lastError = error.localizedDescription
@@ -371,9 +382,10 @@ final class SessionStore {
             guard publishVerifiedIdentity(generation: generation) else { return }
             phase = .loggedIn
             lastError = nil
-            await injectToWebKit(allCookies())
+            await injectToWebKit(allCookies(), expectedGeneration: generation)
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             await loadProfile()
+            updateCookiePersistenceWarning()
         } catch {
             guard CookieJar.generation == generation, !Task.isCancelled else { return }
             lastError = error.localizedDescription
@@ -440,8 +452,6 @@ final class SessionStore {
             }
         }
 
-        lastCookieCount = cookies.count
-
         guard !cookies.isEmpty else {
             lastError = "WebView 里没有任何 ccsut.cn 的 Cookie"
             return false
@@ -463,13 +473,27 @@ final class SessionStore {
             return false
         }
         guard CookieJar.generation == generation, !Task.isCancelled else { return false }
-        CookieJar.commit(generation: generation)
+        do {
+            try CookieJar.commit(generation: generation)
+        } catch {
+            guard CookieJar.generation == generation, !Task.isCancelled,
+                  publishVerifiedIdentity(generation: generation) else { return false }
+            phase = .loggedIn
+            lastError = Self.cookiePersistenceWarning
+            Task {
+                guard CookieJar.generation == generation, !isLoggingOut else { return }
+                await loadProfile()
+                updateCookiePersistenceWarning()
+            }
+            return false
+        }
         guard publishVerifiedIdentity(generation: generation) else { return false }
         phase = .loggedIn
         lastError = nil
         Task {
             guard CookieJar.generation == generation, !isLoggingOut else { return }
             await loadProfile()
+            updateCookiePersistenceWarning()
         }
         return CookieJar.generation == generation && !Task.isCancelled
     }
@@ -525,6 +549,20 @@ final class SessionStore {
         }
     }
 
+    private static let cookiePersistenceWarning =
+        "登录成功，但暂时无法保存登录状态。现在可以继续使用，下次打开可能需要重新登录。"
+
+    private func updateCookiePersistenceWarning() {
+        switch CookieJar.persistenceState {
+        case .failed:
+            lastError = Self.cookiePersistenceWarning
+        case .persisted where lastError == Self.cookiePersistenceWarning:
+            lastError = nil
+        case .notPersisted, .persisted:
+            break
+        }
+    }
+
     // MARK: Cookie 存取
 
     func allCookies() -> [HTTPCookie] {
@@ -538,9 +576,11 @@ final class SessionStore {
         return stored.compactMap(\.asHTTPCookie).filter { CookieJar.isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
     }
 
-    private func injectToWebKit(_ cookies: [HTTPCookie]) async {
+    private func injectToWebKit(_ cookies: [HTTPCookie], expectedGeneration: UInt64) async {
+        guard CookieJar.generation == expectedGeneration, !Task.isCancelled else { return }
         do {
-            try await WebStore.restoreCookies(cookies, to: WebStore.dataStore, policy: .replaceExisting)
+            try await WebStore.restoreCookies(cookies, to: WebStore.dataStore,
+                                              policy: .replaceExisting, expectedGeneration: expectedGeneration)
         } catch is CancellationError {
             return
         } catch {
@@ -560,7 +600,6 @@ final class SessionStore {
         adoptionTask?.cancel()
         CookieJar.shared = []
         EcardTokenBridge.clearCachedToken()
-        Keychain.delete(cookieKey)
         UserDefaults.standard.removeObject(forKey: nameKey)
         UserDefaults.standard.removeObject(forKey: sidKey)
         UserDefaults.standard.removeObject(forKey: "ccsut.teachingWeek.v1")
@@ -568,7 +607,6 @@ final class SessionStore {
         studentId = nil
         verifiedIdentity = nil
         lastError = nil
-        lastCookieCount = 0
         // 等待所有可能写 WebKit 的任务结束，再做最终清理。
         // 登录页也在清理完成后才出现，避免它接管尚未删除的旧 Cookie。
         await refreshTask?.value
@@ -592,6 +630,11 @@ final class SessionStore {
 
         CookieJar.shared = []
         phase = .loggedOut
+        if case .failed = CookieJar.persistenceState {
+            lastError = "已退出登录，但未能确认登录状态已清除。请重新尝试退出，避免下次打开时继续登录。"
+        } else {
+            lastError = nil
+        }
     }
 }
 
@@ -626,6 +669,15 @@ final class NoRedirect: NSObject, URLSessionTaskDelegate {
 }
 
 enum CookieJar {
+    typealias PersistenceOperation = (Data, String) throws -> Void
+    typealias DeletionOperation = (String) -> OSStatus
+
+    enum PersistenceState {
+        case notPersisted
+        case persisted
+        case failed(Error)
+    }
+
     struct RequestCookies {
         let hasCookies: Bool
         let header: String?
@@ -635,6 +687,12 @@ enum CookieJar {
     private nonisolated(unsafe) static var cookies: [HTTPCookie] = []
     private nonisolated(unsafe) static var revision: UInt64 = 0
     private nonisolated(unsafe) static var shouldPersist = true
+    private nonisolated(unsafe) static var persistenceStatus: PersistenceState = .notPersisted
+
+    static var persistenceState: PersistenceState {
+        lock.lock(); defer { lock.unlock() }
+        return persistenceStatus
+    }
 
     /// 只允许这里维护原生 Cookie；替换账号或退出时递增代数，丢弃迟到响应。
     static var shared: [HTTPCookie] {
@@ -643,23 +701,44 @@ enum CookieJar {
             return cookies.filter { isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
         }
         set {
-            replace(newValue)
+            _ = replace(newValue)
         }
     }
 
-    static func replace(_ value: [HTTPCookie], persistChanges: Bool = true) {
+    @discardableResult
+    static func replace(_ value: [HTTPCookie], persistChanges: Bool = true,
+                        save: PersistenceOperation = { try Keychain.save($0, for: $1) },
+                        delete: DeletionOperation = { Keychain.delete($0) }) -> PersistenceState {
         lock.lock(); defer { lock.unlock() }
         revision &+= 1
         shouldPersist = persistChanges
         cookies = value.filter { isSchoolCookie($0) && ($0.expiresDate ?? .distantFuture) > Date() }
-        if shouldPersist { persist() }
+        guard shouldPersist else {
+            persistenceStatus = .notPersisted
+            return persistenceStatus
+        }
+        do {
+            try persist(save: save, delete: delete)
+            persistenceStatus = .persisted
+        } catch {
+            persistenceStatus = .failed(error)
+        }
+        return persistenceStatus
     }
 
-    static func commit(generation: UInt64) {
+    static func commit(generation: UInt64,
+                       save: PersistenceOperation = { try Keychain.save($0, for: $1) },
+                       delete: DeletionOperation = { Keychain.delete($0) }) throws {
         lock.lock(); defer { lock.unlock() }
-        guard generation == revision else { return }
+        guard generation == revision else { throw CancellationError() }
         shouldPersist = true
-        persist()
+        do {
+            try persist(save: save, delete: delete)
+            persistenceStatus = .persisted
+        } catch {
+            persistenceStatus = .failed(error)
+            throw error
+        }
     }
 
     static var generation: UInt64 {
@@ -727,25 +806,19 @@ enum CookieJar {
         }.sorted { $0.path.count > $1.path.count }
     }
 
-    static var names: [String] { shared.map(\.name).sorted() }
-
-    /// 脱敏指纹：只露长度和首尾，用于对比是不是同一个值
-    static func fingerprint(_ name: String) -> String {
-        guard let c = shared.first(where: { $0.name == name }) else { return "缺失" }
-        let v = c.value
-        guard v.count > 8 else { return "\(v.count)字 \(v)" }
-        return "\(v.count)字 \(v.prefix(4))…\(v.suffix(4))"
-    }
-
     /// 按 (name, domain, path) 覆盖或追加。
     /// 服务端每次响应都可能轮换 jw_uf，不更新的话会一直用登录那一刻的旧值。
-    static func upsert(_ cookie: HTTPCookie) {
+    @discardableResult
+    static func upsert(_ cookie: HTTPCookie) -> PersistenceState {
         upsert([cookie])
     }
 
-    static func upsert(_ incoming: [HTTPCookie], generation: UInt64? = nil) {
+    @discardableResult
+    static func upsert(_ incoming: [HTTPCookie], generation: UInt64? = nil,
+                       save: PersistenceOperation = { try Keychain.save($0, for: $1) },
+                       delete: DeletionOperation = { Keychain.delete($0) }) -> PersistenceState {
         lock.lock(); defer { lock.unlock() }
-        if let generation, generation != revision { return }
+        if let generation, generation != revision { return persistenceStatus }
         let key: (HTTPCookie) -> String = {
             let domain = $0.domain.lowercased()
             let normalized = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
@@ -756,14 +829,31 @@ enum CookieJar {
             if (cookie.expiresDate ?? .distantFuture) > Date() { cookies.append(cookie) }
         }
         cookies.removeAll { ($0.expiresDate ?? .distantFuture) <= Date() }
-        if !incoming.isEmpty, shouldPersist { persist() }
+        guard !incoming.isEmpty else { return persistenceStatus }
+        guard shouldPersist else {
+            persistenceStatus = .notPersisted
+            return persistenceStatus
+        }
+        do {
+            try persist(save: save, delete: delete)
+            persistenceStatus = .persisted
+        } catch {
+            persistenceStatus = .failed(error)
+        }
+        return persistenceStatus
     }
 
     /// 在锁内落盘，退出和响应轮换不会交错写回旧凭证。
-    private static func persist() {
-        guard !cookies.isEmpty else { Keychain.delete("ccsut.cookies.v2"); return }
-        guard let data = try? JSONEncoder().encode(cookies.map(StoredCookie.init)) else { return }
-        Keychain.save(data, for: "ccsut.cookies.v2")
+    private static func persist(save: PersistenceOperation, delete: DeletionOperation) throws {
+        guard !cookies.isEmpty else {
+            let status = delete("ccsut.cookies.v2")
+            guard status == errSecSuccess || status == errSecItemNotFound else {
+                throw KeychainDeleteError.status(status)
+            }
+            return
+        }
+        let data = try JSONEncoder().encode(cookies.map(StoredCookie.init))
+        try save(data, "ccsut.cookies.v2")
     }
 }
 
@@ -771,11 +861,14 @@ enum WebStore {
     nonisolated(unsafe) static var dataStore: WKWebsiteDataStore = .nonPersistent()
 
     @MainActor static func restoreCookies(_ cookies: [HTTPCookie], to store: WKWebsiteDataStore,
-                                         policy: WebSessionCookies.Policy) async throws {
-        let generation = CookieJar.generation
+                                         policy: WebSessionCookies.Policy,
+                                         expectedGeneration: UInt64? = nil) async throws {
+        let generation = expectedGeneration ?? CookieJar.generation
+        guard CookieJar.generation == generation else { throw CancellationError() }
         try await WebSessionCookies.restore(cookies, policy: policy,
             read: { try await store.httpCookieStore.cookieSnapshot() },
             write: { try await store.httpCookieStore.set($0) },
+            delete: { try await store.httpCookieStore.remove($0) },
             isCurrent: { CookieJar.generation == generation })
     }
 }

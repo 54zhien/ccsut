@@ -108,7 +108,8 @@ final class EcardTokenBridge: NSObject {
         // preserving cookies already rotated by the official WebView flow.
         do {
             try await WebStore.restoreCookies(CookieJar.shared,
-                to: webView.configuration.websiteDataStore, policy: .fillMissing)
+                to: webView.configuration.websiteDataStore, policy: .fillMissing,
+                expectedGeneration: cookieGeneration)
         } catch is CancellationError {
             throw EcardError.canceled
         } catch {

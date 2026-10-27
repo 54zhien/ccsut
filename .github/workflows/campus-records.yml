@@ -1,0 +1,42 @@
+name: Leave records verification
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['ios/**', '.github/workflows/campus-records.yml']
+jobs:
+  records:
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native app
+        run: |
+          set -o pipefail
+          xcodebuild build -project ios/CCSUT.xcodeproj -scheme CCSUT -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/UIPreview" CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/records-build.log"
+      - name: Boot simulator
+        run: bash ios/Tests/render-preview.sh --boot-only
+      - name: Leave records interaction
+        run: |
+          set -o pipefail
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/records.xcresult" -only-testing:CCSUTUITests/PageInteractionUITests/testCampusEntryAndRecords -only-testing:CCSUTUITests/PageInteractionUITests/testCampusRecordsSurviveFormDismissal -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/records-tests.log"
+      - name: Capture dark and reduced motion
+        run: |
+          xcrun simctl ui "$CCSUT_PREVIEW_DEVICE" appearance dark
+          xcrun simctl launch --terminate-running-process "$CCSUT_PREVIEW_DEVICE" com.imzhien.ccsut --preview-ui --preview-page campus-leave
+          sleep 3
+          xcrun simctl io "$CCSUT_PREVIEW_DEVICE" screenshot "$RUNNER_TEMP/ui-screenshots/records-dark.png"
+          xcrun simctl spawn "$CCSUT_PREVIEW_DEVICE" defaults write com.apple.Accessibility ReduceMotionEnabled -bool YES
+          xcodebuild test -project ios/CCSUT.xcodeproj -scheme CCSUTUI -configuration Debug -destination "platform=iOS Simulator,id=$CCSUT_PREVIEW_DEVICE" -derivedDataPath "$RUNNER_TEMP/UIPreview" -resultBundlePath "$RUNNER_TEMP/records-reduced.xcresult" -only-testing:CCSUTUITests/PageInteractionUITests/testCampusRecordsSurviveFormDismissal -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO
+      - name: Export screenshots
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/records.xcresult" ]; then xcrun xcresulttool export attachments --path "$RUNNER_TEMP/records.xcresult" --output-path "$RUNNER_TEMP/records-attachments"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: leave-records-evidence
+          path: |
+            ${{ runner.temp }}/records-*.log
+            ${{ runner.temp }}/records-attachments/
+            ${{ runner.temp }}/ui-screenshots/
