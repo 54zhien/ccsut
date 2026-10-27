@@ -26,3 +26,5 @@ jobs:
             ios/CCSUT/EcardPaymentPersistence.swift ios/CCSUT/EcardPaymentModel.swift)
           xcrun swiftc -g -parse-as-library "${SOURCES[@]}" ios/Tests/CookieCallbackExecutorTests.swift -o "$RUNNER_TEMP/cookie-executor"
           "$RUNNER_TEMP/cookie-executor"
+          xcrun swiftc -g -parse-as-library "${SOURCES[@]}" "$RUNNER_TEMP/EcardPaymentModelTests.swift" -o "$RUNNER_TEMP/payment-model"
+          CCSUT_PAYMENT_REPETITIONS=300 python3 ios/Tests/run-payment-model-diagnostics.py "$RUNNER_TEMP/payment-model"

@@ -138,8 +138,10 @@ final class CookieCallback<Value>: @unchecked Sendable {
         continuation?.resume(with: result)
     }
 
-    static func wait(timeout: Duration = .seconds(5),
-                     start: (@escaping @Sendable (Value) -> Void) -> Void) async throws -> Value {
+    // Registration calls WebKit synchronously; an unisolated async helper
+    // would move it to the cooperative pool even when its caller is MainActor.
+    @MainActor static func wait(timeout: Duration = .seconds(5),
+                     start: @MainActor (@escaping @Sendable (Value) -> Void) -> Void) async throws -> Value {
         let callback = CookieCallback<Value>()
         let deadline = Task {
             do { try await Task.sleep(for: timeout) } catch { return }
@@ -158,7 +160,7 @@ final class CookieCallback<Value>: @unchecked Sendable {
     }
 }
 
-extension WKHTTPCookieStore {
+@MainActor extension WKHTTPCookieStore {
     func cookieSnapshot() async throws -> [HTTPCookie] {
         try await CookieCallback.wait { completion in getAllCookies(completion) }
     }
