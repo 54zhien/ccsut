@@ -1,24 +1,5 @@
-//
-//  EcardAPI.swift
-//  CCSUT
-//
-//  一卡通缴费（新中新 Synjones 缴费大厅 charge-app 4.0.107 / BladeX 后端）
-//
-//  ⚠️ 状态：协议已实测跑通，但**尚未完成 iOS 构建与真机支付验证**。
-//     在真机走通一笔小额并获得明确的「订单已完成」之前，
-//     不要把本文件当作稳定依赖对外承诺。
-//
-//  认证：两个固定 Header
-//    Authorization: Basic <前端硬编码的 charge:charge_secret>
-//    synjones-auth: bearer <access_token>   ← EcardTokenBridge 提供
-//  没有请求签名、没有加密请求体。
-//
-//  接口层级（全部实测）：
-//    GET  /charge/feeitem/singleFeeitem?feeitemid=408
-//    POST /charge/feeitem/getThirdData   level=0 校区 / 1 楼栋 / 2 房间 / 3(且 type=IEC) 明细
-//    POST /blade-pay/pay                 建单（paystep=0）→ 支付（paystep=2）
-//    GET  /charge/pay/getpayinfo?orderid=
-//
+// Synjones charge-app transport and payment protocol.
+// Requests use the application Basic header and the account-specific synjones-auth token.
 
 import Foundation
 #if canImport(FoundationNetworking)

@@ -1,18 +1,5 @@
-//
-//  WebPanel.swift
-//  CCSUT
-//
-//  WKWebView 的 SwiftUI 容器
-//
-//  为什么不用 iOS 26 的 WebView(page)：
-//    实测在 if/else 两个分支间切换时（1×1 ↔ 全屏），同一个 WebPage
-//    会被两个 WebView 实例争用，直接闪退。
-//    WKWebView + UIViewRepresentable 是十年验证过的方案，行为确定。
-//
-//  另外：WKWebView 只要挂在视图层级里就会正常加载，
-//  不需要靠"可见"来驱动；但不能 alpha = 0 或 frame = 0，
-//  WebKit 会判定不可见并停止导航。
-//
+// Keep one WKWebView across background login and the interactive sheet.
+// Preserve a nonzero frame and opacity so WebKit can continue navigation.
 
 import SwiftUI
 import WebKit

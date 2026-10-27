@@ -1,29 +1,6 @@
-//
-//  EcardTokenBridge.swift
-//  CCSUT
-//
-//  原生 SSO 优先获取缴费 access_token，保留官方 WKWebView 认证兜底。
-//
-//  原理：
-//    先使用当前 CAS 会话逐跳换取缴费 token；需要交互或部署变化时，
-//    打开官方 /plat/login，用户完成一卡通登录并进入电费项目。
-//    /charge/feeitem/toAppitem 是需要令牌的换票接口，不能作为未登录入口：
-//    实际会直接返回「缺失令牌，鉴权失败」，并不会自动重定向到登录页。
-//    由官方门户带着它自己的认证上下文进入电费项目后，跳转到：
-//      https://ecard.ccsut.cn/charge-app/?token=<access_token>&name=pays&id=408
-//    在 302 被应用的那一刻从 URL 里截出 token（charge-app 加载后会立刻
-//    history.replaceState 把参数抹掉，所以不能等页面加载完再看地址栏）。
-//
-//  使用方式（重要）：
-//    bridge 不弹界面，可先在后台 `await fetchToken(forAccount: sno)`。
-//    onNeedsInteraction 通知调用方把同一个 webView 放进 sheet；不要重启请求。
-//
-//  凭证安全：
-//    - token 只在内存缓存，绑定 `sno`，并校验 JWT `exp` 未过期
-//    - `forAccount` 为 nil 时完全绕过缓存
-//    - 退出登录调用 `EcardTokenBridge.clearCachedToken()`
-//    - 只接受 ecard.ccsut.cn/charge-app 路径下、且能解出未过期 exp 的 JWT
-//
+// Prefer native SSO, then reuse the same WKWebView if interaction is required.
+// Capture the charge-app token during navigation: the portal removes it with replaceState.
+// Cached tokens are account-bound, expiry-checked, and cleared on logout.
 
 import Foundation
 import WebKit

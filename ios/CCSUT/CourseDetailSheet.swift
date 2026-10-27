@@ -1,17 +1,4 @@
-//
-//  CourseDetailSheet.swift
-//  CCSUT
-//
-//  选课详情
-//
-//  说明：教务系统没有「课程简介」和「教师简介」的接口。
-//  /admin/xsd/xk/getKcjj 返回的是选课冲突提示页（"冲突课程详情"），
-//  /admin/xsd/xk/getJsxx 只回 {"ret":0,"msg":"查询成功"} 没有数据，
-//  列表数据里的 kcjj / jsjj 字段实测全是空的。
-//
-//  所以这里把 listjxbDataV2 已经带回来的字段组织成详情页，
-//  其中 sksjdd 是服务端直接给的可读文本，不需要自己拼。
-//
+// Details use the fields already returned by listjxbDataV2; sksjdd is server-formatted.
 
 import SwiftUI
 
