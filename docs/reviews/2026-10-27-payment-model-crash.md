@@ -49,6 +49,8 @@ EcardPaymentModel.acceptToken(...) / EcardPaymentModel.swift:226
 
 ## 发布状态
 
-修复提交 `89aa3b5` 正在运行完整回归与原付款测试 300 次独立进程验证。修复通过并合并后，仍须等待主分支全部 CI 通过再发布。旧 Releases 已按要求删除，旧 Git 标签保留。下一版使用 `0.1.0` 标签与版本号，不能覆盖历史 `v0.1.0`。
+修复提交 `89aa3b5` 的[完整回归与模拟器编译 40462990963](https://github.com/54zhien/ccsut/actions/runs/40462990963) 通过；[线程契约与原付款测试 300 次独立进程验证 40462991019](https://github.com/54zhien/ccsut/actions/runs/40462991019) 通过。独立复核未发现生产代码问题，并建议补充回调注册后再取消、随后收到迟到回调的验证，已补充到线程契约测试。
+
+合并后仍须等待主分支全部 CI 通过再发布。旧 Releases 已按要求删除，旧 Git 标签保留。下一版使用 `0.1.0` 标签与版本号，不能覆盖历史 `v0.1.0`。CI、模拟器与安装包校验不能代替真机及真实学校付款验收。
 
 诊断参考：[Apple 内存、线程与崩溃诊断](https://developer.apple.com/documentation/xcode/diagnosing-memory-thread-and-crash-issues-early)。

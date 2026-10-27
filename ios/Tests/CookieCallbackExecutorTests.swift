@@ -30,16 +30,24 @@ import Foundation
         } catch {
             check((error as? URLError)?.code == .timedOut, "missing callback times out")
         }
+        var pendingCompletion: (@Sendable (Int) -> Void)?
         let canceled = Task { () -> Int in
-            try await CookieCallback.wait { _ in }
+            try await CookieCallback.wait { pendingCompletion = $0 }
         }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while pendingCompletion == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        check(pendingCompletion != nil, "callback is registered before cancellation")
         canceled.cancel()
         do {
             _ = try await canceled.value
             check(false, "canceled wait must throw")
         } catch {
-            check(error is CancellationError, "canceled wait ends without waiting for WebKit")
+            check(error is CancellationError, "registered wait cancels without waiting for WebKit")
         }
+        pendingCompletion?(17)
+        check(true, "late callback after cancellation does not resume twice")
         exit(failures == 0 ? 0 : 1)
     }
 }
