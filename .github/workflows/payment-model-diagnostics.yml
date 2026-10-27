@@ -33,7 +33,8 @@ jobs:
           xcrun swiftc -g -parse-as-library "${SOURCES[@]}" "$RUNNER_TEMP/EcardPaymentModelTests.swift" -o "$RUNNER_TEMP/payment-model"
           if [ "$DIAGNOSTIC" = lldb ]; then
             export PAYMENT_LLDB_FAILURE="$RUNNER_TEMP/lldb-failure.txt"
-            lldb --batch -o 'command script import ios/Tests/payment-lldb-stress.py' -o payment-stress -- "$RUNNER_TEMP/payment-model"
+            echo 'Investigation has not completed' > "$PAYMENT_LLDB_FAILURE"
+            lldb --batch -o 'command script import ios/Tests/payment_lldb_stress.py' -o payment-stress -- "$RUNNER_TEMP/payment-model"
             test ! -f "$PAYMENT_LLDB_FAILURE"
           else
             if [ "$DIAGNOSTIC" = scribble ]; then
