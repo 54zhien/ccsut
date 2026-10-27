@@ -1,18 +1,3 @@
-//
-//  WebLoginSheet.swift
-//  CCSUT
-//
-//  统一身份认证 · 全高网页与悬浮玻璃控件
-//
-//  CAS 有三个页签：扫码登录 / 密码登录 / 验证码登录
-//  这里只走两条不需要密码的：
-//    · 扫码      —— 二维码，扫完自动跳转
-//    · 验证码登录 —— 工号/学号/手机号 + 短信验证码
-//
-//  验证码必须人工输入（短信），脚本负责切页签、填账号、
-//  必要时点「获取验证码」，剩下的交给用户。
-//
-
 import SwiftUI
 import WebKit
 
@@ -258,7 +243,6 @@ struct WebLoginSheet: View {
         };
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-        // 1. 等页签渲染
         let tabs = [];
         for (let i = 0; i < 50; i++) {
           tabs = [...document.querySelectorAll('.ant-tabs-tab')];
@@ -267,7 +251,6 @@ struct WebLoginSheet: View {
         }
         if (!tabs.length) return 'no-tab';
 
-        // 2. 切到「验证码登录」
         const target = tabs.find(t => (t.textContent || '').includes('验证码登录'));
         if (!target) return 'no-tab';
         if (!target.classList.contains('ant-tabs-tab-active')) {
@@ -275,7 +258,6 @@ struct WebLoginSheet: View {
           await sleep(1000);
         }
 
-        // 3. 等表单（账号框 + 验证码框）
         let accountBox = null, codeBox = null;
         for (let i = 0; i < 40; i++) {
           const inputs = [...document.querySelectorAll('input')]
@@ -287,7 +269,6 @@ struct WebLoginSheet: View {
         }
         if (!codeBox) return 'no-form';
 
-        // 4. 填账号
         if (accountBox && account) {
           setVal(accountBox, account);
         } else if (!accountBox) {
@@ -295,7 +276,6 @@ struct WebLoginSheet: View {
         }
         await sleep(400);
 
-        // 5. 勾「记住账号」
         [...document.querySelectorAll('label.ant-checkbox-wrapper')].forEach(label => {
           if (/记住/.test(label.textContent || '')) {
             const cb = label.querySelector('input[type=checkbox]');
@@ -303,7 +283,6 @@ struct WebLoginSheet: View {
           }
         });
 
-        // 6. 需要时点「获取验证码」
         if (autoSend === '1') {
           const sendBtn = [...document.querySelectorAll('button')]
             .find(b => (b.textContent || '').includes('获取验证码'));
@@ -313,7 +292,6 @@ struct WebLoginSheet: View {
           return 'sent';
         }
 
-        // 7. 验证码已填 → 一并提交
         if (code) {
           setVal(codeBox, code);
           await sleep(400);

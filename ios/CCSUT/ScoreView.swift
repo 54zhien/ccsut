@@ -1,16 +1,3 @@
-//
-//  ScoreView.swift
-//  CCSUT
-//
-//  成绩单
-//
-//  数据源：GET /admin/ydd/inf/getXscjJson?xnxq=111
-//    · 111 是服务端约定的「全部学期」，一次拿回 61 门跨 5 学期的记录
-//    · 这条接口是移动端成绩页 /admin/ydd/inf/showScore 背后用的
-//    · 不是 /admin/xsd/xsdzgcjcx/xscjdy —— 那条是 PC 端 JSP 报表，
-//      学校的 .rpx 模板缺失，永远报「报表文件不存在」
-//
-
 import SwiftUI
 
 struct ScoreView: View {

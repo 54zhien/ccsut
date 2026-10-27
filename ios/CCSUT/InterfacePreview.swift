@@ -25,7 +25,7 @@ import Foundation
 
 #endif
 
-/// Simulator-only screenshot fixtures. Release builds cannot enable this route.
+/// Synthetic fixtures enabled by a launch argument in DEBUG builds only.
 enum InterfacePreview {
     static var enabled: Bool {
         #if DEBUG

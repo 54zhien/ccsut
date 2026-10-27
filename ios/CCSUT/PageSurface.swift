@@ -2,8 +2,7 @@ import SwiftUI
 import UIKit
 import Observation
 
-/// Content stays on semantic, opaque surfaces; glass is reserved for controls.
-/// HIG Materials/Layout and WWDC25/356, reviewed 2026-10-26.
+/// Shared spacing and opaque content surfaces. Glass is reserved for controls.
 enum AppLayout {
     static let pageInset: CGFloat = 20
     static let cardRadius: CGFloat = 28

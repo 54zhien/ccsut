@@ -1,15 +1,3 @@
-//
-//  ExamView.swift
-//  CCSUT
-//
-//  考试安排
-//
-//  数据源：POST /admin/xsd/kwglXsdKscx/getXsKsxx  { xnxq }
-//  实测 2025-2026-2 有 8 场，含教学楼、教室、座位号、考试批次。
-//
-//  页面结构：即将到来的考试置顶，其余按学期分组倒序。
-//
-
 import SwiftUI
 
 struct ExamView: View {

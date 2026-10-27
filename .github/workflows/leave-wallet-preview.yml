@@ -10,10 +10,6 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - name: Receipt policy
-        run: |
-          swiftc -parse-as-library ios/CCSUT/LeaveTicketReceipt.swift ios/Tests/LeaveTicketReceiptTests.swift -o "$RUNNER_TEMP/receipt-tests"
-          "$RUNNER_TEMP/receipt-tests"
       - name: Build native app
         run: |
           set -o pipefail

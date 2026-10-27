@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A00000000000000000000053 /* VintageAmountDrum.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000053; };
 		A00000000000000000000052 /* MeterAmount.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000052; };
 		A00000000000000000000051 /* TopBarMaterialBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000051; };
 		A00000000000000000000050 /* TopBarBlurProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000050; };
@@ -77,13 +76,9 @@
 900000000000000000000009 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 26.0; PRODUCT_BUNDLE_IDENTIFIER = com.imzhien.ccsut.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = CCSUT; CODE_SIGNING_ALLOWED = NO; }; name = Release; };
 
 		A0000000000000000000001D /* PageSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001D; };
-EE0000000000000000000201 /* LeaveTicketReceipt.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000101; };
-EE0000000000000000000202 /* LeaveTicketWalletView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000102; };
-EE0000000000000000000203 /* LeaveTicketPrinter.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000103; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		B00000000000000000000053 /* VintageAmountDrum.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VintageAmountDrum.swift; sourceTree = "<group>"; };
 		B00000000000000000000052 /* MeterAmount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterAmount.swift; sourceTree = "<group>"; };
 		B00000000000000000000051 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopBarMaterialBackground.swift; sourceTree = "<group>"; };
 		B00000000000000000000050 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopBarBlurProfile.swift; sourceTree = "<group>"; };
@@ -140,9 +135,6 @@ EE0000000000000000000203 /* LeaveTicketPrinter.swift in Sources */ = {isa = PBXB
 		B0000000000000000000001B /* SchedulePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulePresentation.swift; sourceTree = "<group>"; };
 		B0000000000000000000001C /* NagiPageChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NagiPageChrome.swift; sourceTree = "<group>"; };
 		B0000000000000000000001D /* PageSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageSurface.swift; sourceTree = "<group>"; };
-EE0000000000000000000101 /* LeaveTicketReceipt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaveTicketReceipt.swift; sourceTree = "<group>"; };
-EE0000000000000000000102 /* LeaveTicketWalletView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaveTicketWalletView.swift; sourceTree = "<group>"; };
-EE0000000000000000000103 /* LeaveTicketPrinter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaveTicketPrinter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -174,9 +166,6 @@ EE0000000000000000000103 /* LeaveTicketPrinter.swift */ = {isa = PBXFileReferenc
 				000000000000000000CA1004 /* CampusRecordsModel.swift */,
 				000000000000000000CA1005 /* CampusView.swift */,
 				000000000000000000CA1006 /* CampusRecordViews.swift */,
-EE0000000000000000000103 /* LeaveTicketPrinter.swift */,
-EE0000000000000000000102 /* LeaveTicketWalletView.swift */,
-EE0000000000000000000101 /* LeaveTicketReceipt.swift */,
 				000000000000000000CA1007 /* CampusWebView.swift */,
 				000000000000000000CA1008 /* CampusWebPrivacy.swift */,
 				000000000000000000CE1001 /* CampusPresentation.swift */,
@@ -205,7 +194,6 @@ EE0000000000000000000101 /* LeaveTicketReceipt.swift */,
 				B00000000000000000000010 /* ElectiveView.swift */,
 				B00000000000000000000013 /* WebPanel.swift */,
 				B00000000000000000000052 /* MeterAmount.swift */,
-				B00000000000000000000053 /* VintageAmountDrum.swift */,
 				B00000000000000000000014 /* ScoreView.swift */,
 				B00000000000000000000015 /* WebLoginSheet.swift */,
 				B00000000000000000000016 /* CourseDetailSheet.swift */,
@@ -319,9 +307,6 @@ EE0000000000000000000101 /* LeaveTicketReceipt.swift */,
 				000000000000000000CA2004 /* CampusRecordsModel.swift in Sources */,
 				000000000000000000CA2005 /* CampusView.swift in Sources */,
 				000000000000000000CA2006 /* CampusRecordViews.swift in Sources */,
-EE0000000000000000000203 /* LeaveTicketPrinter.swift in Sources */,
-EE0000000000000000000202 /* LeaveTicketWalletView.swift in Sources */,
-EE0000000000000000000201 /* LeaveTicketReceipt.swift in Sources */,
 				000000000000000000CA2007 /* CampusWebView.swift in Sources */,
 				000000000000000000CA2008 /* CampusWebPrivacy.swift in Sources */,
 				000000000000000000CE2001 /* CampusPresentation.swift in Sources */,
@@ -358,7 +343,6 @@ EE0000000000000000000201 /* LeaveTicketReceipt.swift in Sources */,
 				A00000000000000000000010 /* ElectiveView.swift in Sources */,
 				A00000000000000000000012 /* WebPanel.swift in Sources */,
 				A00000000000000000000052 /* MeterAmount.swift in Sources */,
-				A00000000000000000000053 /* VintageAmountDrum.swift in Sources */,
 				A00000000000000000000013 /* ScoreView.swift in Sources */,
 				A00000000000000000000014 /* WebLoginSheet.swift in Sources */,
 				A00000000000000000000015 /* CourseDetailSheet.swift in Sources */,

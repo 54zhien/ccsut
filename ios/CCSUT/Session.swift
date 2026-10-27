@@ -1,17 +1,3 @@
-//
-//  Session.swift
-//  CCSUT
-//
-//  会话层 · 使用 iOS 17+ 的 @Observable 宏（取代 ObservableObject）
-//
-//  职责：
-//    · Cookie 持久化（Keychain）
-//    · 冷启动探测 /admin/ 判断登录态
-//    · 用 TGC（14 天）静默续期
-//
-//  设计：WebView 只负责"登录"这一件脏活，之后所有请求走 URLSession
-//
-
 import Foundation
 import WebKit
 import Observation

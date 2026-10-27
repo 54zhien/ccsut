@@ -1,10 +1,3 @@
-//
-//  Models.swift
-//  CCSUT
-//
-//  数据结构全部按实测响应定义（2026-10-22 抓包）
-//
-
 import Foundation
 
 /// Identity issued by the protected academic entry, independent of elective batches.
@@ -95,7 +88,7 @@ struct StudentIdentity: Equatable, Sendable {
 
 // MARK: - 统一响应壳
 
-/// 所有 /admin/** 接口都返回 {"ret":0,"msg":"success","data":...}
+/// Status/data envelope used by the academic JSON endpoints.
 struct APIEnvelope<T: Decodable>: Decodable {
     let ret: Int
     let msg: String?
@@ -185,13 +178,7 @@ struct TeachingClass: Decodable, Identifiable, Hashable {
     }
 }
 
-/// POST /admin/xsd/xk/listjxbDataV2 的响应
-///
-/// 只声明真正用到的两个字段。
-/// 服务端返回的另外两个字段类型和直觉不符，解析它们会让整个结构解码失败：
-///   "kfrlbfb": "100"                              ← 字符串，不是数字
-///   "condition": { "jxms": ["中文教学"], ... }     ← 值是数组，不是字符串
-/// Decodable 会忽略未声明的键，所以不写它们最省事。
+/// Decode only consumed fields; unrelated server metadata has inconsistent types.
 struct TeachingClassPage: Decodable {
     let mysksjd: [String]?
     let initData: [TeachingClass]?
@@ -199,7 +186,7 @@ struct TeachingClassPage: Decodable {
 
 // MARK: - 课表
 
-/// 从课表 HTML 解析出来的一个格子
+/// One course occurrence in the timetable grid.
 struct ScheduleSlot: Identifiable, Hashable {
     let id = UUID()
     let course: String

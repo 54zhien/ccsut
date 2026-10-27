@@ -1,10 +1,3 @@
-//
-//  CCSUTApp.swift
-//  CCSUT
-//
-//  入口 · TabView 使用 iOS 18 的 Tab 值绑定语法
-//
-
 import SwiftUI
 import WebKit
 
