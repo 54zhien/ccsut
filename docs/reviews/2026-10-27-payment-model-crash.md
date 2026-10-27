@@ -2,9 +2,30 @@
 
 ## 当前结论
 
-尚未定位根因，也没有已验证的业务修复。不能用后续通过的测试宣称原崩溃已修好。
+已复现 SIGSEGV，并定位到 Cookie 异步回调包装丢失主线程隔离。修复后的完整回归和压力验证状态见下方；早期未复现的记录保留作调查过程。
 
 原失败：[Session regression tests 40453171719](https://github.com/54zhien/ccsut/actions/runs/40453171719)，提交 `538a32a`。付款 API 测试通过；付款模型进程收到 SIGSEGV，退出码 139。原测试使用缓冲输出，崩溃前没有模型断言日志，工作流也没有保存原进程崩溃报告。该运行的 artifact 列表为空。
+
+## 根因与修复
+
+[压力验证 40462247666](https://github.com/54zhien/ccsut/actions/runs/40462247666) 的原始程序组在第 85 个进程发生 SIGSEGV。`payment-crash-reports-original` 附件保存了系统崩溃报告和带符号的二进制。报告的异常地址为 `0x8`，故障线程是 `com.apple.root.default-qos.cooperative`：
+
+```text
+WebKit::WebsiteDataStore::isOptInCookiePartitioningEnabled()
+API::HTTPCookieStore::isOptInCookiePartitioningEnabled()
+-[WKHTTPCookieStore getAllCookies:]
+WKHTTPCookieStore.cookieSnapshot() / Session.swift:163
+CookieCallback.wait(timeout:start:) / Session.swift:149–153
+EcardPaymentModel.acceptToken(...) / EcardPaymentModel.swift:226
+```
+
+同时，主线程正在执行 `WKWebView dealloc` 和 `EcardTokenBridge.__ivar_destroyer`。`CookieCallback.wait` 原本是没有 actor 隔离的异步方法，会将回调注册切换到通用并发执行器；上层付款模型的 `@MainActor` 不能跨过这个边界保护 WebKit。Windows 平台替身不会进入 WebKit，因此 200 个对照进程全部通过。
+
+新增 `CookieCallbackExecutorTests.swift`，直接验证从主线程及后台任务调用时，回调注册都必须在主线程执行。[修复前 40462873872](https://github.com/54zhien/ccsut/actions/runs/40462873872) 两项均失败，超时、取消、重复回调检查仍通过，形成不依赖偶发崩溃的回归证据。
+
+修复将 `CookieCallback.wait`、其 `start` 参数及 `WKHTTPCookieStore` 异步包装明确标记为 `@MainActor`。保留原有锁、超时、取消和只能完成一次的机制，不改付款请求或重试策略。
+
+依据：[Apple Cookie API](https://developer.apple.com/documentation/webkit/wkhttpcookiestore/getallcookies(_:))、[Swift SE-0338 的非隔离异步执行器规则](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0338-clarify-execution-non-actor-async.md)。
 
 ## 已做的检查
 
@@ -18,7 +39,7 @@
 
 原失败与 100 次原程序复现使用同一镜像 `macos-26-arm64 20261013.0424.1`，不能将通过归因于镜像升级。原程序的接口响应来自本地 fixture，没有执行真实学校付款。
 
-模型登录测试仍创建真实 WebKit 组件；检查过该入口，但目前没有堆栈或检测器报告能证明它是原因。也没有证据将失败归因于重复付款逻辑。
+上述早期检测均未捕获问题。之后扩大原始程序验证取得了原进程系统堆栈，见上文。付款请求仍使用本地 fixture，没有执行真实学校付款。
 
 ## 补充诊断
 
@@ -28,6 +49,6 @@
 
 ## 发布状态
 
-主分支 `8dc117d` 的会话回归、IPA 构建和校园记录验证均通过，但原崩溃仍未解决，因此尚未满足用户要求的发布条件。旧 Releases 已按要求删除，旧 Git 标签保留。下一版使用 `0.1.0` 标签与版本号，不能覆盖历史 `v0.1.0`。
+修复提交 `89aa3b5` 正在运行完整回归与原付款测试 300 次独立进程验证。修复通过并合并后，仍须等待主分支全部 CI 通过再发布。旧 Releases 已按要求删除，旧 Git 标签保留。下一版使用 `0.1.0` 标签与版本号，不能覆盖历史 `v0.1.0`。
 
 诊断参考：[Apple 内存、线程与崩溃诊断](https://developer.apple.com/documentation/xcode/diagnosing-memory-thread-and-crash-issues-early)。
