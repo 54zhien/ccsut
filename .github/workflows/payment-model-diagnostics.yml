@@ -1,0 +1,28 @@
+name: Payment model crash investigation
+on:
+  workflow_dispatch:
+jobs:
+  investigate:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reproduce original binary without diagnostic timing changes
+        run: |
+          set -e
+          git show 538a32a:ios/Tests/EcardPaymentModelTests.swift > "$RUNNER_TEMP/EcardPaymentModelTests.swift"
+          SOURCES=(ios/CCSUT/Session.swift ios/CCSUT/API.swift ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift
+            ios/CCSUT/EnrolledCourses.swift ios/CCSUT/ElectiveState.swift
+            ios/CCSUT/AcademicAPI.swift ios/CCSUT/AcademicCalendar.swift ios/CCSUT/SchedulePresentation.swift
+            ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift
+            ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift
+            ios/CCSUT/EcardPaymentPersistence.swift ios/CCSUT/EcardPaymentModel.swift)
+          xcrun swiftc -parse-as-library "${SOURCES[@]}" "$RUNNER_TEMP/EcardPaymentModelTests.swift" -o "$RUNNER_TEMP/payment-model"
+          CCSUT_PAYMENT_REPETITIONS=100 python3 ios/Tests/run-payment-model-diagnostics.py "$RUNNER_TEMP/payment-model"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: payment-crash-reports
+          path: ~/Library/Logs/DiagnosticReports/
