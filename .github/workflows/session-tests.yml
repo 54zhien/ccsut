@@ -78,8 +78,8 @@ jobs:
             ios/CCSUT/EcardPaymentPersistence.swift ios/CCSUT/EcardPaymentModel.swift)
           xcrun swiftc -parse-as-library "${SOURCES[@]}" ios/Tests/EcardPaymentAPITests.swift -o "$RUNNER_TEMP/payment-api"
           "$RUNNER_TEMP/payment-api"
-          xcrun swiftc -g -parse-as-library "${SOURCES[@]}" ios/Tests/EcardPaymentModelTests.swift -o "$RUNNER_TEMP/payment-model"
-          CCSUT_PAYMENT_REPETITIONS=10 python3 ios/Tests/run-payment-model-diagnostics.py "$RUNNER_TEMP/payment-model"
+          xcrun swiftc -g -sanitize=address -parse-as-library "${SOURCES[@]}" ios/Tests/EcardPaymentModelTests.swift -o "$RUNNER_TEMP/payment-model"
+          ASAN_OPTIONS=detect_leaks=0 CCSUT_PAYMENT_REPETITIONS=30 python3 ios/Tests/run-payment-model-diagnostics.py "$RUNNER_TEMP/payment-model"
       - name: Preserve native crash reports
         if: failure()
         uses: actions/upload-artifact@v4
