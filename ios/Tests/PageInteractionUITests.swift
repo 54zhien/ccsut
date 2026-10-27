@@ -528,7 +528,7 @@ final class PageInteractionUITests: XCTestCase {
                 let close = app.buttons[isLeave ? "关闭申请请假" : "关闭离校登记"]
                 XCTAssertTrue(close.waitForExistence(timeout: 5))
                 close.tap()
-                XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format:"exists == false"), evaluatedWith:close)], timeout:5), .completed)
+                XCTAssertTrue(close.waitForNonExistence(timeout: 5), "The form must close before checking retained records")
                 XCTAssertTrue(record.waitForExistence(timeout: 5), "Cancelling a form must retain existing records without a manual refresh")
             }
             capture(app, "campus-records-after-form-\(page)")

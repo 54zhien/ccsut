@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="ios/CCSUT/Assets.xcassets/SchoolEmblemCore.imageset/SchoolEmblemCore.svg" width="88" alt="长工院标识">
+  <img src="docs/images/app-icon.png" width="88" alt="长工院 App 图标">
 </p>
 
 <h1 align="center">长工院</h1>

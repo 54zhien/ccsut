@@ -54,3 +54,13 @@ EcardPaymentModel.acceptToken(...) / EcardPaymentModel.swift:226
 合并后仍须等待主分支全部 CI 通过再发布。旧 Releases 已按要求删除，旧 Git 标签保留。下一版使用 `0.1.0` 标签与版本号，不能覆盖历史 `v0.1.0`。CI、模拟器与安装包校验不能代替真机及真实学校付款验收。
 
 诊断参考：[Apple 内存、线程与崩溃诊断](https://developer.apple.com/documentation/xcode/diagnosing-memory-thread-and-crash-issues-early)。
+
+## 合并后的界面测试等待问题
+
+付款修复合并为 `75c62e7` 后，完整会话回归与 IPA 构建通过。[校园界面运行 40463988826](https://github.com/54zhien/ccsut/actions/runs/40463988826) 在等待离校表单关闭按钮消失时超时，失败行是 `PageInteractionUITests.swift:531`。该运行的录屏明确显示表单已关闭，原有离校记录仍在；日志中一次 `exists` 查询及其自动重试超过了外层五秒 predicate waiter 的时间窗口。
+
+将这项等待改为 XCTest 的 `waitForNonExistence(timeout:)`，直接等待元素消失，仍使用五秒限时，并保留后续原记录存在的断言与两次打开/关闭流程。不更改 App 的页面或关闭行为，也不重试失败用例以替换原失败记录。
+
+参考：[Apple waitForNonExistence(timeout:)](https://developer.apple.com/documentation/xcuiautomation/xcuielement/waitfornonexistence(timeout:))。后续主分支必须重新完成三项 CI 才可发布。
+
+README 顶部使用完整 App 图标，来自原生 Icon Composer 导出的 `Default.png`（运行 `40062568546`）。已核对该运行与当前提交的 `AppIcon.icon` 源文件完全一致。
