@@ -145,6 +145,7 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
     debugPrint('[ccsut] 注入 Cookie $n 条');
     // 给 CookieManager 一点时间落盘到 WebView 内核
     await Future.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
     setState(() => _booting = false);
     _startKeepAlive();
   }
@@ -190,14 +191,6 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
       final t = await _web?.getTitle();
       if (t != null && t.isNotEmpty) setState(() => _title = t);
     }
-  }
-
-  Future<bool> _onOverride(String url) async {
-    // 选课/评教等写操作弹确认，避免误触
-    if (RegExp(r'(select|choose|submit|save|delete|drop)', caseSensitive: false).hasMatch(url)) {
-      return true; // 放行，但页面内仍会有二次确认
-    }
-    return false;
   }
 
   // ---------------- UI ----------------
@@ -265,7 +258,6 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
                 databaseEnabled: true,
                 thirdPartyCookiesEnabled: true,
                 sharedCookiesEnabled: true,
-                useShouldOverrideUrlLoading: true,
                 mediaPlaybackRequiresUserGesture: false,
                 userAgent: null, // 用系统默认 UA，教务系统会按 UA 做响应式
               ),
@@ -275,13 +267,6 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
                 if (url == null) return;
                 await _handlePageLoaded(url.toString());
               },
-              shouldOverrideUrlLoading: (_, action) async {
-                final url = action.request.url.toString();
-                await _onOverride(url);
-                return NavigationActionPolicy.ALLOW;
-              },
-              onReceivedServerTrustAuthRequest: (_, challenge) async =>
-                  ServerTrustAuthResponse(action: ServerTrustAuthResponseAction.PROCEED),
             ),
       floatingActionButton: FloatingActionButton.small(
         tooltip: '课表',

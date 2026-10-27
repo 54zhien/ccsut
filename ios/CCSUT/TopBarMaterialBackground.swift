@@ -2,8 +2,7 @@ import SwiftUI
 import UIKit
 
 enum TopBarBlur {
-    /// The native safeAreaBar / soft scroll-edge implementation remains intact.
-    /// No preference screen or change to page interaction is needed to revert.
+    /// Keep the legacy renderer available for comparison tests.
     #if CCSUT_LEGACY_TOP_BLUR
     static let usesLegacy = true
     #else
@@ -105,9 +104,7 @@ final class TopBarMaterialView: UIVisualEffectView {
         isUserInteractionEnabled = false
         isAccessibilityElement = false
         accessibilityElementsHidden = true
-        // A dark system material still adds a luminous gray tint. Apply an
-        // explicit black surface inside the SAME masked effect so the top is
-        // black and the existing lower fade still reveals blurred content.
+        // Mask the black surface with the material to retain the lower fade in dark mode.
         blackTint.backgroundColor = UIColor.black.withAlphaComponent(0.92)
         blackTint.isUserInteractionEnabled = false
         blackTint.isHidden = true

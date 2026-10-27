@@ -1,23 +1,3 @@
-//
-//  LoginView.swift
-//  CCSUT
-//
-//  登录页 · 短信验证码，全程留在 App 内
-//
-//  结构：
-//    登录页底层使用全屏 WKWebView（不可交互），上层用原生界面盖住；
-//    打开网页登录时，先从登录页树中卸载，再把同一个实例挂到 large sheet。
-//    WebView 始终保持正常尺寸和透明度，让 CAS 的 Angular 正常运行。
-//
-//    为什么不能把 WebView 缩成 1×1 或 opacity(0.01)：
-//    WebKit 会判定它不可见并停止导航，表现为永远卡在「加载认证页」。
-//
-//  流程：
-//    输账号 → 点「获取验证码」（后台切页签、填账号、点发送）
-//    → 收短信 → 输验证码 → 点「登录」（后台填码并提交）
-//    → 落到教务系统 → 接管 Cookie → 进主界面
-//
-
 import SwiftUI
 import WebKit
 
@@ -510,7 +490,6 @@ struct LoginView: View {
           .filter(el => previous.get(el) !== (el.textContent || '').trim())
           .map(el => (el.textContent || '').trim());
 
-        // 1. 等页签
         let tabs = [];
         for (let i = 0; i < 50; i++) {
           if (reachedAcademicPage()) return 'authenticated';
@@ -520,7 +499,6 @@ struct LoginView: View {
         }
         if (!tabs.length) return 'no-tab';
 
-        // 2. 切到「验证码登录」
         const target = tabs.find(t => (t.textContent || '').includes('验证码登录'));
         if (!target) return 'no-tab';
         if (!target.classList.contains('ant-tabs-tab-active')) {
@@ -528,7 +506,6 @@ struct LoginView: View {
           await sleep(1000);
         }
 
-        // 3. 等表单
         let accountBox = null, codeBox = null;
         for (let i = 0; i < 40; i++) {
           if (reachedAcademicPage()) return 'authenticated';
@@ -542,11 +519,9 @@ struct LoginView: View {
         if (!codeBox) return 'no-form';
         if (!accountBox) return 'no-account';
 
-        // 4. 填账号
         if (account) setVal(accountBox, account);
         await sleep(300);
 
-        // 5. 勾「记住账号」
         [...document.querySelectorAll('label.ant-checkbox-wrapper')].forEach(label => {
           if (/记住/.test(label.textContent || '')) {
             const cb = label.querySelector('input[type=checkbox]');
@@ -554,7 +529,6 @@ struct LoginView: View {
           }
         });
 
-        // 6. 按动作执行
         if (action === 'prepare') return 'ready';
 
         if (action === 'send') {

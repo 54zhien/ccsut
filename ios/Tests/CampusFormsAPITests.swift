@@ -266,6 +266,88 @@ actor ExpiredFormTransport: CampusTransport {
         }
         do { _ = try await CampusClient(account:"fixture-account",credentials:FormCredentials(),transport:paddedScope).loadForm(.leave); check(false,"noncanonical reviewer scope never broadens eligibility") }
         catch { check(error as? CampusFormError == .invalidResponse,"noncanonical reviewer scope never broadens eligibility") }
+
+        let recordSlot = FormRecordSlot()
+        let paginatedRecords = FormTransport { req, count in
+            guard req.url!.path.hasSuffix("/leaveApply/queryListForPage") else { return nil }
+            let body = try JSONSerialization.jsonObject(with:req.httpBody!) as! [String:Any]
+            let page = (body["pageNum"] as! NSNumber).intValue
+            if count <= 2 || page == 1 {
+                let start = (page - 1) * 100
+                let rowCount = page == 1 ? 100 : 1
+                let rows = (0..<rowCount).map { ["id":"baseline-\(start + $0)"] }
+                return (200, String(data:try JSONSerialization.data(withJSONObject:["data":["list":rows,"hasNextPage":page == 1,"pageNum":page,"pageSize":100,"total":101]]),encoding:.utf8)!)
+            }
+            return (200, String(data:try JSONSerialization.data(withJSONObject:["data":["list":[recordSlot.value() as Any],"hasNextPage":false,"pageNum":page,"pageSize":100,"total":101]]),encoding:.utf8)!)
+        }
+        let paginatedAPI = CampusClient(account:"fixture-account", credentials:FormCredentials(), transport:paginatedRecords)
+        let paginatedConfig = try await paginatedAPI.loadForm(.leave)
+        check(paginatedConfig.baselineRecordIDs.count == 101,
+              "form baseline includes records after the first 100")
+        let paginatedApprovers = try await paginatedAPI.approvers(type:"sick", days:0.5)
+        var paginatedDraft = CampusFormDraft(begin:Date(), end:Date().addingTimeInterval(3600))
+        paginatedDraft.typeID = "sick"; paginatedDraft.contactPhone = "18000000001"
+        paginatedDraft.reason = "later-page match"; paginatedDraft.approverID = "teacher"; paginatedDraft.leaving = false
+        let paginatedSubmission = try paginatedDraft.snapshot(configuration:paginatedConfig, approvers:paginatedApprovers)
+        var matchingRecord = try paginatedSubmission.payload(uploaded:[])
+        matchingRecord["id"] = "new-later-page"
+        matchingRecord["applyTime"] = CampusSubmission.date(Date())
+        recordSlot.set(try JSONSerialization.data(withJSONObject:matchingRecord))
+        check(try await paginatedAPI.reconcile(paginatedSubmission),
+              "read-only reconciliation finds a unique match after the first 100 records")
+        let queriedPages = await paginatedRecords.requests.filter { $0.url!.path.hasSuffix("/leaveApply/queryListForPage") }.compactMap { request -> Int? in
+            guard let data = request.httpBody,
+                  let object = try? JSONSerialization.jsonObject(with:data) as? [String:Any],
+                  let page = object["pageNum"] as? Int else { return nil }
+            return page
+        }
+        check(queriedPages == [1,2,1,2], "record baseline and reconciliation follow bounded page order")
+
+        matchingRecord["id"] = "baseline-0"
+        recordSlot.set(try JSONSerialization.data(withJSONObject:matchingRecord))
+        check(!(try await paginatedAPI.reconcile(paginatedSubmission)),
+              "matching fields on a pre-existing baseline record cannot confirm the attempt")
+
+        var attachedDraft = paginatedDraft
+        attachedDraft.attachments = [.init(name:"proof.png", mime:"image/png", data:Data([1,2,3]), isImage:true)]
+        let attachedSubmission = try attachedDraft.snapshot(configuration:paginatedConfig, approvers:paginatedApprovers)
+        let attachedRecovery = CampusFormRecoveryDescriptor(submission:attachedSubmission)
+        let beforeAttachmentCheck = await paginatedRecords.requests.count
+        let attachmentMatch = try await paginatedAPI.reconcile(attachedRecovery)
+        let afterAttachmentCheck = await paginatedRecords.requests.count
+        check(attachedRecovery.hasAttachments && attachedRecovery.expectedFingerprint == nil &&
+              !attachmentMatch && beforeAttachmentCheck == afterAttachmentCheck,
+              "recovery metadata omits attachment bytes and refuses an unprovable read-only match")
+        var changedDraft = paginatedDraft
+        changedDraft.reason = "different private reason"
+        let changedSubmission = try changedDraft.snapshot(configuration:paginatedConfig, approvers:paginatedApprovers)
+        check(CampusFormRecoveryDescriptor(submission:changedSubmission).expectedFingerprint !=
+              CampusFormRecoveryDescriptor(submission:paginatedSubmission).expectedFingerprint,
+              "in-memory recovery fingerprint binds form fields without retaining their text")
+
+        let unboundedRecords = FormTransport { req, _ in
+            guard req.url!.path.hasSuffix("/leaveApply/queryListForPage") else { return nil }
+            let rows = (0..<100).map { ["id":"record-\($0)"] }
+            return (200, String(data:try JSONSerialization.data(withJSONObject:["data":["list":rows,"hasNextPage":true,"pageSize":100,"total":10000]]),encoding:.utf8)!)
+        }
+        do {
+            _ = try await CampusClient(account:"fixture-account", credentials:FormCredentials(), transport:unboundedRecords).loadForm(.leave)
+            check(false, "record pagination stops at its configured page bound")
+        } catch {
+            let calls = await unboundedRecords.requests.filter { $0.url!.path.hasSuffix("/leaveApply/queryListForPage") }.count
+            check(error as? CampusFormError == .invalidResponse && calls == 50,
+                  "record pagination stops at its configured page bound")
+        }
         if failures > 0 { exit(1) }
+    }
+}
+
+final class FormRecordSlot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Data?
+    func set(_ data: Data) { lock.lock(); defer { lock.unlock() }; stored = data }
+    func value() throws -> [String:Any] {
+        lock.lock(); defer { lock.unlock() }
+        return try JSONSerialization.jsonObject(with:stored!) as! [String:Any]
     }
 }

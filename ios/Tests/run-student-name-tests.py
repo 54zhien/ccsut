@@ -20,6 +20,8 @@ harness = r'''
 import Foundation
 struct FakeCookie: Sendable { let name: String; let domain: String }
 enum CookieJar {
+    enum PersistenceState { case persisted, failed(Error) }
+    static var persistenceState: PersistenceState { .persisted }
     nonisolated(unsafe) static var generation: UInt64 = 1
     nonisolated(unsafe) static var shared = [FakeCookie(name: "jw_uf", domain: "tls.ccsut.cn")]
     static func isSchoolCookie(_ cookie: FakeCookie) -> Bool { true }

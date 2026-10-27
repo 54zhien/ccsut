@@ -1,15 +1,3 @@
-//
-//  ExamView.swift
-//  CCSUT
-//
-//  考试安排
-//
-//  数据源：POST /admin/xsd/kwglXsdKscx/getXsKsxx  { xnxq }
-//  实测 2025-2026-2 有 8 场，含教学楼、教室、座位号、考试批次。
-//
-//  页面结构：即将到来的考试置顶，其余按学期分组倒序。
-//
-
 import SwiftUI
 
 struct ExamView: View {
@@ -252,14 +240,7 @@ struct ExamView: View {
     }
 
     private func dateText(_ exam: ExamItem) -> String {
-        guard let date = exam.startDate else { return nonempty(exam.ksrq) ?? "—" }
-        let style = Date.FormatStyle.dateTime
-            .year()
-            .month(.defaultDigits)
-            .day()
-            .weekday(.wide)
-            .locale(Locale(identifier: "zh_CN"))
-        return date.formatted(style)
+        exam.schoolDateText ?? nonempty(exam.ksrq) ?? "—"
     }
 
     private func locationText(_ exam: ExamItem) -> String {
@@ -419,17 +400,11 @@ private struct ExamRow: View {
     }
 
     private var visibleDateText: String {
-        guard let d = exam.startDate else {
+        guard let text = exam.schoolDateText else {
             let raw = exam.ksrq?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return raw.isEmpty ? "—" : raw
         }
-        let format = Date.FormatStyle.dateTime
-            .year()
-            .month(.defaultDigits)
-            .day()
-            .weekday(.wide)
-            .locale(Locale(identifier: "zh_CN"))
-        return d.formatted(format)
+        return text
     }
 
     private func shortDateLabel(_ date: Date) -> String {

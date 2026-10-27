@@ -15,6 +15,7 @@ final class CampusRecordsModel {
     private let generation: UInt64
     private var revision: UInt64 = 0
     @ObservationIgnored private var leaveTask: Task<CampusLeavePage, Error>?
+    @ObservationIgnored private var leaveRequestIsRefresh = false
     @ObservationIgnored private var travelTasks: [CampusTravelKind: Task<[CampusTravelRecord], Error>] = [:]
     @ObservationIgnored private var leaveCompletion: ReadCompletion?
     @ObservationIgnored private var travelCompletions: [CampusTravelKind: ReadCompletion] = [:]
@@ -27,10 +28,19 @@ final class CampusRecordsModel {
 
     func loadLeave(reset: Bool) async {
         guard verifyAccount() else { return }
-        if let leaveCompletion { await leaveCompletion.wait(); return }
+        if let leaveCompletion {
+            let refreshAfterJoin = reset && !leaveRequestIsRefresh
+            let joinedRevision = revision
+            await leaveCompletion.wait()
+            if refreshAfterJoin, revision == joinedRevision, verifyAccount(), !Task.isCancelled {
+                await loadLeave(reset: true)
+            }
+            return
+        }
         guard reset || leave.hasMore else { return }
         let completion = ReadCompletion()
         leaveCompletion = completion
+        leaveRequestIsRefresh = reset
         let requestRevision = revision
         let page = reset ? 1 : leave.page + 1
         let api = api
@@ -39,7 +49,9 @@ final class CampusRecordsModel {
         let task = Task { try await api.leaveRecords(page: page, size: 20) }
         leaveTask = task
         defer {
-            if revision == requestRevision { isLoadingLeave = false; leaveTask = nil; leaveCompletion = nil }
+            if revision == requestRevision {
+                isLoadingLeave = false; leaveTask = nil; leaveCompletion = nil; leaveRequestIsRefresh = false
+            }
             completion.finish()
         }
         do {
@@ -82,6 +94,7 @@ final class CampusRecordsModel {
         revision &+= 1
         leaveTask?.cancel()
         leaveTask = nil
+        leaveRequestIsRefresh = false
         for task in travelTasks.values { task.cancel() }
         travelTasks.removeAll()
         isLoadingLeave = false

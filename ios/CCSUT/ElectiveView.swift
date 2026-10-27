@@ -1,13 +1,3 @@
-//
-//  ElectiveView.swift
-//  CCSUT
-//
-//  选课 · 教学班浏览
-//
-//  数据来源：/admin/xsd/xk/listjxbDataV2（JSON，实测 71 KB）
-//  展示教学班并通过官方接口执行选课/退课；写操作只使用已验证的完整快照。
-//
-
 import SwiftUI
 
 struct ElectiveView: View {
@@ -644,8 +634,7 @@ struct ElectiveView: View {
         do {
             let initData = try await APIClient.shared.electiveInit()
             guard !handleCookieGenerationChange(expected: generation), !Task.isCancelled else { return }
-            // pcencs 里可能有多个选课批次（实测有 2 个：网络课 63 门 + 面授课 75 门）
-            // 必须逐个拉、合并去重；只取第一个会漏掉一大半
+            // Fetch every advertised batch before publishing a complete catalog.
             var builder = ElectiveSnapshotBuilder<TeachingClass>()
             var batchError: Error?
             if let batches = initData.pcencs, !batches.isEmpty {

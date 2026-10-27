@@ -174,6 +174,82 @@ struct CampusFormDraft: Sendable, Equatable {
     }
 }
 
+struct CampusFormRecoveryDescriptor: Sendable, Equatable {
+    struct DateExpectation: Sendable, Equatable {
+        let field: String
+        let value: Date?
+    }
+
+    let id: UUID
+    let createdAt: Date
+    let kind: CampusFormKind
+    let account: String
+    let generation: UInt64
+    let expectedFingerprint: Int?
+    let baselineRecordFingerprints: Set<Int>
+    let hasAttachments: Bool
+    let duration: Double?
+    let dateExpectations: [DateExpectation]
+
+    init(submission: CampusSubmission) {
+        let configuration = submission.configuration, draft = submission.draft
+        id = submission.id; createdAt = submission.createdAt; kind = submission.kind
+        account = configuration.account; generation = configuration.generation
+        hasAttachments = !draft.attachments.isEmpty
+        baselineRecordFingerprints = Set(configuration.baselineRecordIDs.map(CampusFormRecoveryFingerprint.recordID))
+        if hasAttachments {
+            expectedFingerprint = nil
+        } else if let payload = try? submission.payload(uploaded: []) {
+            expectedFingerprint = CampusFormRecoveryFingerprint.form(kind: submission.kind, values: payload)
+        } else {
+            expectedFingerprint = nil
+        }
+        duration = submission.kind == .leave ? draft.duration : nil
+        switch submission.kind {
+        case .leave:
+            dateExpectations = [
+                .init(field: "beginTime", value: draft.begin),
+                .init(field: "endTime", value: draft.end),
+                .init(field: "leaveTime", value: configuration.canLeaveSchool && draft.leaving == true && configuration.needsLeaveTime
+                      ? draft.actualLeaveTime : nil)
+            ]
+        case .departure:
+            dateExpectations = [
+                .init(field: "startDate", value: draft.leaving == true ? draft.begin : nil),
+                .init(field: "endDate", value: draft.leaving == true ? draft.end : nil)
+            ]
+        }
+    }
+}
+
+enum CampusFormRecoveryFingerprint {
+    private static func stringFields(_ kind: CampusFormKind) -> [String] {
+        kind == .leave
+            ? ["leaveType", "reason", "linkmanPhone", "approver", "roleId", "leaveSchool", "address", "qxlx", "qxmx"]
+            : ["type", "isLeave", "phone", "jzPhone", "reason", "jtgj", "tjcs", "xxdz", "txdz"]
+    }
+
+    static func form(kind: CampusFormKind, values: [String: Any]) -> Int? {
+        var hasher = Hasher()
+        for field in stringFields(kind) {
+            guard let value = values[field] else { return nil }
+            let normalized: String
+            if value is NSNull { normalized = "" }
+            else if let string = value as? String { normalized = string }
+            else { return nil }
+            field.hash(into: &hasher)
+            normalized.hash(into: &hasher)
+        }
+        return hasher.finalize()
+    }
+
+    static func recordID(_ value: String) -> Int {
+        var hasher = Hasher()
+        value.hash(into: &hasher)
+        return hasher.finalize()
+    }
+}
+
 struct CampusSubmission: Identifiable, Sendable, Equatable {
     let id = UUID()
     let createdAt = Date()

@@ -1,167 +1,72 @@
-# 长工教务 · iOS
+# iOS 开发指南
 
-长沙工业学院教务系统的原生 iOS 客户端。
-SwiftUI + Swift 6 + iOS 26。
+用户功能与安装方式见[项目首页](../README.md)。此目录包含当前的 SwiftUI 客户端及其测试。
 
----
+当前应用代码在 `ios/`，构建工作流在 `.github/workflows/`。`shell/`、`tools/` 和根目录 `_*.mjs` 是历史实验，不是 iOS 构建依赖；其中一些脚本调用真实选退课接口，不应直接用作自动化测试。
 
-## 功能
+## 工程与环境
 
-「校园」页提供请假记录、节假日离返校记录与电表缴费入口。请假和离返校通过已有 CAS/TGC 查询，进入子系统前验证会话；读取遇到 401 或明确的官方登录跳转时，先通过 CAS 重建会话，再验证身份并重试读取一次。请假申请与节假日离校/留校登记使用原生表单，按学校配置处理类型、审批人、必填附件和定位，核对摘要后由用户确认提交；返校登记仍使用官方页面。电表缴费复用现有 `EcardPaymentView`，保留确认和订单处理。一卡通余额与流水暂未接入。
+- 工程：`CCSUT.xcodeproj`，scheme：`CCSUT`。
+- 最低系统：iOS 26.0；CI 使用 `macos-26` 和已安装的 Xcode。
+- 工程的 Swift language mode 为 **5.0**；部分独立测试明确以 Swift 6 模式编译。
+- 工程文件手动维护。增删源文件时，需要同步检查 `.pbxproj` 与独立测试工作流的源文件列表。
 
-新增校园记录只保存在内存，手机号、身份证号、银行卡号不进入展示模型，自由文本号码脱敏；错误不包含服务器响应正文。真实会话和抓包文件不得用作仓库 fixture。
-
-ehall 业务查询还需要 `validate_full.data.access_token`，以 `Authorization: Bearer …` 传递；单独带 Cookie 会返回 401。令牌仅保存在当前账号代数对应的内存客户端中，401 后重新验证并换用新令牌，CAS 跳转与验证请求不携带该令牌。官方 WebView 失败提示仅显示固定类别与数字错误码，不显示原始错误、完整 URL 或票据。
-
-`validate_full` 成功不代表它返回的令牌仍被业务服务接受。业务读取拒绝令牌后，强制恢复会进入 CAS，而不是反复校验并重发同一令牌。电费初始数据及房间选择读取遇到认证拒绝时，也会清除旧令牌并自动启动一次已有的后台 SSO；失败后保留手动重试入口，不循环认证。申请、上传和付款均不因本次读取恢复而自动重发；需要验证码等真实交互时仍由官方认证页面处理。
-
-原生提交使用单独的单次发送路径，不自动重试或跟随重定向；结果未知时先查询新记录。表单、电话、定位及附件只在内存中持有，退出页面或换号后清除。号码输入及辅助功能显示也遮蔽，原始值只用于用户确认的请求。`CampusAreas.json` 是从官方公开前端包提取的地区树，内含来源和包摘要，与个人抓包无关。DEBUG 表单预览与自动化使用合成接口，不访问学校写接口；构建与模拟验证不能替代用户真实申请的验收。
-
-| 模块 | 数据源 | 实测规模 |
-|---|---|---|
-| 课表 | `POST /admin/xsd/pkgl/xskb/sdpkkbList` | 98 条 / 10 门课 / 4 大节 × 7 天 |
-| 成绩 | `GET /admin/ydd/inf/getXscjJson?xnxq=111` | 61 门 / 5 个学期 |
-| 选课 | `POST /admin/xsd/xk/listjxbDataV2` | 138 门（63 网课 + 75 面授） |
-| 会话 | `TGC` 14 天 | 冷启动免登录，到期静默续期 |
-
-登录全部走 WebView 代理，不重写任何加密逻辑。
-
----
-
-## 认证体系
-
-### 域名拓扑
-
-```
-auth.ccsut.cn   CAS 统一身份认证（Spring Boot + Angular）
-tls.ccsut.cn    教务系统（超星综合教学管理系统 v3）
-ehall.ccsut.cn  智慧校园门户（Pitcher 3.0，只做导航）
-```
-
-### CAS 的三个页签
-
-页签 class 是 `.ant-tabs-tab`（Angular + Ant Design）：
-
-| 页签 | 字段 | 说明 |
-|---|---|---|
-| 扫码登录 | 二维码 | 不需要验证码，最快 |
-| 密码登录 | 学号 + 密码 + 短信验证码 | 密码是独立的一套 |
-| **验证码登录** | 工号/学号/手机号 + 短信验证码 | **本 App 用这条，不需要密码** |
-
-验证码是**短信验证码**（DOM 里没有 captcha 图片，只有「获取验证码」按钮）。
-服务端先校验验证码，空的直接拒，密码根本不检查。
-
-### Cookie 生命周期
-
-| Cookie | 域 | 有效期 | 作用 |
-|---|---|---|---|
-| `TGC` | auth.ccsut.cn | **14 天** | CAS 票据，静默续期的关键 |
-| `jw_uf` | tls.ccsut.cn | 4 小时 | **教务接口唯一必需的凭证** |
-| `username` / `puid` | tls.ccsut.cn | 14 天 | 身份标识 |
-| `JSESSIONID` | tls.ccsut.cn | 会话级 | 可有可无 |
-
-**实测结论**：把 14 条 Cookie 逐个删掉做隔离测试，只有去掉 `jw_uf` 会失败，其余全部能拿到数据。
-
----
-
-## 关键接口
-
-### 课表
-
-```
-GET  /admin/xsd/pkgl/xskb/queryKbForXsd?xnxq=2026-2027-1   ← 只用来取隐藏字段 xhid
-POST /admin/xsd/pkgl/xskb/sdpkkbList?xnxq=...&xhid=...      ← 真数据
-```
-
-`queryKbForXsd` 返回的 HTML 里 `<td>` 全是空的，数据是页面加载后 AJAX 拉的。
-别解析 HTML，直接调 `sdpkkbList`。
-
-字段里都包着 `<a href="javascript:...">`，要剥。`djc` 是 1-8（小节），压缩成 4 大节：`(djc + 1) / 2`。
-
-### 成绩
-
-```
-GET /admin/ydd/inf/getXscjJson?xnxq=111
-```
-
-`xnxq=111` 是服务端约定的「全部学期」，一次拿回所有成绩。
-
-**不要走 `/admin/xsd/xsdzgcjcx/xscjdy`** —— 那是 PC 端的 JSP 报表，学校缺 `.rpx` 模板文件，永远报「报表文件不存在」。`ydd` 这个模块（超星「云督导」）才是移动端用的 JSON 接口。
-
-### 选课
-
-```
-POST /admin/xsd/xk/listV2              ← 拿 pcencs（可能有多批）
-POST /admin/xsd/xk/listjxbDataV2       ← 拿具体课程
-```
-
-`pcencs` 是 `{pcid: pcenc}`，**可能有多批**（实测 2 批：线上 63 门 + 线下 75 门），必须遍历合并，只取第一个会漏一大半。
-
-`status == "1"` 表示已选。
-
----
-
-## 踩过的坑
-
-按发现顺序，都是实测踩出来的：
-
-**1. WebView 不可见会停止渲染**
-把 `WKWebView` 缩成 1×1 或 `opacity(0.01)`，WebKit 会判定不可见并停止导航，表现为永远卡在「加载认证页」。
-正确做法是全屏渲染 + 用不透明的原生层遮住。
-
-**2. CAS 登录页的 URL 里含 `tls.ccsut.cn`**
-```swift
-// 错：CAS 页的 service 参数里就含这个域名，会把登录页误判成已登录
-absolute.contains("tls.ccsut.cn")
-// 对：按 host 精确匹配
-url.host == "tls.ccsut.cn"
-```
-
-**3. 响应结构的字段类型和直觉不符**
-```swift
-let kfrlbfb: Int?                            // 实际是字符串 "100"
-let jxms: String?                            // 实际是数组 ["中文教学"]
-```
-任一不符整个结构解码失败，而 `if let env = try? JSONDecoder()...` 会**吞掉错误**，既不报警也不显示失败，只是给你一个空列表。
-用不到就别声明，`Decodable` 会忽略未声明的键。
-
-**4. `httpShouldSetCookies` 会覆盖手写的 Cookie header**
-`URLSessionConfiguration.httpShouldSetCookies = true` 时，`URLSession` 用 `HTTPCookieStorage` 里的 Cookie 替换你手写的 `Cookie` 头。
-
-**5. `adoptCookies` 的轮询结束条件**
-不能以「拿到任意一条 Cookie」为结束 —— 打开 CAS 页瞬间就有 `JSESSIONID`，这时还没登录。要等 `jw_uf` / `puid` / `username` 出现。
-
-**6. Angular 渲染延迟**
-`didFinish` 时 DOM 往往还是空的，`querySelectorAll('.ant-tabs-tab')` 得到空数组。必须轮询等页签出现。
-
----
-
-## 构建
-
-GitHub Actions + `macos-26` runner，Xcode 26。
+从仓库根目录执行模拟器编译：
 
 ```bash
-git push origin main      # 自动构建
+xcodebuild -project ios/CCSUT.xcodeproj -scheme CCSUT \
+  -configuration Debug -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO build
 ```
 
-产物是**未签名 IPA**，用 SideStore / Sideloadly 自签安装。
+真机调试需要配置自己的开发者签名。CI 的 Release 打包流程见 [`ios.yml`](../.github/workflows/ios.yml)，产物为未签名 IPA。
 
-部署目标 **iOS 26.0**（用了 `glassEffect`、`tabBarMinimizeBehavior`）。
+## 模块边界
 
----
+| 模块 | 主要文件 | 职责 |
+| --- | --- | --- |
+| 会话 | `Session.swift`、`WebSessionCookies.swift` | Cookie、Keychain、账号代数与 WebKit 同步 |
+| 教务传输与模型 | `API.swift`、`AcademicAPI.swift`、`Models.swift` | 请求、响应校验、课程／成绩／考试数据 |
+| 课表 | `AcademicCalendar.swift`、`SchedulePresentation.swift`、`ScheduleView.swift` | 周次、课表转换与展示 |
+| 选课 | `ElectiveState.swift`、`EnrolledCourses.swift`、`ElectiveView.swift` | 批次、列表、选退课及结果状态 |
+| 校园记录 | `CampusAPI.swift`、`CampusRecordsModel.swift` | 智慧校园认证及分页读取 |
+| 校园表单 | `CampusFormsAPI.swift`、`CampusFormModel.swift`、`CampusFormRules.swift` | 配置、字段校验、确认与提交结果核对 |
+| 智慧校园：电表缴费 | `EcardSSOClient.swift`、`EcardAPI.swift`、`EcardPaymentModel.swift`、`EcardPaymentPersistence.swift` | 一卡通认证、房间、电表、订单及未决付款恢复 |
+| 共享界面 | `PageSurface.swift`、`NavigationBridge.swift` 等 | 页面表面、原生导航与交互适配 |
 
-## 目录
+教务与智慧校园各业务使用的认证协议不同，包括智慧校园内的电表缴费模块。业务读取的恢复和写入的提交策略也不同，不能把通用重试逻辑直接套在申请、上传或付款上。
 
+## 需要保留的约束
+
+- 异步请求绑定账号代数，换号后不能把旧请求的数据写回当前页面。
+- Cookie 按目标域、路径和安全属性匹配；认证跳转不能把业务 Bearer token 带到其他服务。
+- 写入超时不能按普通读取重试。电费在扣款前保存待核对订单，遇到未知结果优先查单。
+- 校园表单和附件使用内存状态；日志与错误提示不得输出原始个人数据或认证响应。
+- DEBUG 预览使用合成数据。模拟器测试不能连接学校生产写接口。
+
+这些是维护约束，不代表所有边界已覆盖；当前已知缺口见[项目审查记录](../docs/reviews/2026-10-27-project-review.md)。
+
+## 测试
+
+跨平台的脚本与仓库隐私检查（Node.js）：
+
+```bash
+node --test ios/Tests/repository-privacy.test.mjs \
+  ios/Tests/login-script.test.mjs ios/Tests/cas-script.test.mjs \
+  ios/Tests/campus-web-privacy.test.mjs
 ```
-ios/CCSUT/
-├── CCSUTApp.swift      入口 / RootView / TabView / 我的页
-├── Session.swift       会话：Keychain / CookieJar / TGC 续期
-├── API.swift           网络层
-├── Models.swift        数据模型
-├── LoginView.swift     登录页（原生 UI + 后台 WebView）
-├── ScheduleView.swift  课表（4 大节 × 7 天 + 周次胶囊）
-├── ScoreView.swift     成绩单（按学期分组 + GPA）
-├── ElectiveView.swift  选课（138 门 + 已选筛选）
-├── WebPanel.swift      WKWebView 容器 + JS 执行
-└── WebLoginSheet.swift 底部弹窗登录（备用）
+
+电费离线回归（Python 3、Swift 编译器）：
+
+```bash
+python3 ios/Tests/run-ecard-tests.py
 ```
+
+Windows runner 对不可用的平台接口使用测试替身，不能替代 macOS 上真实 WebKit／Security 框架的验证。完整会话、教务、校园表单和付款测试命令维护在 [`session-tests.yml`](../.github/workflows/session-tests.yml)。
+
+模拟器界面测试位于 `CCSUTUITests/`，对应工作流位于 `.github/workflows/`。运行时应记录提交 SHA、测试范围及截图来源，分别报告：离线逻辑与源码检查、Xcode 编译、模拟器交互与外观、真机及真实学校业务验收。
+
+## 改动界面前
+
+遵循仓库的 [`AGENTS.md`](../AGENTS.md)：查询相关 Apple 官方 API 文档，优先使用适用的系统控件和 Liquid Glass 样式，保留已确认的布局与动效。解释平台限制、竞态和业务约束的注释应保留；文件名复述、过期实测数字和逐行翻译代码的注释应删除。

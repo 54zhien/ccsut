@@ -114,7 +114,6 @@ final class EcardPaymentModel {
         loadingText == nil && !isStarting && !isSubmitting && !isChecking && receipt == nil &&
         recoveryError == nil && boundGeneration == currentGeneration()
     }
-    var quickAmounts: [Decimal] { fee?.quickAmounts.filter { $0 >= 10 && $0 <= (fee?.maxAmount ?? 0) } ?? [] }
 
     func start(account: String?, force: Bool = false) {
         guard let account, !account.isEmpty else {
@@ -478,6 +477,7 @@ final class EcardPaymentModel {
         }
         do {
             let outcome = try await client.rechargeElectricity(amount: confirmed.amount, context: confirmed.context,
+                expectedRoom: confirmed.roomValue,
                 beforePayment: { [self] orderID in
                     guard submissionID == operation, revision == current, self.account == account,
                           currentGeneration() == generation, !Task.isCancelled else { throw EcardError.canceled }

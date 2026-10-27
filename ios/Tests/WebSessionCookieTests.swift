@@ -6,12 +6,15 @@ import FoundationNetworking
 @MainActor private final class CookieStoreProbe {
     var cookies: [HTTPCookie] = []
     var writes = 0
+    var deletes = 0
     var reads = 0
     var writeFailures = 0
+    var deleteFailures = 0
     var readFailures = 0
     var dropWrites = false
     var current = true
     var afterWrite: (() -> Void)?
+    var afterDelete: (() -> Void)?
 
     private func identity(_ cookie: HTTPCookie) -> String {
         let domain = cookie.domain.lowercased()
@@ -33,6 +36,12 @@ import FoundationNetworking
         }
         afterWrite?()
     }
+    func delete(_ cookie: HTTPCookie) throws {
+        deletes += 1
+        if deleteFailures > 0 { deleteFailures -= 1; throw URLError(.timedOut) }
+        cookies.removeAll { identity($0) == identity(cookie) }
+        afterDelete?()
+    }
 }
 
 @main struct WebSessionCookieTests {
@@ -53,7 +62,8 @@ import FoundationNetworking
         func restore(_ cookies: [HTTPCookie], _ store: CookieStoreProbe,
                      _ policy: WebSessionCookies.Policy = .replaceExisting) async throws {
             try await WebSessionCookies.restore(cookies, policy: policy,
-                read: { try store.read() }, write: { try store.write($0) }, isCurrent: { store.current })
+                read: { try store.read() }, write: { try store.write($0) }, delete: { try store.delete($0) },
+                isCurrent: { store.current })
         }
 
         let sessionCookie = cookie()
@@ -91,6 +101,32 @@ import FoundationNetworking
 
         try await restore([sessionCookie], newer)
         check(newer.cookies.first(where: { $0.name == "TGC" })?.value == "fixture", "bootstrap replaces stale WebKit credentials")
+
+        let revoked = CookieStoreProbe()
+        let unrelated = cookie("analytics", value: "keep", domain: "analytics.example.org")
+        revoked.cookies = [cookie("jw_uf", value: "revoked", domain: "tls.ccsut.cn"), unrelated]
+        try await restore([sessionCookie], revoked)
+        check(!revoked.cookies.contains(where: { $0.name == "jw_uf" }),
+              "replaceExisting removes a school cookie absent from the native jar")
+        check(revoked.cookies.contains(where: { $0.name == "analytics" && $0.value == "keep" }),
+              "replaceExisting leaves cookies outside the school domain untouched")
+
+        let retryDelete = CookieStoreProbe(); retryDelete.cookies = [cookie("jw_uf", value: "revoked")]
+        retryDelete.deleteFailures = 1
+        try await restore([sessionCookie], retryDelete)
+        check(retryDelete.deletes == 2 && !retryDelete.cookies.contains(where: { $0.name == "jw_uf" }),
+              "failed stale-cookie deletion is retried and verified")
+
+        let switchedDuringDelete = CookieStoreProbe()
+        switchedDuringDelete.cookies = [cookie("jw_uf", value: "old"), cookie("puid", value: "old")]
+        switchedDuringDelete.afterDelete = { switchedDuringDelete.current = false }
+        do {
+            try await restore([sessionCookie], switchedDuringDelete)
+            check(false, "account switch during stale-cookie deletion must cancel")
+        } catch {
+            check(error is CancellationError && switchedDuringDelete.deletes == 1 && switchedDuringDelete.writes == 0,
+                  "generation change during deletion stops later cookie mutations")
+        }
 
         let expired = CookieStoreProbe(); expired.cookies = [cookie(value: "expired", expires: Date(timeIntervalSinceNow: -60))]
         try await restore([sessionCookie], expired, .fillMissing)

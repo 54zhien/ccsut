@@ -15,26 +15,23 @@
  */
 
 import fs from "node:fs/promises";
+import { sessionRequest } from "./session-request.mjs";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- 会话 ----------
 
-let COOKIE = "";
+let state;
 try {
-  const state = JSON.parse(await fs.readFile("./out/state.json", "utf8"));
-  COOKIE = state.cookies
-    .filter((c) => c.domain.includes("ccsut.cn"))
-    .map((c) => `${c.name}=${c.value}`)
-    .join("; ");
+  state = JSON.parse(await fs.readFile("./out/state.json", "utf8"));
 } catch {
   console.error("找不到 out/state.json，先跑：node tools/capture.mjs");
   process.exit(2);
 }
 
 async function req(path, { method = "GET", form = null, base = "https://tls.ccsut.cn" } = {}) {
-  const headers = { cookie: COOKIE, "user-agent": UA, accept: "application/json, text/html, */*" };
+  const headers = { "user-agent": UA, accept: "application/json, text/html, */*" };
   let body;
   if (form !== null) {
     headers["content-type"] = "application/x-www-form-urlencoded; charset=UTF-8";
@@ -42,7 +39,7 @@ async function req(path, { method = "GET", form = null, base = "https://tls.ccsu
     body = form;
   }
   try {
-    const r = await fetch(base + path, { method, headers, body, redirect: "manual" });
+    const r = await sessionRequest(base + path, state, { method, headers, body, redirect: "manual" });
     const buf = Buffer.from(await r.arrayBuffer());
     return { s: r.status, loc: r.headers.get("location") || "", len: buf.length, text: buf.toString("utf8") };
   } catch (e) {

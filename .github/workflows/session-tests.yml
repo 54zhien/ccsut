@@ -5,6 +5,10 @@ on:
     paths:
       - 'ios/CCSUT/**'
       - 'ios/Tests/**'
+      - 'tools/**'
+      - '_e2e*.mjs'
+      - '_probe2.mjs'
+      - 'package*.json'
       - '.github/workflows/session-tests.yml'
       - '.gitignore'
       - 'dist/**'
@@ -19,6 +23,10 @@ jobs:
       - name: Reject tracked distribution and diagnostic files
         if: always()
         run: node --test ios/Tests/repository-privacy.test.mjs
+      - name: Verify research tools without school traffic
+        run: |
+          npm ci --ignore-scripts
+          node --test tools/session-request.test.mjs tools/write-opt-in.test.mjs
       - name: Compile session regression runner
         run: |
           xcrun swiftc -parse-as-library \
@@ -108,6 +116,8 @@ jobs:
           "$RUNNER_TEMP/enrolled-courses-tests"
           xcrun swiftc -parse-as-library ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift ios/CCSUT/SchedulePresentation.swift ios/CCSUT/AcademicCalendar.swift ios/Tests/AcademicReliabilityTests.swift -o "$RUNNER_TEMP/academic-tests"
           "$RUNNER_TEMP/academic-tests"
+          xcrun swiftc -parse-as-library ios/CCSUT/APIResponse.swift ios/CCSUT/Models.swift ios/Tests/ExamDateTests.swift -o "$RUNNER_TEMP/exam-date-tests"
+          TZ=America/Los_Angeles "$RUNNER_TEMP/exam-date-tests"
       - name: Run timetable presentation regressions
         if: always()
         run: |

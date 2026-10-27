@@ -122,8 +122,22 @@ private actor ModelServer {
         }
         func confirm(_ model: EcardPaymentModel) -> EcardPaymentModel.Confirmation? {
             model.room = "fixture-room"; model.amountText = "10"
-            model.detail = MeterDetail(context: MeterContext(), show: ["房间信息": "fixture room"], dataType: nil)
+            model.detail = MeterDetail(context: MeterContext(houseID: "fixture-room"), show: ["房间信息": "fixture room"], dataType: nil)
             model.prepareConfirmation(); return model.confirmation
+        }
+
+        do {
+            let server = ModelServer(), journal = store("room-mismatch"), epoch = Epoch()
+            let model = make(server, journal, epoch)
+            await ready(model)
+            _ = confirm(model)
+            model.detail = MeterDetail(context: MeterContext(houseID: "another-room"), show: [:], dataType: nil)
+            model.prepareConfirmation()
+            if let approved = model.confirmation { await model.submit(approved) }
+            let counts = await server.counts()
+            check(counts.creations == 0 && counts.debits == 0 && model.errorText != nil,
+                  "mismatched meter room is rejected before order creation or debit")
+            model.stopQueries()
         }
 
         do {

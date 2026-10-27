@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Direct access to academic services.
 struct AcademicView: View {
     private enum Destination: Hashable { case scores, exams, electives }
     @State private var path: [Destination] = []

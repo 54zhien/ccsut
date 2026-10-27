@@ -1,3 +1,5 @@
+import { requireSchoolWrite } from "./tools/require-school-write.mjs";
+requireSchoolWrite();
 ﻿import fs from "node:fs/promises";
 const state = JSON.parse(await fs.readFile("./out/state.json","utf8"));
 const ck = state.cookies.filter(c=>c.domain.includes("ccsut.cn")).map(c=>`${c.name}=${c.value}`).join("; ");

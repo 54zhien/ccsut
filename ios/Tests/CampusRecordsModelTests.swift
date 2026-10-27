@@ -67,11 +67,18 @@ struct CampusRecordsModelTests {
         }
         while !joinedLeaveStarted { await Task.yield() }
         check(!joinedLeaveFinished, "refresh waits for an in-flight leave read")
-        let pages = await reader.pages
-        check(pages.last == 2 && pages.count == 6, "overlapping refresh cannot race pagination")
-        model.cancel()
         await pending.value
         await joinedLeave.value
+        let pages = await reader.pages
+        check(Array(pages.suffix(2)) == [2, 1] && pages.count == 7,
+              "refresh requested during pagination runs once after the current page completes")
+        check(model.leave.page == 1 && model.leave.items.map(\.id) == ["fixture-1"],
+              "the deferred refresh replaces the just-completed pagination state")
+        await reader.configure(delay: true)
+        let cancelPendingLeave = Task { await model.loadLeave(reset: false) }
+        while !model.isLoadingLeave { await Task.yield() }
+        model.cancel()
+        await cancelPendingLeave.value
         check(model.leave.page == 1 && !model.isLoadingLeave && model.leaveError == nil, "leaving page cancels pending read without error")
         await reader.configure()
         await model.loadTravel(kind: .departure)
