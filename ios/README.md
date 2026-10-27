@@ -2,6 +2,8 @@
 
 用户功能与安装方式见[项目首页](../README.md)。此目录包含当前的 SwiftUI 客户端及其测试。
 
+当前应用代码在 `ios/`，构建工作流在 `.github/workflows/`。`shell/`、`tools/` 和根目录 `_*.mjs` 是历史实验，不是 iOS 构建依赖；其中一些脚本调用真实选退课接口，不应直接用作自动化测试。
+
 ## 工程与环境
 
 - 工程：`CCSUT.xcodeproj`，scheme：`CCSUT`。
@@ -30,10 +32,10 @@ xcodebuild -project ios/CCSUT.xcodeproj -scheme CCSUT \
 | 选课 | `ElectiveState.swift`、`EnrolledCourses.swift`、`ElectiveView.swift` | 批次、列表、选退课及结果状态 |
 | 校园记录 | `CampusAPI.swift`、`CampusRecordsModel.swift` | 智慧校园认证及分页读取 |
 | 校园表单 | `CampusFormsAPI.swift`、`CampusFormModel.swift`、`CampusFormRules.swift` | 配置、字段校验、确认与提交结果核对 |
-| 电费 | `EcardSSOClient.swift`、`EcardAPI.swift`、`EcardPaymentModel.swift`、`EcardPaymentPersistence.swift` | 一卡通认证、房间、电表、订单及未决付款恢复 |
+| 智慧校园：电表缴费 | `EcardSSOClient.swift`、`EcardAPI.swift`、`EcardPaymentModel.swift`、`EcardPaymentPersistence.swift` | 一卡通认证、房间、电表、订单及未决付款恢复 |
 | 共享界面 | `PageSurface.swift`、`NavigationBridge.swift` 等 | 页面表面、原生导航与交互适配 |
 
-教务、智慧校园与电费服务并不共用一种认证协议。业务读取的恢复和写入的提交策略也不同，不能把通用重试逻辑直接套在申请、上传或付款上。
+教务与智慧校园各业务使用的认证协议不同，包括智慧校园内的电表缴费模块。业务读取的恢复和写入的提交策略也不同，不能把通用重试逻辑直接套在申请、上传或付款上。
 
 ## 需要保留的约束
 
