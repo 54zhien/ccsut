@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Reproduce original binary without diagnostic timing changes
+      - name: Check concurrent memory access in original runner
         run: |
           set -e
           git show 538a32a:ios/Tests/EcardPaymentModelTests.swift > "$RUNNER_TEMP/EcardPaymentModelTests.swift"
@@ -22,8 +22,8 @@ jobs:
             ios/CCSUT/EcardAPI.swift ios/CCSUT/EcardTokenBridge.swift ios/CCSUT/WebSessionCookies.swift
             ios/CCSUT/EcardSSOClient.swift ios/CCSUT/EcardSSOSession.swift
             ios/CCSUT/EcardPaymentPersistence.swift ios/CCSUT/EcardPaymentModel.swift)
-          xcrun swiftc -parse-as-library "${SOURCES[@]}" "$RUNNER_TEMP/EcardPaymentModelTests.swift" -o "$RUNNER_TEMP/payment-model"
-          CCSUT_PAYMENT_REPETITIONS=100 python3 ios/Tests/run-payment-model-diagnostics.py "$RUNNER_TEMP/payment-model"
+          xcrun swiftc -g -sanitize=thread -parse-as-library "${SOURCES[@]}" "$RUNNER_TEMP/EcardPaymentModelTests.swift" -o "$RUNNER_TEMP/payment-model"
+          TSAN_OPTIONS=halt_on_error=1 CCSUT_PAYMENT_REPETITIONS=20 python3 ios/Tests/run-payment-model-diagnostics.py "$RUNNER_TEMP/payment-model"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
