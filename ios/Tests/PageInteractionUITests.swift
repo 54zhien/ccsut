@@ -494,7 +494,7 @@ final class PageInteractionUITests: XCTestCase {
             let landscapeAction = app.buttons[page == "campus-electricity" ? "立即缴费" : "campus-form-review"]
             XCTAssertTrue(landscapeAction.isHittable)
             add(XCTAttachment(string: "orientation=\(XCUIDevice.shared.orientation.rawValue) app=\(app.frame) window=\(app.windows.firstMatch.frame) action=\(landscapeAction.frame)"))
-            let deviceCapture = XCTAttachment(screenshot: XCUIDevice.shared.screenshot())
+            let deviceCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             deviceCapture.name = "campus-landscape-device-\(page)"
             deviceCapture.lifetime = .keepAlways
             add(deviceCapture)
