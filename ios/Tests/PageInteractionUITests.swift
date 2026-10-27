@@ -213,6 +213,8 @@ final class PageInteractionUITests: XCTestCase {
         for id in ["campus-leave", "campus-travel", "campus-electricity"] {
             XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5))
         }
+        XCTAssertFalse(app.staticTexts["校园事务"].exists)
+        XCTAssertFalse(app.staticTexts["生活缴费"].exists)
         capture(app, "campus-home")
         app.buttons["campus-leave"].tap()
         XCTAssertTrue(app.staticTexts["示例请假记录"].waitForExistence(timeout: 5))
@@ -228,6 +230,7 @@ final class PageInteractionUITests: XCTestCase {
         app.terminate()
         app = launch("academic")
         XCTAssertTrue(app.buttons["academic-scores"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["学习与课程"].exists)
         XCTAssertFalse(app.buttons["academic-electricity"].exists)
     }
 

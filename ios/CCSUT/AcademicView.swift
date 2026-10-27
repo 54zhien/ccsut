@@ -12,7 +12,6 @@ struct AcademicView: View {
             PageScrollSurface(onOffsetChange: { headerScrollOffset = $0 }) { _, _ in
                 VStack(alignment: .leading, spacing: AppLayout.sectionSpacing) {
                     VStack(spacing: 12) {
-                        AppSectionHeading("学习与课程")
                         VStack(spacing: 0) {
                             NavigationLink(value: Destination.scores) {
                                 AppServiceRow(title: "成绩查询", symbol: "chart.bar.doc.horizontal")
