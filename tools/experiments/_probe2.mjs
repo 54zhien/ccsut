@@ -1,4 +1,4 @@
-import { requireSchoolWrite } from "./tools/require-school-write.mjs";
+import { requireSchoolWrite } from "../require-school-write.mjs";
 requireSchoolWrite();
 ﻿import fs from "node:fs/promises";
 const state = JSON.parse(await fs.readFile("./out/state.json","utf8"));

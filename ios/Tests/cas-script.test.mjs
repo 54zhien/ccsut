@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import vm from 'node:vm';
 
-const source = (await fs.readFile(new URL('../../_cas3.mjs', import.meta.url), 'utf8'))
+const source = (await fs.readFile(new URL('../../tools/experiments/_cas3.mjs', import.meta.url), 'utf8'))
   .replace(/^\uFEFF/, '')
   .replace(/^import .*;\r?\n/gm, '');
 
