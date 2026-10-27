@@ -2,7 +2,20 @@
 
 用户功能与安装方式见[项目首页](../README.md)。此目录包含当前的 SwiftUI 客户端及其测试。
 
-当前应用代码在 `ios/`，构建工作流在 `.github/workflows/`。`shell/`、`tools/` 和根目录 `_*.mjs` 是历史实验，不是 iOS 构建依赖；其中一些脚本调用真实选退课接口，不应直接用作自动化测试。
+当前应用代码在 `ios/`，构建工作流在 `.github/workflows/`。历史接口脚本已集中到 [`tools/experiments/`](../tools/experiments/README.md)，其中一些调用真实选退课接口，不应直接用作自动化测试。
+
+## 仓库目录
+
+| 目录 | 用途 |
+| --- | --- |
+| `ios/` | 当前 App、Xcode 工程和测试 |
+| `tools/` | 开发工具、图标生成和脚本测试；历史接口脚本放在 `experiments/` |
+| `docs/` | 截图、设计记录、审查和问题排查记录 |
+| `design/` | 品牌与图标的源素材 |
+| `shell/` | 早期 Flutter 原型，不参与当前 IPA 构建 |
+| `.github/` | 自动测试、打包与预览工作流 |
+
+根目录的 `package.json` 和 `package-lock.json` 管理 Node.js 工具依赖；`AGENTS.md` 记录代码助手必须遵守的项目要求。历史排查记录保留在 `docs/`，便于追溯改动依据和失败记录。
 
 ## 工程与环境
 
